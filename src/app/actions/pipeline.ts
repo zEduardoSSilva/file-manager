@@ -64,7 +64,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       days: Record<string, any> 
     }> = {};
 
-    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'PRESENÇA', 'AUXILIO', 'AUXÍLIO'];
+    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'PRESENÇA', 'AUXILIO', 'AUXÍLIO', 'FALTA ABONADA'];
 
     // 1. Extração Bruta
     for (const file of files) {
@@ -81,6 +81,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const col1 = String(row[1] || '').trim();
         const col2 = String(row[2] || '').trim();
 
+        // Identificação do Colaborador
         if (/^\d+$/.test(col0) && !col0.includes('/') && col1.length > 5 && parseInt(col0) > 30) {
           currentId = col0;
           currentName = col1;
@@ -106,6 +107,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             }
 
             const existing = colabMap[currentId].days[dateStr];
+            // Score de deduplicação: prioriza o registro com mais batidas
             if (!existing || times.length >= (existing.score || 0)) {
               colabMap[currentId].days[dateStr] = {
                 data: dateStr,
@@ -123,15 +125,15 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
 
     // 2. Processamento
     const detalhePonto: any[] = [];
-    const consolidado: DriverConsolidated[] = [];
+    const consolidado: any[] = [];
     const absenteismo: AbsenteismoData[] = [];
 
-    // Datas únicas no mês para cálculo de dias úteis base
-    const allDatesInFiles = new Set<string>();
-    Object.values(colabMap).forEach(c => Object.keys(c.days).forEach(d => allDatesInFiles.add(d)));
+    // Datas únicas no mês para cálculo de dias úteis base (Denominador)
+    const allDatesInMonth = new Set<string>();
+    Object.values(colabMap).forEach(c => Object.keys(c.days).forEach(d => allDatesInMonth.add(d)));
     
-    // Filtrar domingos e feriados (excluídos) da base de cálculo
-    const workingDaysBase = Array.from(allDatesInFiles).filter(dStr => {
+    // Filtrar domingos e feriados (excluídos) da base de cálculo (Agenda Oficial do Mês)
+    const agendaOficial = Array.from(allDatesInMonth).filter(dStr => {
       const date = parse(dStr, 'dd/MM/yyyy', new Date());
       const isExcl = excludedDates.includes(dStr);
       const isSun = isSunday(date);
@@ -142,7 +144,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       return true;
     });
     
-    const totalWorkingDays = workingDaysBase.length || 26;
+    const totalWorkingDays = agendaOficial.length || 26;
 
     const MOT_VAL = 1.60;
     const AJU_VAL = 2.40;
@@ -166,7 +168,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         marcOkCount: 0,
         ajustesTotais: 0,
         presencasFisicas: 0,
-        presencasJustificadas: 0
+        presencasJustificadas: 0,
+        presencasDentroAgenda: 0
       };
 
       let lastExit: number | null = null;
@@ -177,8 +180,9 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const dateObj = parse(dStr, 'dd/MM/yyyy', new Date());
         const isExcl = excludedDates.includes(dStr);
         const isSun = isSunday(dateObj);
+        const estaNaAgenda = agendaOficial.includes(dStr);
 
-        // Lógica de trabalho
+        // Lógica de trabalho (Horários)
         const e = h2m(d.marcacoes[0]);
         const sa = h2m(d.marcacoes[1]);
         const ra = h2m(d.marcacoes[2]);
@@ -208,24 +212,28 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
 
         let interDescanso: number | null = null;
         if (lastExit !== null && e !== null) {
-          interDescanso = e - lastExit + 1440;
+          interDescanso = e - lastExit;
+          if (interDescanso < 0) interDescanso += 1440;
         }
         const interOk = interDescanso !== null ? interDescanso >= 660 : true;
 
         const todosCritOk = marcOk && jornadaOk && heOk && almocoOk && intraOk && interOk;
-        const isPresencaJust = situacoesPresenca.some(s => d.situacao.includes(s));
+        const isPresencaJust = situacoesPresenca.some(sit => d.situacao.includes(sit));
         const hasPhysActivity = d.marcacoes.length > 0;
 
+        // Se o dia está na agenda oficial ou teve atividade física, processamos
         if (hasPhysActivity) {
-          stats.diasTrabalhados++;
           stats.presencasFisicas++;
           stats.bonusMarc += (marcOk ? valMarc : 0);
           stats.bonusCrit += (todosCritOk ? valCrit : 0);
           if (todosCritOk) stats.critOkCount++;
           if (marcOk) stats.marcOkCount++;
           stats.ajustesTotais += d.ajustes;
-        } else if (isPresencaJust) {
+          stats.diasTrabalhados++;
+          if (estaNaAgenda) stats.presencasDentroAgenda++;
+        } else if (isPresencaJust && estaNaAgenda) {
           stats.presencasJustificadas++;
+          stats.presencasDentroAgenda++;
         }
 
         detalhePonto.push({
@@ -266,7 +274,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Todos_5_Criterios_OK': todosCritOk ? 'SIM' : 'NÃO',
           '💰 Bonus_Criterios': (todosCritOk ? valCrit : 0).toFixed(2),
           '💵 Bonificacao_Total_Dia': ((marcOk ? valMarc : 0) + (todosCritOk ? valCrit : 0)).toFixed(2),
-          'Dias_Consecutivos': 0,
+          'Dias_Consecutivos': 0, // Placeholder para lógica de DSR futura se necessário
           'Violou_DSR': 'NÃO'
         });
 
@@ -287,8 +295,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Total_Ajustes_Manuais': stats.ajustesTotais
         });
 
-        const totalPres = stats.presencasFisicas + stats.presencasJustificadas;
-        const perc = Number(((totalPres / totalWorkingDays) * 100).toFixed(2));
+        const perc = Number(((stats.presencasDentroAgenda / totalWorkingDays) * 100).toFixed(2));
+        const faltas = Math.max(0, totalWorkingDays - stats.presencasDentroAgenda);
 
         absenteismo.push({
           'ID': colab.id,
@@ -298,8 +306,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Presenças Físicas': stats.presencasFisicas,
           'Atestados/Férias': stats.presencasJustificadas,
           'Abonos Manuais': excludedDates.length,
-          'Total Presenças': totalPres,
-          'Faltas': Math.max(0, totalWorkingDays - totalPres),
+          'Total Presenças': stats.presencasDentroAgenda,
+          'Faltas': faltas,
           'Percentual (%)': perc,
           'Valor_Incentivo': perc >= 100 ? 50 : perc >= 90 ? 40 : perc >= 75 ? 25 : 0,
           'Datas_Abonos_Manuais': excludedDates.length > 0 ? excludedDates.join(', ') : '-'
@@ -315,7 +323,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       data: consolidado,
       absenteismoData: absenteismo,
       detalhePonto,
-      summary: `Processamento concluído. ${consolidado.length} colaboradores analisados. Base de dias úteis: ${totalWorkingDays}. Feriados/Abonos: ${excludedDates.length}.`
+      summary: `Processamento concluído. ${consolidado.length} colaboradores analisados. Base de dias úteis (Denominador): ${totalWorkingDays}. Feriados/Abonos: ${excludedDates.length}.`
     });
 
     return { success: true, result: JSON.parse(JSON.stringify(saved)) };

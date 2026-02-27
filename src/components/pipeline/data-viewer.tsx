@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -14,35 +13,24 @@ import {
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Info, Award, UserCheck, AlertTriangle, Truck, UserCircle, Clock, CalendarCheck } from "lucide-react"
+import { Info, Truck, CalendarCheck } from "lucide-react"
 
 export function DataViewer({ result }: { result: PipelineResult }) {
   const isPonto = result.pipelineType === 'ponto';
 
-  const renderTable = (data: DriverConsolidated[], type: 'Motorista' | 'Ajudante') => (
+  const renderTable = (data: any[], type: 'Motorista' | 'Ajudante') => (
     <div className="rounded-md border overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead className="min-w-[150px]">{type}</TableHead>
-            {isPonto ? (
-              <>
-                <TableHead className="text-center">Dias Trab.</TableHead>
-                <TableHead className="text-center">Bonus Marc.</TableHead>
-                <TableHead className="text-center">Bonus Crit.</TableHead>
-                <TableHead className="text-center">Total (R$)</TableHead>
-                <TableHead className="text-center">4/4 OK</TableHead>
-                <TableHead className="text-center">Crit. OK</TableHead>
-                <TableHead className="text-center">Ajustes</TableHead>
-              </>
-            ) : (
-              <>
-                <TableHead className="text-center">Atividade</TableHead>
-                <TableHead className="text-center">Bonif. (4/4)</TableHead>
-                <TableHead className="text-center">Desempenho %</TableHead>
-                <TableHead className="text-center">Total (R$)</TableHead>
-              </>
-            )}
+            <TableHead className="text-center">Dias Trab.</TableHead>
+            <TableHead className="text-center">Bonus Marc.</TableHead>
+            <TableHead className="text-center">Bonus Crit.</TableHead>
+            <TableHead className="text-center">Total (R$)</TableHead>
+            <TableHead className="text-center">4/4 OK</TableHead>
+            <TableHead className="text-center">Crit. OK</TableHead>
+            <TableHead className="text-center">Ajustes</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -50,36 +38,21 @@ export function DataViewer({ result }: { result: PipelineResult }) {
             <TableRow key={i}>
               <TableCell className="font-medium">
                 <div>
-                  <p className="text-xs uppercase">{row.Motorista || row.Ajudante}</p>
+                  <p className="text-xs uppercase">{row.Motorista || row.Ajudante || row.Nome}</p>
                   <p className="text-[10px] text-muted-foreground">ID: {row.ID}</p>
                 </div>
               </TableCell>
-              {isPonto ? (
-                <>
-                  <TableCell className="text-center">{row.Dias_Trabalhados}</TableCell>
-                  <TableCell className="text-center text-xs">R$ {row['💰 Total_Bonus_Marcacoes']?.toFixed(2)}</TableCell>
-                  <TableCell className="text-center text-xs">R$ {row['💰 Total_Bonus_Criterios']?.toFixed(2)}</TableCell>
-                  <TableCell className="text-center font-bold text-primary">R$ {row['💵 BONIFICACAO_TOTAL']?.toFixed(2)}</TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant="outline" className="text-[10px]">{row.Dias_4_Marcacoes_Completas}</Badge>
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant="outline" className="text-[10px]">{row.Dias_Todos_Criterios_OK}</Badge>
-                  </TableCell>
-                  <TableCell className="text-center text-destructive font-mono text-xs">{row.Total_Ajustes_Manuais}</TableCell>
-                </>
-              ) : (
-                <>
-                  <TableCell className="text-center">{row['Dias com Atividade']}</TableCell>
-                  <TableCell className="text-center">{row['Dias Bonif. Máxima (4/4)']}</TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant={row['Percentual de Desempenho (%)']! >= 90 ? 'default' : 'secondary'}>
-                      {row['Percentual de Desempenho (%)']}%
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-center font-bold">R$ {row['Total Bonificação (R$)']?.toFixed(2)}</TableCell>
-                </>
-              )}
+              <TableCell className="text-center">{row.Dias_Trabalhados}</TableCell>
+              <TableCell className="text-center text-xs">R$ {Number(row['💰 Total_Bonus_Marcacoes'] || 0).toFixed(2)}</TableCell>
+              <TableCell className="text-center text-xs">R$ {Number(row['💰 Total_Bonus_Criterios'] || 0).toFixed(2)}</TableCell>
+              <TableCell className="text-center font-bold text-primary">R$ {Number(row['💵 BONIFICACAO_TOTAL'] || 0).toFixed(2)}</TableCell>
+              <TableCell className="text-center">
+                <Badge variant="outline" className="text-[10px]">{row.Dias_4_Marcacoes_Completas}</Badge>
+              </TableCell>
+              <TableCell className="text-center">
+                <Badge variant="outline" className="text-[10px]">{row.Dias_Todos_Criterios_OK}</Badge>
+              </TableCell>
+              <TableCell className="text-center text-destructive font-mono text-xs">{row.Total_Ajustes_Manuais}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -88,13 +61,17 @@ export function DataViewer({ result }: { result: PipelineResult }) {
   )
 
   const renderAbsenteismoTable = (data: AbsenteismoData[]) => (
-    <div className="rounded-md border">
+    <div className="rounded-md border overflow-x-auto">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Colaborador</TableHead>
-            <TableHead className="text-center">Dias</TableHead>
-            <TableHead className="text-center">Presenças</TableHead>
+            <TableHead>Nome</TableHead>
+            <TableHead className="text-center">Grupo</TableHead>
+            <TableHead className="text-center">Denom. (Dias)</TableHead>
+            <TableHead className="text-center">Pres. Físicas</TableHead>
+            <TableHead className="text-center">Atestados/Férias</TableHead>
+            <TableHead className="text-center">Abonos Man.</TableHead>
+            <TableHead className="text-center">Total Pres.</TableHead>
             <TableHead className="text-center">Faltas</TableHead>
             <TableHead className="text-center">Freq %</TableHead>
             <TableHead className="text-center">Incentivo (R$)</TableHead>
@@ -103,13 +80,20 @@ export function DataViewer({ result }: { result: PipelineResult }) {
         <TableBody>
           {data.map((row, i) => (
             <TableRow key={i}>
-              <TableCell className="font-medium text-xs uppercase">{row.Nome}</TableCell>
-              <TableCell className="text-center">{row.Total_Dias}</TableCell>
-              <TableCell className="text-center">{row.Presencas}</TableCell>
-              <TableCell className="text-center text-destructive">{row.Faltas}</TableCell>
+              <TableCell className="font-medium text-[10px] uppercase">
+                {row.Nome}
+                <p className="text-[9px] text-muted-foreground">ID: {row.ID}</p>
+              </TableCell>
+              <TableCell className="text-center text-[10px]">{row.Grupo}</TableCell>
+              <TableCell className="text-center font-bold">{row.Total_Dias}</TableCell>
+              <TableCell className="text-center">{row['Presenças Físicas']}</TableCell>
+              <TableCell className="text-center">{row['Atestados/Férias']}</TableCell>
+              <TableCell className="text-center text-amber-600">{row['Abonos Manuais']}</TableCell>
+              <TableCell className="text-center font-semibold text-primary">{row['Total Presenças']}</TableCell>
+              <TableCell className="text-center text-destructive font-bold">{row.Faltas}</TableCell>
               <TableCell className="text-center">
-                <Badge variant={row.Percentual >= 90 ? 'default' : 'secondary'}>
-                  {row.Percentual}%
+                <Badge variant={row['Percentual (%)'] >= 90 ? 'default' : 'secondary'} className="text-[10px]">
+                  {row['Percentual (%)']}%
                 </Badge>
               </TableCell>
               <TableCell className="text-center font-bold text-green-700">R$ {row.Valor_Incentivo.toFixed(2)}</TableCell>
@@ -140,7 +124,7 @@ export function DataViewer({ result }: { result: PipelineResult }) {
           <TabsList className="mb-4">
             <TabsTrigger value="overview">Sumário IA</TabsTrigger>
             <TabsTrigger value="drivers" className="flex items-center gap-2">
-              <Truck className="size-3" /> Motoristas
+              <Truck className="size-3" /> Consolidado
             </TabsTrigger>
             {isPonto && result.absenteismoData && (
               <TabsTrigger value="abs" className="flex items-center gap-2">
@@ -161,7 +145,7 @@ export function DataViewer({ result }: { result: PipelineResult }) {
           </TabsContent>
           
           <TabsContent value="drivers">
-            {renderTable(result.data, 'Motorista')}
+            {renderTable(result.data, 'Colaborador')}
           </TabsContent>
 
           {isPonto && result.absenteismoData && (
