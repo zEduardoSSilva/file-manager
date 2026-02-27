@@ -9,7 +9,7 @@ import {
   FileCode,
   Files,
   Loader2,
-  Truck
+  Zap
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -23,7 +23,7 @@ import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
 
-export function VFleetPipelineView() {
+export function PerformaxxiPipelineView() {
   const [year, setYear] = React.useState(2026)
   const [month, setMonth] = React.useState(1)
   const [files, setFiles] = React.useState<File[]>([])
@@ -54,34 +54,34 @@ export function VFleetPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog("Iniciando Pipeline VFLEET PILOT...")
+    addLog("Iniciando Pipeline PERFORMAXXI ÚNICO...")
 
     try {
       addLog("Conectando ao Firebase Studio...", "info")
       await new Promise(r => setTimeout(r, 400))
-      setProgress(20)
+      setProgress(15)
       
-      addLog("Validando colunas vFleet (Curva, Banguela, Ociosidade, Velocidade)...", "info")
-      addLog(`Processando lote de ${files.length} arquivos...`)
+      addLog("Analisando 4 critérios: Raio, SLA, Tempo e Sequência.", "info")
+      addLog("Aplicando bônus: R$ 8,00 (Motorista) / R$ 7,20 (Ajudante).", "info")
       
-      setProgress(50)
+      setProgress(40)
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
       files.forEach(f => formData.append('files', f))
 
-      const response = await executePipeline(formData, 'vfleet')
+      const response = await executePipeline(formData, 'performaxxi')
       
       if (response.success) {
         setLastResult(response.result as PipelineResult)
         setProgress(100)
-        addLog("Transformação vFleet concluída e salva no Firebase.", "success")
-        toast({ title: "Concluído", description: "Dados vFleet processados com sucesso." });
+        addLog("Processamento Performaxxi concluído com sucesso.", "success")
+        toast({ title: "Concluído", description: "Dados Performaxxi processados." });
       } else {
         throw new Error(response.error)
       }
     } catch (error: any) {
-      addLog(`FALHA NO PROCESSAMENTO: ${error.message}`, "error")
+      addLog(`FALHA: ${error.message}`, "error")
       setProgress(0)
     } finally {
       setIsExecuting(false)
@@ -95,11 +95,11 @@ export function VFleetPipelineView() {
           <Card className="shadow-sm border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Truck className="size-5 text-primary" />
-                Configuração vFleet
+                <Zap className="size-5 text-accent" />
+                Configuração Performaxxi
               </CardTitle>
               <CardDescription>
-                Consolidação de Alertas e Controle para Remuneração Variável (R$ 4,80)
+                Análise de Rotas e Performance Proporcional (Motorista/Ajudante)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -118,9 +118,9 @@ export function VFleetPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold">Arquivos do Mês ({files.length})</Label>
+                  <Label className="text-base font-semibold">Relatório Analítico de Rotas ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
-                    <Upload className="mr-2 size-4" /> Anexar Lote
+                    <Upload className="mr-2 size-4" /> Selecionar
                   </Button>
                   <input id="file-upload" type="file" multiple className="hidden" onChange={handleFileChange} />
                 </div>
@@ -129,7 +129,7 @@ export function VFleetPipelineView() {
                   {files.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                       <Files className="size-10 mb-2 opacity-20" />
-                      <p className="text-sm italic">Arraste ou anexe os boletins e alertas.</p>
+                      <p className="text-sm">Anexe o arquivo Excel de Rota/Pedidos.</p>
                     </div>
                   ) : (
                     <ScrollArea className="h-[150px] p-4">
@@ -150,8 +150,8 @@ export function VFleetPipelineView() {
 
               {isExecuting && (
                 <div className="space-y-2 pt-2">
-                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-primary">
-                    <span>Processando vFleet</span>
+                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-accent">
+                    <span>Analisando Performance</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -159,8 +159,8 @@ export function VFleetPipelineView() {
               )}
             </CardContent>
             <CardFooter className="bg-muted/5 border-t pt-6">
-              <Button className="w-full h-12 text-base font-semibold" onClick={runPipeline} disabled={isExecuting || files.length === 0}>
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Iniciar Transformação</>}
+              <Button className="w-full h-12 text-base font-semibold bg-accent hover:bg-accent/90 text-accent-foreground" onClick={runPipeline} disabled={isExecuting || files.length === 0}>
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Analisando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise Performaxxi</>}
               </Button>
             </CardFooter>
           </Card>
@@ -170,12 +170,12 @@ export function VFleetPipelineView() {
           <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm">
             <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                 <FileCode className="size-3" /> Terminal de Eventos
+                 <FileCode className="size-3" /> Monitor de Execução
                </span>
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed">
               {logs.length === 0 ? (
-                <span className="text-muted-foreground italic">Sistema pronto para execução.</span>
+                <span className="text-muted-foreground italic">Pronto para processar dados Performaxxi.</span>
               ) : (
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (

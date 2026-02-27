@@ -1,6 +1,7 @@
 
 import { PipelineLayout } from "@/components/pipeline/pipeline-layout"
 import { VFleetPipelineView } from "@/components/pipeline/vfleet-pipeline-view"
+import { PerformaxxiPipelineView } from "@/components/pipeline/performaxxi-pipeline-view"
 import { notFound } from "next/navigation"
 
 export default async function PipelinePage({ params }: { params: Promise<{ id: string }> }) {
@@ -19,11 +20,16 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
           </h2>
           <p className="text-muted-foreground">
             {id === 'vfleet' 
-              ? 'Pipeline de remuneração variável: boletins, alertas e análise de condução unificada.'
-              : 'Sequência de rotas, performance de motoristas e ajudantes com critérios detalhados.'}
+              ? 'Pipeline de remuneração variável: alertas de telemetria e análise de condução (R$ 4,80).'
+              : 'Sequência de rotas e performance de motoristas (R$ 8,00) e ajudantes (R$ 7,20).'}
           </p>
         </div>
-        <VFleetPipelineView pipelineId={id as 'vfleet' | 'performaxxi'} />
+        
+        {id === 'vfleet' ? (
+          <VFleetPipelineView />
+        ) : (
+          <PerformaxxiPipelineView />
+        )}
       </div>
     </PipelineLayout>
   )
