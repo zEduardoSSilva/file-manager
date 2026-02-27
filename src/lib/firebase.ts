@@ -2,16 +2,27 @@
 // Simulation of Firebase store to manage pipeline results
 
 export interface DriverConsolidated {
-  'ID': string;
-  'Motorista': string;
-  'Dias_Trabalhados': number;
-  '💰 Total_Bonus_Marcacoes': number;
-  '💰 Total_Bonus_Criterios': number;
-  '💵 BONIFICACAO_TOTAL': number;
-  'Dias_Todos_Criterios_OK': number;
-  'Dias_4_Marcacoes_Completas': number;
-  'Dias_Violou_DSR': number;
-  'Total_Ajustes_Manuais': number;
+  'ID'?: string;
+  'Empresa'?: string;
+  'Motorista'?: string;
+  'Ajudante'?: string;
+  'Dias_Trabalhados'?: number;
+  'Dias com Atividade'?: number;
+  'Dias Bonif. Máxima (4/4)'?: number;
+  'Percentual de Desempenho (%)'?: number;
+  'Total Bonificação (R$)'?: number;
+  'Total Critérios Cumpridos'?: number;
+  'Falhas Raio'?: number;
+  'Falhas SLA'?: number;
+  'Falhas Tempo'?: number;
+  'Falhas Sequência'?: number;
+  '💰 Total_Bonus_Marcacoes'?: number;
+  '💰 Total_Bonus_Criterios'?: number;
+  '💵 BONIFICACAO_TOTAL'?: number;
+  'Dias_Todos_Criterios_OK'?: number;
+  'Dias_4_Marcacoes_Completas'?: number;
+  'Dias_Violou_DSR'?: number;
+  'Total_Ajustes_Manuais'?: number;
 }
 
 export interface AbsenteismoData {
@@ -38,6 +49,8 @@ export interface PipelineResult {
   data: DriverConsolidated[];
   absenteismoData?: AbsenteismoData[];
   detalhePonto?: any[];
+  helpersData?: DriverConsolidated[];
+  helpersDetail?: any[];
   summary?: string;
 }
 

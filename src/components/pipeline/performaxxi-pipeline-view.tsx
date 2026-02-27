@@ -60,7 +60,7 @@ export function PerformaxxiPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline PERFORMAXXI ÚNICO${downloadOnly ? ' (MODO TESTE)' : ''}...`)
+    addLog(`Iniciando Pipeline PERFORMAXXI ÚNICO...`)
 
     try {
       addLog("Conectando ao Firebase Studio...", "info")
@@ -68,7 +68,7 @@ export function PerformaxxiPipelineView() {
       setProgress(15)
       
       addLog("Analisando 4 critérios: Raio, SLA, Tempo e Sequência.", "info")
-      addLog("Aplicando bônus: R$ 8,00 (Motorista) / R$ 7,20 (Ajudante).", "info")
+      addLog("Bônus Proporcional: R$ 2,00/critério (Motorista) | R$ 1,80/critério (Ajudante).", "info")
       
       setProgress(40)
       const formData = new FormData()
@@ -86,16 +86,18 @@ export function PerformaxxiPipelineView() {
         if (downloadOnly) {
           addLog("Gerando Excel detalhado (Motoristas/Ajudantes)...", "success")
           downloadMultipleSheets([
+            { data: result.detalhePonto || [], name: '04_Detalhe_Motorista' },
             { data: result.data, name: '05_Consolidado_Motorista' },
+            { data: result.helpersDetail || [], name: '06_Detalhe_Ajudante' },
             { data: result.helpersData || [], name: '07_Consolidado_Ajudante' }
-          ], `Teste_Performaxxi_${month}_${year}`)
+          ], `Performaxxi_Final_${month}_${year}`)
         } else {
           addLog("Processamento Performaxxi concluído com sucesso.", "success")
         }
 
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel de teste foi baixado." : "Dados Performaxxi processados." 
+          description: downloadOnly ? "O Excel analítico foi baixado." : "Dados Performaxxi processados." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido')
@@ -120,13 +122,13 @@ export function PerformaxxiPipelineView() {
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Anexe o relatório analítico de rotas. O sistema avaliará Raio, SLA, Tempo e Sequência para motoristas e ajudantes.</p>
+                <p>Anexe o relatório analítico de rotas. O sistema avaliará Raio, SLA, Tempo e Sequência de forma proporcional.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-sm mt-2">
-          Esta análise calcula bônus proporcionais de <strong>R$ 8,00</strong> para Motoristas e <strong>R$ 7,20</strong> para Ajudantes baseados na conformidade da rota.
+          Bônus proporcional: <strong>R$ 8,00</strong> (Motorista) e <strong>R$ 7,20</strong> (Ajudante) baseados em 4 critérios de conformidade da rota.
         </AlertDescription>
       </Alert>
 
@@ -139,7 +141,7 @@ export function PerformaxxiPipelineView() {
                 Configuração Performaxxi
               </CardTitle>
               <CardDescription>
-                Análise de Rotas e Performance Proporcional (Motorista/Ajudante)
+                Análise de Rotas e Performance (Bônus Proporcional)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -205,7 +207,7 @@ export function PerformaxxiPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel (Teste)
+                <Download className="mr-2 size-4" /> Baixar Excel (Completo)
               </Button>
               <Button 
                 className="flex-[2] h-12 text-base font-semibold bg-accent hover:bg-accent/90 text-accent-foreground shadow-sm" 
@@ -231,7 +233,7 @@ export function PerformaxxiPipelineView() {
                   <p>Aguardando arquivos do Performaxxi.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
                     <strong>Sugestão:</strong><br/>
-                    • Relatorio_Analitico_Rotas_*.xlsx
+                    • RelatorioAnaliticoRotaPedidos.xlsx
                   </div>
                 </div>
               ) : (

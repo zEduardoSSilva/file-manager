@@ -1,8 +1,9 @@
+
 'use server';
 
 import { firebaseStore, PipelineResult } from '@/lib/firebase';
 import * as XLSX from 'xlsx';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSunday } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSunday, parse } from 'date-fns';
 
 export type PipelineResponse = 
   | { success: true; result: PipelineResult }
@@ -29,7 +30,6 @@ const normalizeDateStr = (dateStr: string, defaultYear: number): string => {
 
 const excelSerialToDateStr = (serial: any, defaultYear: number): string => {
   if (typeof serial === 'number' && serial > 30000 && serial < 60000) {
-    // Converte serial do Excel para data JS (ajustando para o bug de 1900 do Excel)
     const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
     return format(date, 'dd/MM/yyyy');
   }
@@ -46,6 +46,23 @@ const hmsToSeconds = (hms: string): number => {
     }
     return 0;
   } catch { return 0; }
+};
+
+const toFloat = (val: any): number => {
+  if (val === undefined || val === null || val === '') return 0;
+  if (typeof val === 'number') return val;
+  const clean = String(val).replace(/[^\d,.-]/g, '').replace(',', '.');
+  return parseFloat(clean) || 0;
+};
+
+const findCol = (row: any, candidates: string[]): string | undefined => {
+  const keys = Object.keys(row);
+  for (const cand of candidates) {
+    const normCand = cand.toLowerCase().trim();
+    const found = keys.find(k => k.toLowerCase().trim().includes(normCand));
+    if (found) return found;
+  }
+  return undefined;
 };
 
 async function fileToBuffer(file: File): Promise<Buffer> {
@@ -65,6 +82,181 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
 
+    if (pipelineType === 'performaxxi') {
+      let rawData: any[] = [];
+      const MOT_BASE = 8.00;
+      const AJU_BASE = 7.20;
+      const CRITERIOS_TOTAL = 4;
+
+      for (const file of files) {
+        const buffer = await fileToBuffer(file);
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(sheet) as any[];
+        rawData.push(...data);
+      }
+
+      // Filtrar StandBy
+      const baseDados = rawData.filter(row => {
+        const statusCol = findCol(row, ['status_rota', 'status_da_rota', 'status']);
+        const status = String(row[statusCol || ''] || '').toUpperCase();
+        return status !== 'STANDBY';
+      });
+
+      const analisarGrupo = (grupoTipo: 'Motorista' | 'Ajudante') => {
+        const colNomeCand = grupoTipo === 'Motorista' ? ['nome_motorista', 'motorista'] : ['nome_primeiro_ajudante', 'nome_segundo_ajudante', 'ajudante'];
+        const baseValor = grupoTipo === 'Motorista' ? MOT_BASE : AJU_BASE;
+        const valorPorCriterio = baseValor / CRITERIOS_TOTAL;
+
+        const dailyMap: Record<string, any> = {};
+
+        baseDados.forEach(row => {
+          const colNome = findCol(row, colNomeCand);
+          const colData = findCol(row, ['data_rota', 'data_da_rota', 'data']);
+          const colEmpresa = findCol(row, ['empresa', 'nome_deposito', 'deposito']);
+          
+          const nome = String(row[colNome || ''] || '').trim();
+          const dataRaw = row[colData || ''];
+          if (!nome || nome === 'N.R.' || !dataRaw) return;
+
+          const dateStr = excelSerialToDateStr(dataRaw, year);
+          const key = `${nome}_${dateStr}`;
+
+          if (!dailyMap[key]) {
+            dailyMap[key] = {
+              Empresa: String(row[colEmpresa || ''] || 'N/A'),
+              Nome: nome,
+              Dia: dateStr,
+              Total_Pedidos: 0,
+              Raio_OK: 0,
+              SLA_OK: 0,
+              Tempo_OK: 0,
+              Seq_OK: 0,
+              Peso_Total: 0,
+              Peso_Devolvido: 0
+            };
+          }
+
+          const distCol = findCol(row, ['distancia_cliente_metros', 'distancia_metros', 'distancia']);
+          const slaCol = findCol(row, ['sla_janela_atendimento', 'sla']);
+          const chegCol = findCol(row, ['chegada_cliente_realizado', 'chegada']);
+          const fimCol = findCol(row, ['fim_atendimento_cliente_realizado', 'fim_atendimento']);
+          const seqPlanCol = findCol(row, ['sequencia_entrega_planejado']);
+          const seqRealCol = findCol(row, ['sequencia_entrega_realizado']);
+          const pesoCol = findCol(row, ['peso_pedido', 'peso']);
+          const ocCol = findCol(row, ['descricao_ocorrencia', 'ocorrencia']);
+
+          dailyMap[key].Total_Pedidos++;
+          
+          if (toFloat(row[distCol || '']) <= 100) dailyMap[key].Raio_OK++;
+          if (String(row[slaCol || ''] || '').toUpperCase().match(/SIM|OK/)) dailyMap[key].SLA_OK++;
+          
+          const t1 = hmsToSeconds(String(row[chegCol || ''] || ''));
+          const t2 = hmsToSeconds(String(row[fimCol || ''] || ''));
+          if (t2 - t1 >= 60) dailyMap[key].Tempo_OK++;
+
+          if (row[seqPlanCol || ''] === row[seqRealCol || ''] && row[seqPlanCol || ''] !== undefined) dailyMap[key].Seq_OK++;
+
+          const peso = toFloat(row[pesoCol || '']);
+          dailyMap[key].Peso_Total += peso;
+          if (String(row[ocCol || ''] || '').trim() !== '') dailyMap[key].Peso_Devolvido += peso;
+        });
+
+        const detalhe = Object.values(dailyMap).map(d => {
+          const pRaio = Number(((d.Raio_OK / d.Total_Pedidos) * 100).toFixed(2));
+          const pSla = Number(((d.SLA_OK / d.Total_Pedidos) * 100).toFixed(2));
+          const pTempo = Number(((d.Tempo_OK / d.Total_Pedidos) * 100).toFixed(2));
+          const pSeq = Number(((d.Seq_OK / d.Total_Pedidos) * 100).toFixed(2));
+
+          const cRaio = pRaio >= 70;
+          const cSla = pSla >= 80;
+          const cTempo = pTempo >= 100;
+          const cSeq = pSeq >= 0;
+
+          const cumpridos = (cRaio ? 1 : 0) + (cSla ? 1 : 0) + (cTempo ? 1 : 0) + (cSeq ? 1 : 0);
+          const bonus = Number((cumpridos * valorPorCriterio).toFixed(2));
+
+          const item: any = {
+            'Empresa': d.Empresa,
+            'Dia': d.Dia,
+            'Total de Pedidos': d.Total_Pedidos,
+            'Peso Pedido Dia (Kg)': d.Peso_Total.toFixed(2),
+            'Peso Devolvido Dia (Kg)': d.Peso_Devolvido.toFixed(2),
+            '% Devolvido Dia': d.Peso_Total > 0 ? ((d.Peso_Devolvido / d.Peso_Total) * 100).toFixed(2) : '0.00',
+            'Pedidos Raio OK': d.Raio_OK,
+            '% Raio': pRaio,
+            'Pedidos SLA OK': d.SLA_OK,
+            '% SLA': pSla,
+            'Pedidos Tempo OK': d.Tempo_OK,
+            '% Tempo': pTempo,
+            'Pedidos Sequência OK': d.Seq_OK,
+            '% Sequência': pSeq,
+            'Critérios Cumpridos (de 4)': cumpridos,
+            'Critérios Falhados': 4 - cumpridos,
+            'Dia Bonificação Máxima (4/4)': cumpridos === 4 ? 'SIM' : 'NÃO',
+            '% Bonificação': (cumpridos / 4 * 100).toFixed(2),
+          };
+          
+          item[grupoTipo] = d.Nome;
+          item[`✓ Raio ≥70%`] = cRaio ? 'SIM' : 'NÃO';
+          item[`✓ SLA ≥80%`] = cSla ? 'SIM' : 'NÃO';
+          item[`✓ Tempo ≥100%`] = cTempo ? 'SIM' : 'NÃO';
+          item[`✓ Sequência ≥0%`] = cSeq ? 'SIM' : 'NÃO';
+          item[`Bonificação ${grupoTipo} (R$)`] = bonus;
+
+          return item;
+        });
+
+        const consolidado = Object.values(detalhe.reduce((acc: any, curr: any) => {
+          const nome = curr[grupoTipo];
+          if (!acc[nome]) {
+            acc[nome] = {
+              'Empresa': curr.Empresa,
+              'Dias com Atividade': 0,
+              'Dias Bonif. Máxima (4/4)': 0,
+              'Total Bonificação (R$)': 0,
+              'Total Critérios Cumpridos': 0,
+              'Falhas Raio': 0,
+              'Falhas SLA': 0,
+              'Falhas Tempo': 0,
+              'Falhas Sequência': 0
+            };
+            acc[nome][grupoTipo] = nome;
+          }
+          acc[nome]['Dias com Atividade']++;
+          if (curr['Dia Bonificação Máxima (4/4)'] === 'SIM') acc[nome]['Dias Bonif. Máxima (4/4)']++;
+          acc[nome]['Total Bonificação (R$)'] += curr[`Bonificação ${grupoTipo} (R$)` || 0];
+          acc[nome]['Total Critérios Cumpridos'] += curr['Critérios Cumpridos (de 4)'];
+          if (curr[`✓ Raio ≥70%`] === 'NÃO') acc[nome]['Falhas Raio']++;
+          if (curr[`✓ SLA ≥80%`] === 'NÃO') acc[nome]['Falhas SLA']++;
+          if (curr[`✓ Tempo ≥100%`] === 'NÃO') acc[nome]['Falhas Tempo']++;
+          if (curr[`✓ Sequência ≥0%`] === 'NÃO') acc[nome]['Falhas Sequência']++;
+          return acc;
+        }, {})).map((m: any) => ({
+          ...m,
+          'Percentual de Desempenho (%)': Number(((m['Total Critérios Cumpridos'] / (m['Dias com Atividade'] * 4)) * 100).toFixed(2))
+        }));
+
+        return { detalhe, consolidado };
+      };
+
+      const resMot = analisar_Grupo('Motorista');
+      const resAju = analisar_Grupo('Ajudante');
+
+      const saved = await firebaseStore.saveResult('performaxxi', {
+        pipelineType: 'performaxxi',
+        timestamp: Date.now(),
+        year, month,
+        data: resMot.consolidado as any,
+        detalhePonto: resMot.detalhe,
+        helpersData: resAju.consolidado as any,
+        helpersDetail: resAju.detalhe,
+        summary: `Performaxxi: Analisados ${resMot.consolidado.length} motoristas e ${resAju.consolidado.length} ajudantes.`
+      });
+
+      return { success: true, result: JSON.parse(JSON.stringify(saved)) };
+    }
+
     if (pipelineType === 'vfleet') {
       let vehicleBulletins: any[] = [];
       let alerts: any[] = [];
@@ -75,12 +267,12 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const name = file.name.toUpperCase();
 
         if (name.includes('BOLETIM')) {
-          const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+          const workbook = XLSX.read(buffer, { type: 'buffer' });
           const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
           vehicleBulletins.push(...data);
         }
         else if (name.includes('ALERTAS') || name.includes('HISTORICO')) {
-          const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+          const workbook = XLSX.read(buffer, { type: 'buffer' });
           const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
           alerts.push(...data);
         }
@@ -91,13 +283,19 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       const dailyAnalysis: Record<string, any> = {};
 
       vehicleBulletins.forEach(row => {
-        const placa = normalizePlate(row['PLACA']);
-        const diaRaw = row['DIA'] || row['DATA'];
+        const placaCol = findCol(row, ['PLACA']);
+        const diaCol = findCol(row, ['DIA', 'DATA']);
+        const motCol = findCol(row, ['MOTORISTAS', 'MOTORISTA']);
+        const curvaCol = findCol(row, ['CURVA BRUSCA']);
+        const banguelaCol = findCol(row, ['BANGUELA']);
+        const paradoCol = findCol(row, ['PARADO LIGADO']);
+
+        const placa = normalizePlate(row[placaCol || '']);
+        const diaRaw = row[diaCol || ''];
         if (!placa || !diaRaw) return;
 
         const dateStr = excelSerialToDateStr(diaRaw, year);
-        
-        let motorista = String(row['MOTORISTAS'] || row['MOTORISTA'] || '').split('-')[0].trim();
+        let motorista = String(row[motCol || ''] || '').split('-')[0].trim();
         if (!motorista || motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO')) return;
 
         const key = `${motorista}_${dateStr}`;
@@ -112,19 +310,23 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           };
         }
 
-        dailyAnalysis[key].curvaBrusca += parseInt(row['CURVA BRUSCA'] || 0);
-        dailyAnalysis[key].banguelaSegundos += hmsToSeconds(row['BANGUELA']);
-        dailyAnalysis[key].ociosidadeSegundos += hmsToSeconds(row['PARADO LIGADO']);
+        dailyAnalysis[key].curvaBrusca += parseInt(row[curvaCol || ''] || 0);
+        dailyAnalysis[key].banguelaSegundos += hmsToSeconds(row[banguelaCol || '']);
+        dailyAnalysis[key].ociosidadeSegundos += hmsToSeconds(row[paradoCol || '']);
       });
 
       alerts.forEach(alert => {
-        const dataRaw = alert['DATA'] || alert['DIA'];
+        const dataCol = findCol(alert, ['DATA', 'DIA']);
+        const motCol = findCol(alert, ['MOTORISTA']);
+        const tipoCol = findCol(alert, ['TIPO']);
+
+        const dataRaw = alert[dataCol || ''];
         if (!dataRaw) return;
 
         const dateStr = excelSerialToDateStr(dataRaw, year);
-        const motorista = String(alert['MOTORISTA'] || '').trim();
+        const motorista = String(alert[motCol || ''] || '').trim();
 
-        if (motorista && !motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO') && alert['TIPO'] === 'EXCESSO_VELOCIDADE') {
+        if (motorista && !motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO') && String(alert[tipoCol || '']).includes('VELOCIDADE')) {
           const key = `${motorista}_${dateStr}`;
           if (dailyAnalysis[key]) {
             dailyAnalysis[key].excessosVelocidade++;
@@ -280,9 +482,9 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
 
       const absData = consolidado.map((c: any) => {
         const presencasFisicas = c.presencasNoMes.size;
-        const totalPresencas = presencasFisicas + 0; // Simplificado: sem atestados manuais aqui
-        const faltas = Math.max(0, metaDias - totalPresencas);
-        const percentual = Number(((totalPresencas / metaDias) * 100).toFixed(2));
+        const totalPresencas = presencasFisicas + (excludedDatesSet.size); // Simplificado
+        const faltas = Math.max(0, metaDias - presencasFisicas);
+        const percentual = Number(((presencasFisicas / metaDias) * 100).toFixed(2));
         
         return {
           ID: c.ID,
@@ -291,8 +493,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           Total_Dias: metaDias,
           'Presenças Físicas': presencasFisicas,
           'Atestados/Férias': 0,
-          'Abonos Manuais': 0,
-          'Total Presenças': totalPresencas,
+          'Abonos Manuais': excludedDatesSet.size,
+          'Total Presenças': presencasFisicas,
           Faltas: faltas,
           'Percentual (%)': percentual,
           Valor_Incentivo: percentual >= 100 ? 50 : percentual >= 90 ? 40 : 0,
