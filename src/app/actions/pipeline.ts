@@ -29,8 +29,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     let processedDrivers: DriverConsolidated[] = [];
     let absenteismoData: AbsenteismoData[] = [];
 
-    // Lista de termos a ignorar na identificação de nomes (abreviações de dias e cabeçalhos)
-    const blackList = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM', 'TOTAL', 'PAG', 'DATA', 'NOME'];
+    const blackList = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM', 'TOTAL', 'PAG', 'DATA', 'NOME', 'HRAP001'];
 
     for (const file of files) {
       const buffer = await fileToBuffer(file);
@@ -48,11 +47,11 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           const col1 = String(row[1] || '').trim();
           const col2 = String(row[2] || '').trim();
 
-          // Identifica linha de Colaborador (ID numérico em A e Nome em B)
-          // Regra Rigorosa: Col 0 é número, Col 1 não é vazio e não está na blacklist
+          // REGRA DE OURO: Identifica Colaborador (ID em A e Nome em B)
+          // Deve ser numérico MAS NÃO PODE ter barra (para não confundir com data 06/jan)
           const isNumericId = /^\d+$/.test(col0);
           const isNotDate = !col0.includes('/');
-          const isNotBlacklisted = !blackList.includes(col1.toUpperCase());
+          const isNotBlacklisted = !blackList.includes(col1.toUpperCase().substring(0, 3));
           const hasRealName = col1.length > 3;
 
           if (isNumericId && isNotDate && isNotBlacklisted && hasRealName) {
@@ -62,6 +61,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
               driverStats[currentId] = {
                 id: currentId,
                 nome: currentName,
+                diasRegistrados: 0,
                 diasTrab: 0,
                 bonusMarc: 0,
                 bonusCrit: 0,
@@ -74,15 +74,14 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             }
           }
 
-          // Identifica linha de Marcação (Data DD/MMM em A)
+          // Identifica linha de Ponto Diário (Data DD/MMM em A)
           if (currentId && col0.includes('/')) {
             const stats = driverStats[currentId];
+            stats.diasRegistrados++; // Conta o registro (os 21 dias do Rafael)
             
-            // Extrai marcações de col C (índice 2)
             const timesStr = col2.trim();
             const times = timesStr.split(/\s+/).filter(t => t.includes(':'));
             
-            // SÓ CONTABILIZA SE HOUVER MARCAÇÃO REAL (Evita contar feriados/folgas vazias como trabalho)
             if (times.length > 0) {
               stats.diasTrab++;
               stats.presencas++;
@@ -94,20 +93,19 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
                 stats.bonusMarc += 1.60;
               }
 
-              // Conta ajustes manuais (asteriscos nas marcações)
+              // Conta ajustes manuais (asteriscos)
               const manualCount = (timesStr.match(/\*/g) || []).length;
               stats.ajustesManuais += manualCount;
 
-              // Simulação de critérios (em produção aqui entraria a lógica de jornada real)
-              const isCriteriaOk = is44 && Math.random() > 0.1; 
+              // Simulação de critérios OK (R$ 1,60)
+              const isCriteriaOk = is44 && (manualCount === 0); 
               if (isCriteriaOk) {
                 stats.criteriosOk++;
                 stats.bonusCrit += 1.60;
               }
             } else {
-              // Se houver situação de abono/férias mas sem ponto, conta apenas para Absenteísmo (presença justificada)
-              // Aqui você pode expandir para ler a coluna de Situação (ex: Férias, Atestado)
-              const situacao = String(row[5] || '').toUpperCase();
+              // Situações de abono/justificativa
+              const situacao = String(row[5] || row[4] || '').toUpperCase();
               if (['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO'].some(s => situacao.includes(s))) {
                  stats.presencas++;
               }
@@ -115,14 +113,12 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           }
         });
 
-        // Converte o objeto de stats para o array final consolidado
         Object.values(driverStats).forEach((s: any) => {
-          // Só adiciona se teve pelo menos um registro ou presença justificada
-          if (s.presencas > 0 || s.diasTrab > 0) {
+          if (s.diasRegistrados > 0) {
             processedDrivers.push({
               ID: s.id,
               Motorista: s.nome,
-              Dias_Trabalhados: s.diasTrab,
+              Dias_Trabalhados: s.diasRegistrados, // Mostra o total de registros (ex: 21)
               '💰 Total_Bonus_Marcacoes': Number(s.bonusMarc.toFixed(2)),
               '💰 Total_Bonus_Criterios': Number(s.bonusCrit.toFixed(2)),
               '💵 BONIFICACAO_TOTAL': Number((s.bonusMarc + s.bonusCrit).toFixed(2)),
@@ -130,19 +126,18 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
               Dias_4_Marcacoes_Completas: s.marcacoesOk,
               Dias_Violou_DSR: s.dsrViolado,
               Total_Ajustes_Manuais: s.ajustesManuais,
-              // Campos para o Absenteísmo
               'Dias com Atividade': s.diasTrab,
-              'Percentual de Desempenho (%)': Number(((s.criteriosOk / Math.max(1, s.diasTrab)) * 100).toFixed(1)) || 0
+              'Percentual de Desempenho (%)': Number(((s.criteriosOk / Math.max(1, s.diasRegistrados)) * 100).toFixed(1)) || 0
             });
 
             absenteismoData.push({
               ID: s.id,
               Nome: s.nome,
-              Grupo: 'Motorista', // Pode ser ajustado se houver lógica de cargo
-              Total_Dias: 26,
+              Grupo: 'Motorista',
+              Total_Dias: s.diasRegistrados,
               Presencas: s.presencas,
-              Faltas: Math.max(0, 26 - s.presencas),
-              Percentual: Number(((s.presencas / 26) * 100).toFixed(1)),
+              Faltas: Math.max(0, s.diasRegistrados - s.presencas),
+              Percentual: Number(((s.presencas / Math.max(1, s.diasRegistrados)) * 100).toFixed(1)),
               Valor_Incentivo: s.presencas >= 26 ? 50 : s.presencas >= 24 ? 40 : 0
             });
           }
@@ -150,13 +145,13 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       }
     }
 
-    if (processedDrivers.length === 0) throw new Error('Não foi possível extrair dados válidos dos arquivos. Verifique o formato.');
+    if (processedDrivers.length === 0) throw new Error('Não foi possível extrair dados. Verifique se o arquivo segue o formato de Apuração Colaborador.');
 
-    let summaryText = "Processamento de Ponto concluído. Dados consolidados e filtrados.";
+    let summaryText = "Processamento concluído. Verifique os bônus e absenteísmo.";
     try {
       const summaryResult = await generateDataSummary({
-        consolidatedDriverData: JSON.stringify(processedDrivers.slice(0, 10)),
-        pipelineContext: `Ponto: ${month}/${year}.`
+        consolidatedDriverData: JSON.stringify(processedDrivers.slice(0, 5)),
+        pipelineContext: `Ponto ${month}/${year}. Unificado.`
       });
       summaryText = summaryResult.summary;
     } catch (e) {}
