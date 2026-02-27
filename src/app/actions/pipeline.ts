@@ -1,15 +1,10 @@
+
 'use server';
 
 import { firebaseStore, DriverConsolidated, PipelineResult } from '@/lib/firebase';
 import { generateDataSummary } from '@/ai/flows/ai-generated-data-summary';
 
-/**
- * Server Action para executar o pipeline de transformação vFleet.
- * Processa dados baseados nas colunas:
- * - Controle: "PLACA SISTEMA", "MOTORISTA", "ENTREGAS", "VIAGEM"
- * - Alertas: "MOTORISTA", "TIPO" (Curva Brusca, Banguela, Ociosidade, Exc. Velocidade)
- */
-export async function executeVFleetPipeline(formData: FormData) {
+export async function executePipeline(formData: FormData, pipelineType: 'vfleet' | 'performaxxi') {
   try {
     const rawYear = formData.get('year');
     const rawMonth = formData.get('month');
@@ -26,77 +21,92 @@ export async function executeVFleetPipeline(formData: FormData) {
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
     
-    console.log(`[vFleet] Iniciando processamento de ${month}/${year}`);
+    console.log(`[${pipelineType}] Iniciando processamento de ${month}/${year}`);
 
-    // Simulação de Validação de Cabeçalhos (Baseado no que você forneceu)
-    const mockValidationDelay = () => new Promise(r => setTimeout(r, 400));
-    
-    // 1. Validando Controle de Entregas (Aba Acumulado)
-    console.log("[vFleet] Validando colunas: PLACA SISTEMA, MOTORISTA, KM, VIAGEM...");
-    await mockValidationDelay();
+    // Simulação de processamento baseada no tipo de pipeline
+    await new Promise(r => setTimeout(r, 1000));
 
-    // 2. Validando Histórico de Alertas
-    console.log("[vFleet] Validando colunas de Alertas: MOTORISTA, TIPO, EXCESSO, DURACAO...");
-    await mockValidationDelay();
+    let processedDrivers: DriverConsolidated[] = [];
+    let processedHelpers: DriverConsolidated[] = [];
 
-    // Lógica de Consolidação Simulada (Refletindo a aba 05_Consolidado_Motorista)
-    const mockDrivers = [
-      "RODRIGO ALVES", "MARCOS SILVA", "JOSE OLIVEIRA", "ANTONIO SANTOS", 
-      "LUIS FERREIRA", "CARLOS GOMES", "PAULO COSTA", "RICARDO MARTINS"
-    ];
-
-    const processedData: DriverConsolidated[] = mockDrivers.map(name => {
-      const activityDays = Math.floor(Math.random() * 20) + 5;
+    if (pipelineType === 'performaxxi') {
+      // Lógica Performaxxi (Motorista R$ 8.00, Ajudante R$ 7.20)
+      const mockNames = ["RODRIGO ALVES", "MARCOS SILVA", "JOSE OLIVEIRA", "ANTONIO SANTOS"];
       
-      // Simulação de cruzamento por TIPO de alerta
-      const failures = {
-        curva: Math.floor(Math.random() * 2),
-        banguela: Math.floor(Math.random() * 1.5),
-        ociosidade: Math.floor(Math.random() * 3),
-        velocidade: Math.floor(Math.random() * 2),
-      };
-      
-      // Regra: 4/4 critérios (Sem nenhuma falha no dia)
-      const bonifiedDays = Math.max(0, activityDays - (failures.curva + failures.banguela + failures.ociosidade + failures.velocidade));
-      const performance = parseFloat(((bonifiedDays / activityDays) * 100).toFixed(2));
-      const totalBonus = bonifiedDays * 4.80;
-
-      return {
-        'Motorista': name,
-        'Dias com Atividade': activityDays,
-        'Dias Bonificados (4/4)': bonifiedDays,
-        'Percentual de Desempenho (%)': performance,
-        'Total Bonificação (R$)': totalBonus,
-        'Falhas Curva Brusca': failures.curva,
-        'Falhas Banguela': failures.banguela,
-        'Falhas Ociosidade': failures.ociosidade,
-        'Falhas Exc. Velocidade': failures.velocidade,
-      };
-    });
-
-    processedData.sort((a, b) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
-
-    console.log(`[vFleet] Cruzamento concluído. Solicitando resumo de IA...`);
-
-    // Geração de Resumo via Genkit
-    let summaryResult;
-    try {
-      summaryResult = await generateDataSummary({
-        consolidatedDriverData: JSON.stringify(processedData),
-        pipelineContext: `Período: ${month}/${year}. Regra: Bonificação R$ 4.80 por dia 4/4.`
+      processedDrivers = mockNames.map(name => {
+        const activeDays = Math.floor(Math.random() * 15) + 10;
+        const maxBonusDays = Math.floor(activeDays * 0.8);
+        const perf = parseFloat(((maxBonusDays / activeDays) * 100).toFixed(2));
+        return {
+          'Motorista': name,
+          'Empresa': 'Performaxxi Log',
+          'Dias com Atividade': activeDays,
+          'Dias Bonif. Máxima (4/4)': maxBonusDays,
+          'Percentual de Desempenho (%)': perf,
+          'Total Bonificação (R$)': maxBonusDays * 8.00,
+          'Total Critérios Cumpridos': maxBonusDays * 4 + (activeDays - maxBonusDays) * 2,
+          'Falhas Raio': Math.floor(Math.random() * 2),
+          'Falhas SLA': Math.floor(Math.random() * 1),
+          'Falhas Tempo': 0,
+          'Falhas Sequência': Math.floor(Math.random() * 3),
+        };
       });
-    } catch (aiError) {
-      console.error("[vFleet] Erro Genkit:", aiError);
-      summaryResult = { summary: "O resumo automático não pôde ser gerado, mas os dados estão salvos." };
+
+      processedHelpers = mockNames.map(name => ({
+        'Ajudante': name + " (Ajudante)",
+        'Empresa': 'Performaxxi Log',
+        'Dias com Atividade': 15,
+        'Dias Bonif. Máxima (4/4)': 12,
+        'Percentual de Desempenho (%)': 80.0,
+        'Total Bonificação (R$)': 12 * 7.20,
+        'Total Critérios Cumpridos': 48,
+        'Falhas Raio': 1,
+        'Falhas SLA': 1,
+        'Falhas Tempo': 0,
+        'Falhas Sequência': 1,
+      }));
+
+    } else {
+      // Lógica vFleet (R$ 4.80 fixo)
+      const mockDrivers = ["CARLOS GOMES", "PAULO COSTA", "RICARDO MARTINS"];
+      processedDrivers = mockDrivers.map(name => {
+        const activityDays = 20;
+        const failures = { curva: 1, banguela: 0, ociosidade: 2, velocidade: 0 };
+        const bonifiedDays = 17;
+        return {
+          'Motorista': name,
+          'Dias com Atividade': activityDays,
+          'Dias Bonif. Máxima (4/4)': bonifiedDays,
+          'Percentual de Desempenho (%)': 85,
+          'Total Bonificação (R$)': bonifiedDays * 4.80,
+          'Falhas Curva Brusca': failures.curva,
+          'Falhas Banguela': failures.banguela,
+          'Falhas Ociosidade': failures.ociosidade,
+          'Falhas Exc. Velocidade': failures.velocidade,
+        };
+      });
     }
 
-    // Persistência no "Firebase"
-    const saved = await firebaseStore.saveResult('vfleet', {
+    // Geração de Resumo via Genkit
+    let summaryText = "Resumo gerado automaticamente.";
+    try {
+      const summaryResult = await generateDataSummary({
+        consolidatedDriverData: JSON.stringify(processedDrivers.slice(0, 5)),
+        pipelineContext: `Pipeline: ${pipelineType}. Período: ${month}/${year}.`
+      });
+      summaryText = summaryResult.summary;
+    } catch (e) {
+      console.warn("IA Summary failed, using fallback.");
+    }
+
+    const saved = await firebaseStore.saveResult(pipelineType, {
+      pipelineType,
       timestamp: Date.now(),
       year,
       month,
-      data: processedData,
-      summary: summaryResult.summary
+      data: processedDrivers,
+      helpersData: processedHelpers,
+      summary: summaryText
     });
 
     return {
@@ -104,14 +114,10 @@ export async function executeVFleetPipeline(formData: FormData) {
       result: JSON.parse(JSON.stringify(saved)) as PipelineResult
     };
   } catch (error: any) {
-    console.error(`[vFleet] ERRO NO PIPELINE:`, error.message);
-    return {
-      success: false,
-      error: error.message || 'Erro interno durante o processamento.'
-    };
+    return { success: false, error: error.message };
   }
 }
 
-export async function getLatestPipelineResult(pipelineId: string) {
-  return await firebaseStore.getResult(pipelineId);
+export async function getLatestResult(type: string) {
+  return await firebaseStore.getLatestByType(type);
 }

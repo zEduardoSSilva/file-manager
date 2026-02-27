@@ -3,23 +3,33 @@
 // In a real app, you would initialize Firebase here.
 
 export interface DriverConsolidated {
-  Motorista: string;
+  Motorista?: string;
+  Ajudante?: string;
+  Empresa?: string;
   'Dias com Atividade': number;
-  'Dias Bonificados (4/4)': number;
+  'Dias Bonif. Máxima (4/4)': number;
   'Percentual de Desempenho (%)': number;
   'Total Bonificação (R$)': number;
-  'Falhas Curva Brusca': number;
-  'Falhas Banguela': number;
-  'Falhas Ociosidade': number;
-  'Falhas Exc. Velocidade': number;
+  'Total Critérios Cumpridos'?: number;
+  'Falhas Raio'?: number;
+  'Falhas SLA'?: number;
+  'Falhas Tempo'?: number;
+  'Falhas Sequência'?: number;
+  // vFleet legacy fields
+  'Falhas Curva Brusca'?: number;
+  'Falhas Banguela'?: number;
+  'Falhas Ociosidade'?: number;
+  'Falhas Exc. Velocidade'?: number;
 }
 
 export interface PipelineResult {
   id: string;
+  pipelineType: 'vfleet' | 'performaxxi';
   timestamp: number;
   year: number;
   month: number;
   data: DriverConsolidated[];
+  helpersData?: DriverConsolidated[]; // Specific for Performaxxi
   summary?: string;
 }
 
@@ -27,14 +37,21 @@ export interface PipelineResult {
 const storage: Record<string, PipelineResult> = {};
 
 export const firebaseStore = {
-  saveResult: async (pipelineId: string, result: Omit<PipelineResult, 'id'>) => {
+  saveResult: async (id: string, result: Omit<PipelineResult, 'id'>) => {
     // Simulating delay
     await new Promise((resolve) => setTimeout(resolve, 800));
-    storage[pipelineId] = { ...result, id: pipelineId };
-    return storage[pipelineId];
+    const newId = `${result.pipelineType}_${result.year}_${result.month}`;
+    storage[newId] = { ...result, id: newId };
+    return storage[newId];
   },
 
-  getResult: async (pipelineId: string): Promise<PipelineResult | null> => {
-    return storage[pipelineId] || null;
+  getResult: async (id: string): Promise<PipelineResult | null> => {
+    return storage[id] || null;
+  },
+
+  getLatestByType: async (type: string): Promise<PipelineResult | null> => {
+    const results = Object.values(storage).filter(r => r.pipelineType === type);
+    if (results.length === 0) return null;
+    return results.sort((a, b) => b.timestamp - a.timestamp)[0];
   }
 };
