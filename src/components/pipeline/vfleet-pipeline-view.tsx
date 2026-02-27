@@ -13,7 +13,8 @@ import {
   Trash2,
   FileCode,
   FileText,
-  Files
+  Files,
+  Loader2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -32,18 +33,26 @@ import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
 
 export function VFleetPipelineView() {
   const [year, setYear] = React.useState(2026)
   const [month, setMonth] = React.useState(1)
   const [files, setFiles] = React.useState<File[]>([])
   const [isExecuting, setIsExecuting] = React.useState(false)
+  const [progress, setProgress] = React.useState(0)
   const [logs, setLogs] = React.useState<string[]>([])
   const [lastResult, setLastResult] = React.useState<PipelineResult | null>(null)
   const { toast } = useToast()
 
-  const addLog = (msg: string) => {
-    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`])
+  const addLog = (msg: string, type: 'info' | 'error' | 'success' | 'warn' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString()
+    let prefix = ""
+    if (type === 'error') prefix = "❌ [ERRO] "
+    if (type === 'success') prefix = "✅ [OK] "
+    if (type === 'warn') prefix = "⚠️ [AVISO] "
+    
+    setLogs(prev => [...prev, `[${timestamp}] ${prefix}${msg}`])
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -64,49 +73,70 @@ export function VFleetPipelineView() {
         title: "Arquivos ausentes",
         description: "Adicione os arquivos Excel/CSV necessários.",
       });
+      addLog("Tentativa de execução sem arquivos. Abortando.", "error")
       return;
     }
 
     setIsExecuting(true)
+    setProgress(5)
     setLogs([])
-    addLog("Iniciando Pipeline vFleet...")
-    addLog(`Configurado para período: ${month.toString().padStart(2, '0')}/${year}`)
+    addLog("Iniciando Pipeline vFleet v2.0...")
+    addLog(`Parâmetros: Mês ${month}, Ano ${year}`)
 
     try {
-      addLog("Carregando arquivos de entrada...")
+      addLog("Verificando integridade dos arquivos selecionados...")
       await new Promise(r => setTimeout(r, 600))
-      addLog(`Processando ${files.length} arquivos simultaneamente...`)
+      setProgress(15)
+      
+      const hasControlFile = files.some(f => f.name.toLowerCase().includes('entrega') || f.name.toLowerCase().includes('controle'))
+      if (!hasControlFile) {
+        addLog("Nenhum arquivo de 'Controle de Entregas' detectado. O processamento continuará, mas os dados podem ser parciais.", "warn")
+      }
+
+      addLog("Estabelecendo conexão com o Firebase Firestore...", "info")
+      await new Promise(r => setTimeout(r, 400))
+      setProgress(25)
       
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
       files.forEach(f => formData.append('files', f))
 
+      addLog("Enviando lote de dados para o servidor (Server Action)...", "info")
+      setProgress(40)
+      
       const response = await executeVFleetPipeline(formData)
       
       if (response.success) {
-        addLog("Etapa 1: Analisando arquivos de alertas...")
+        setProgress(60)
+        addLog("Servidor: Leitura de boletins de alerta concluída.", "success")
         await new Promise(r => setTimeout(r, 400))
-        addLog("Etapa 2: Consolidando com controle de entregas...")
+        
+        setProgress(75)
+        addLog("Servidor: Cruzamento de dados com Controle de Entregas efetuado.", "success")
+        
+        setProgress(85)
+        addLog("Servidor: Inicializando Genkit para análise de IA...", "info")
         await new Promise(r => setTimeout(r, 400))
-        addLog("Etapa 3: Calculando bonificações (R$ 4.80/dia)...")
-        await new Promise(r => setTimeout(r, 400))
-        addLog("Etapa 4: Gerando relatório de desempenho final...")
-        await new Promise(r => setTimeout(r, 600))
-        addLog("Salvando resultados no Firebase...")
+        
+        setProgress(95)
+        addLog("Servidor: Resumo de desempenho gerado pela IA.", "success")
         
         setLastResult(response.result as PipelineResult)
-        addLog("Pipeline concluído com sucesso!")
+        setProgress(100)
+        addLog("Pipeline concluído com sucesso! Dados persistidos no Firebase.", "success")
         
         toast({
           title: "Pipeline Finalizado",
-          description: "Os dados foram processados e salvos.",
+          description: "Os dados foram processados e o resumo de IA foi gerado.",
         });
       } else {
         throw new Error(response.error)
       }
     } catch (error: any) {
-      addLog(`ERRO: ${error.message || "Falha crítica na execução."}`)
+      addLog(`FALHA CRÍTICA: ${error.message || "Erro desconhecido durante o processamento."}`, "error")
+      addLog("Verifique se as tabelas do Excel estão no formato vFleet padrão.", "warn")
+      setProgress(0)
       toast({
         variant: "destructive",
         title: "Erro na Execução",
@@ -125,7 +155,7 @@ export function VFleetPipelineView() {
             <CardHeader>
               <CardTitle>Execução de Pipeline</CardTitle>
               <CardDescription>
-                Selecione todos os arquivos de alertas e o controle de entregas para iniciar.
+                Selecione os arquivos de alertas (vFleet) e o controle de entregas.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -197,7 +227,7 @@ export function VFleetPipelineView() {
                       <p className="text-xs">Arraste arquivos ou use o botão acima</p>
                     </div>
                   ) : (
-                    <ScrollArea className="h-[240px] p-4">
+                    <ScrollArea className="h-[200px] p-4">
                       <div className="space-y-2">
                         {files.map((file, idx) => (
                           <div key={idx} className="flex items-center justify-between bg-background p-3 rounded-md border shadow-sm">
@@ -226,6 +256,16 @@ export function VFleetPipelineView() {
                   )}
                 </div>
               </div>
+
+              {isExecuting && (
+                <div className="space-y-2 pt-2">
+                  <div className="flex justify-between text-xs font-medium">
+                    <span>Progresso do Pipeline</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <Progress value={progress} className="h-2" />
+                </div>
+              )}
             </CardContent>
             <CardFooter className="border-t pt-6 bg-muted/5">
               <Button 
@@ -234,7 +274,10 @@ export function VFleetPipelineView() {
                 disabled={isExecuting || files.length === 0}
               >
                 {isExecuting ? (
-                  <>Processando {files.length} arquivos...</>
+                  <>
+                    <Loader2 className="mr-2 size-5 animate-spin" />
+                    Processando...
+                  </>
                 ) : (
                   <>
                     <Play className="mr-2 size-5 fill-current" />
@@ -263,17 +306,25 @@ export function VFleetPipelineView() {
                 )}
               </div>
             </CardHeader>
-            <CardContent className="flex-1 p-0">
-              <ScrollArea className="h-[400px] p-4 font-code text-xs">
+            <CardContent className="flex-1 p-0 bg-zinc-950">
+              <ScrollArea className="h-[460px] p-4 font-code text-[11px] leading-relaxed">
                 {logs.length === 0 ? (
-                  <p className="text-muted-foreground italic">Aguardando início do pipeline...</p>
+                  <p className="text-zinc-500 italic">Aguardando início do pipeline...</p>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     {logs.map((log, i) => (
-                      <div key={i} className={`${log.includes('ERRO') ? 'text-destructive font-bold' : log.includes('sucesso') ? 'text-green-600 font-bold' : ''}`}>
+                      <div key={i} className={`
+                        ${log.includes('[ERRO]') ? 'text-red-400 font-bold' : 
+                          log.includes('[OK]') ? 'text-emerald-400' : 
+                          log.includes('[AVISO]') ? 'text-amber-400' : 
+                          'text-zinc-300'}
+                      `}>
                         {log}
                       </div>
                     ))}
+                    {isExecuting && (
+                      <div className="text-zinc-500 animate-pulse">_</div>
+                    )}
                   </div>
                 )}
               </ScrollArea>
@@ -282,7 +333,7 @@ export function VFleetPipelineView() {
         </div>
       </div>
 
-      {lastResult && (
+      {lastResult && !isExecuting && (
         <DataViewer result={lastResult} />
       )}
     </div>

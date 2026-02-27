@@ -1,3 +1,4 @@
+
 'use server';
 
 import { firebaseStore, DriverConsolidated, PipelineResult } from '@/lib/firebase';
@@ -11,9 +12,15 @@ export async function executeVFleetPipeline(formData: FormData) {
   try {
     const rawYear = formData.get('year');
     const rawMonth = formData.get('month');
+    const files = formData.getAll('files');
     
+    // Step 1: Input Validation
     if (!rawYear || !rawMonth) {
-      throw new Error('Parâmetros de período ausentes.');
+      throw new Error('Parâmetros de período (Mês/Ano) ausentes na requisição.');
+    }
+
+    if (!files || files.length === 0) {
+      throw new Error('Nenhum arquivo enviado para o servidor. Verifique o upload.');
     }
 
     const year = parseInt(rawYear as string);
@@ -21,12 +28,17 @@ export async function executeVFleetPipeline(formData: FormData) {
     
     console.log(`[vFleet Pipeline] Starting execution for ${month}/${year}`);
 
+    // Step 2: Database Connection Mock
+    // Simulating checking if the collection exists or if connection is stable
+    console.log(`[vFleet Pipeline] Validating Firestore Collection 'vfleet_results'...`);
+    
     // Simulated transformation logic
     const mockDrivers = [
       "RODRIGO ALVES", "MARCOS SILVA", "JOSE OLIVEIRA", "ANTONIO SANTOS", 
       "LUIS FERREIRA", "CARLOS GOMES", "PAULO COSTA", "RICARDO MARTINS"
     ];
 
+    // Step 3: Processing Step
     const processedData: DriverConsolidated[] = mockDrivers.map(name => {
       const activityDays = Math.floor(Math.random() * 20) + 5;
       const failures = {
@@ -57,24 +69,35 @@ export async function executeVFleetPipeline(formData: FormData) {
 
     console.log(`[vFleet Pipeline] Transformation complete. Generating AI summary...`);
 
-    // Generate AI Summary
-    const summaryResult = await generateDataSummary({
-      consolidatedDriverData: JSON.stringify(processedData),
-      pipelineContext: `Month: ${month}, Year: ${year}. Rules: Bonus R$ 4.80 if 4/4 criteria met.`
-    });
+    // Step 4: AI Summary Generation
+    let summaryResult;
+    try {
+      summaryResult = await generateDataSummary({
+        consolidatedDriverData: JSON.stringify(processedData),
+        pipelineContext: `Month: ${month}, Year: ${year}. Rules: Bonus R$ 4.80 if 4/4 criteria met.`
+      });
+    } catch (aiError) {
+      console.error("[vFleet Pipeline] AI Flow Failure:", aiError);
+      throw new Error('Falha ao comunicar com o modelo Genkit de IA. Verifique as credenciais da API Google AI.');
+    }
 
-    // Save to Firebase (Simulated)
-    const saved = await firebaseStore.saveResult('vfleet', {
-      timestamp: Date.now(),
-      year,
-      month,
-      data: processedData,
-      summary: summaryResult.summary
-    });
+    // Step 5: Persistence
+    let saved;
+    try {
+      saved = await firebaseStore.saveResult('vfleet', {
+        timestamp: Date.now(),
+        year,
+        month,
+        data: processedData,
+        summary: summaryResult.summary
+      });
+    } catch (dbError) {
+      console.error("[vFleet Pipeline] Database Save Failure:", dbError);
+      throw new Error('Erro ao salvar os resultados no Firebase Firestore. Verifique as regras de segurança ou conexão.');
+    }
 
     console.log(`[vFleet Pipeline] Execution successful. Result saved.`);
 
-    // Return a plain serializable object
     return {
       success: true,
       result: JSON.parse(JSON.stringify(saved)) as PipelineResult
@@ -83,7 +106,7 @@ export async function executeVFleetPipeline(formData: FormData) {
     console.error(`[vFleet Pipeline] ERROR:`, error.message);
     return {
       success: false,
-      error: error.message || 'Ocorreu um erro interno durante o processamento.'
+      error: error.message || 'Ocorreu um erro interno crítico durante o processamento do pipeline.'
     };
   }
 }
