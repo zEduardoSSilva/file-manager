@@ -10,6 +10,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const rawMonth = formData.get('month');
     const files = formData.getAll('files') as File[];
     
+    console.log(`[SERVER] Recebida requisição para ${pipelineType}. Arquivos: ${files.length}`);
+
     if (!rawYear || !rawMonth) {
       throw new Error('Parâmetros de período (Mês/Ano) ausentes.');
     }
@@ -21,146 +23,72 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
     
-    console.log(`[${pipelineType}] Iniciando processamento de ${month}/${year}`);
-
-    // Simulação de processamento baseada no tipo de pipeline
-    await new Promise(r => setTimeout(r, 1500));
+    // Simulação de processamento pesado
+    await new Promise(r => setTimeout(r, 2000));
 
     let processedDrivers: DriverConsolidated[] = [];
     let processedHelpers: DriverConsolidated[] = [];
     let absenteismoData: AbsenteismoData[] = [];
 
+    // Lógica simplificada de retorno para o protótipo
     if (pipelineType === 'ponto') {
-      // Lógica de Ponto (Motorista R$ 3.20 | Ajudante R$ 4.80)
-      const mockNames = ["RODRIGO ALVES", "MARCOS SILVA", "JOSE OLIVEIRA", "ANTONIO SANTOS"];
-      
-      processedDrivers = mockNames.map(name => {
-        const activeDays = 22;
-        const fullMarkingsDays = Math.floor(Math.random() * 5) + 17; // 17 a 22 dias
-        const bonusMarks = fullMarkingsDays * 1.60;
-        const bonusCrit = fullMarkingsDays * 1.60; // Mock: todos os critérios ok se 4 marcações ok
-        return {
-          'ID': 'M' + Math.floor(Math.random() * 1000),
-          'Motorista': name,
-          'Empresa': 'Logistics Pro',
-          'Dias com Atividade': activeDays,
-          'Dias Bonif. Ponto (4/4)': fullMarkingsDays,
-          'Percentual de Desempenho (%)': parseFloat(((fullMarkingsDays / activeDays) * 100).toFixed(2)),
-          'Total Bônus Marcações': bonusMarks,
-          'Total Bônus Critérios': bonusCrit,
-          'Total Bonificação (R$)': bonusMarks + bonusCrit,
-          'Total Ajustes Manuais': Math.floor(Math.random() * 3),
-        };
-      });
-
-      processedHelpers = mockNames.map(name => {
-        const activeDays = 22;
-        const fullMarkingsDays = Math.floor(Math.random() * 4) + 18;
-        const bonusMarks = fullMarkingsDays * 2.40;
-        const bonusCrit = fullMarkingsDays * 2.40;
-        return {
-          'ID': 'A' + Math.floor(Math.random() * 1000),
-          'Ajudante': name + " (Ajudante)",
-          'Empresa': 'Logistics Pro',
-          'Dias com Atividade': activeDays,
-          'Dias Bonif. Ponto (4/4)': fullMarkingsDays,
-          'Percentual de Desempenho (%)': parseFloat(((fullMarkingsDays / activeDays) * 100).toFixed(2)),
-          'Total Bônus Marcações': bonusMarks,
-          'Total Bônus Critérios': bonusCrit,
-          'Total Bonificação (R$)': bonusMarks + bonusCrit,
-          'Total Ajustes Manuais': 0,
-        };
-      });
-
-      // Lógica de Absenteísmo - Corrigido sintaxe de concatenação
-      absenteismoData = [
-        ...mockNames.map(n => ({ n, g: 'Motorista' as const })), 
-        ...mockNames.map(n => ({ n: n + " (Ajudante)", g: 'Ajudante' as const }))
-      ].map(item => {
-        const total = 26; // Dias úteis
-        const presences = Math.floor(Math.random() * 4) + 23;
-        const perc = parseFloat(((presences / total) * 100).toFixed(2));
-        let incentive = 0;
-        if (perc >= 100) incentive = 50;
-        else if (perc >= 90) incentive = 40;
-        else if (perc >= 75) incentive = 25;
-
-        return {
-          ID: 'ID-' + Math.floor(Math.random() * 999),
-          Nome: item.n,
-          Grupo: item.g,
-          Total_Dias: total,
-          Presencas: presences,
-          Faltas: total - presences,
-          Percentual: perc,
-          Valor_Incentivo: incentive
-        };
-      });
-
+      const mockNames = ["RODRIGO ALVES", "MARCOS SILVA", "JOSE OLIVEIRA"];
+      processedDrivers = mockNames.map(name => ({
+        'ID': 'M' + Math.floor(Math.random() * 1000),
+        'Motorista': name,
+        'Dias com Atividade': 22,
+        'Dias Bonif. Ponto (4/4)': 20,
+        'Percentual de Desempenho (%)': 90.9,
+        'Total Bonificação (R$)': 64.00,
+        'Total Ajustes Manuais': 1
+      }));
+      absenteismoData = mockNames.map(name => ({
+        ID: 'ID-' + Math.floor(Math.random() * 999),
+        Nome: name,
+        Grupo: 'Motorista' as const,
+        Total_Dias: 26,
+        Presencas: 25,
+        Faltas: 1,
+        Percentual: 96.15,
+        Valor_Incentivo: 40.00
+      }));
     } else if (pipelineType === 'performaxxi') {
-      const mockNames = ["RODRIGO ALVES", "MARCOS SILVA", "JOSE OLIVEIRA", "ANTONIO SANTOS"];
-      processedDrivers = mockNames.map(name => {
-        const activeDays = 15;
-        const maxBonusDays = 12;
-        const perf = parseFloat(((maxBonusDays / activeDays) * 100).toFixed(2));
-        return {
-          'Motorista': name,
-          'Empresa': 'Performaxxi Log',
-          'Dias com Atividade': activeDays,
-          'Dias Bonif. Máxima (4/4)': maxBonusDays,
-          'Percentual de Desempenho (%)': perf,
-          'Total Bonificação (R$)': maxBonusDays * 8.00,
-          'Total Critérios Cumpridos': maxBonusDays * 4 + (activeDays - maxBonusDays) * 2,
-          'Falhas Raio': Math.floor(Math.random() * 2),
-          'Falhas SLA': Math.floor(Math.random() * 1),
-          'Falhas Tempo': 0,
-          'Falhas Sequência': Math.floor(Math.random() * 3),
-        };
-      });
-
-      processedHelpers = mockNames.map(name => ({
-        'Ajudante': name + " (Ajudante)",
-        'Empresa': 'Performaxxi Log',
+      processedDrivers = [{
+        'Motorista': "CARLOS SILVA",
+        'Empresa': 'Logistics Pro',
         'Dias com Atividade': 15,
         'Dias Bonif. Máxima (4/4)': 12,
         'Percentual de Desempenho (%)': 80.0,
-        'Total Bonificação (R$)': 12 * 7.20,
-        'Total Critérios Cumpridos': 48,
+        'Total Bonificação (R$)': 96.00,
         'Falhas Raio': 1,
         'Falhas SLA': 1,
         'Falhas Tempo': 0,
-        'Falhas Sequência': 1,
-      }));
-
+        'Falhas Sequência': 1
+      }];
     } else {
-      const mockDrivers = ["CARLOS GOMES", "PAULO COSTA", "RICARDO MARTINS"];
-      processedDrivers = mockDrivers.map(name => {
-        const activityDays = 20;
-        const bonifiedDays = 17;
-        return {
-          'Motorista': name,
-          'Dias com Atividade': activityDays,
-          'Dias Bonif. Máxima (4/4)': bonifiedDays,
-          'Percentual de Desempenho (%)': 85,
-          'Total Bonificação (R$)': bonifiedDays * 4.80,
-          'Falhas Curva Brusca': 1,
-          'Falhas Banguela': 0,
-          'Falhas Ociosidade': 2,
-          'Falhas Exc. Velocidade': 0,
-        };
-      });
+      processedDrivers = [{
+        'Motorista': "RICARDO GOMES",
+        'Dias com Atividade': 20,
+        'Dias Bonif. Máxima (4/4)': 18,
+        'Percentual de Desempenho (%)': 90.0,
+        'Total Bonificação (R$)': 86.40,
+        'Falhas Curva Brusca': 0,
+        'Falhas Banguela': 0,
+        'Falhas Ociosidade': 1,
+        'Falhas Exc. Velocidade': 1
+      }];
     }
 
-    // Geração de Resumo via Genkit
-    let summaryText = "Resumo gerado automaticamente.";
+    // IA Summary
+    let summaryText = "Processamento concluído. Verifique os detalhes na tabela abaixo.";
     try {
       const summaryResult = await generateDataSummary({
-        consolidatedDriverData: JSON.stringify(processedDrivers.slice(0, 5)),
+        consolidatedDriverData: JSON.stringify(processedDrivers.slice(0, 3)),
         pipelineContext: `Pipeline: ${pipelineType}. Período: ${month}/${year}.`
       });
       summaryText = summaryResult.summary;
     } catch (e) {
-      console.warn("IA Summary failed, using fallback.");
+      console.error("[SERVER] IA Summary error:", e);
     }
 
     const saved = await firebaseStore.saveResult(pipelineType, {
@@ -179,7 +107,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       result: JSON.parse(JSON.stringify(saved)) as PipelineResult
     };
   } catch (error: any) {
-    return { success: false, error: error.message };
+    console.error("[SERVER] Pipeline Error:", error.message);
+    return { success: false, error: error.message || 'Erro interno no servidor.' };
   }
 }
 
