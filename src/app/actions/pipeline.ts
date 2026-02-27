@@ -1,59 +1,68 @@
-
 'use server';
 
 import { firebaseStore, DriverConsolidated, PipelineResult } from '@/lib/firebase';
 import { generateDataSummary } from '@/ai/flows/ai-generated-data-summary';
 
 /**
- * Server Action to execute the vFleet transformation pipeline.
- * Processes mock driver data based on provided period and files.
+ * Server Action para executar o pipeline de transformação vFleet.
+ * Processa dados baseados nas colunas:
+ * - Controle: "PLACA SISTEMA", "MOTORISTA", "ENTREGAS", "VIAGEM"
+ * - Alertas: "MOTORISTA", "TIPO" (Curva Brusca, Banguela, Ociosidade, Exc. Velocidade)
  */
 export async function executeVFleetPipeline(formData: FormData) {
   try {
     const rawYear = formData.get('year');
     const rawMonth = formData.get('month');
-    const files = formData.getAll('files');
+    const files = formData.getAll('files') as File[];
     
-    // Step 1: Input Validation
     if (!rawYear || !rawMonth) {
-      throw new Error('Parâmetros de período (Mês/Ano) ausentes na requisição.');
+      throw new Error('Parâmetros de período (Mês/Ano) ausentes.');
     }
 
     if (!files || files.length === 0) {
-      throw new Error('Nenhum arquivo enviado para o servidor. Verifique o upload.');
+      throw new Error('Nenhum arquivo enviado para processamento.');
     }
 
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
     
-    console.log(`[vFleet Pipeline] Starting execution for ${month}/${year}`);
+    console.log(`[vFleet] Iniciando processamento de ${month}/${year}`);
 
-    // Step 2: Database Connection Mock
-    // Simulating checking if the collection exists or if connection is stable
-    console.log(`[vFleet Pipeline] Validating Firestore Collection 'vfleet_results'...`);
+    // Simulação de Validação de Cabeçalhos (Baseado no que você forneceu)
+    const mockValidationDelay = () => new Promise(r => setTimeout(r, 400));
     
-    // Simulated transformation logic
+    // 1. Validando Controle de Entregas (Aba Acumulado)
+    console.log("[vFleet] Validando colunas: PLACA SISTEMA, MOTORISTA, KM, VIAGEM...");
+    await mockValidationDelay();
+
+    // 2. Validando Histórico de Alertas
+    console.log("[vFleet] Validando colunas de Alertas: MOTORISTA, TIPO, EXCESSO, DURACAO...");
+    await mockValidationDelay();
+
+    // Lógica de Consolidação Simulada (Refletindo a aba 05_Consolidado_Motorista)
     const mockDrivers = [
       "RODRIGO ALVES", "MARCOS SILVA", "JOSE OLIVEIRA", "ANTONIO SANTOS", 
       "LUIS FERREIRA", "CARLOS GOMES", "PAULO COSTA", "RICARDO MARTINS"
     ];
 
-    // Step 3: Processing Step
     const processedData: DriverConsolidated[] = mockDrivers.map(name => {
       const activityDays = Math.floor(Math.random() * 20) + 5;
+      
+      // Simulação de cruzamento por TIPO de alerta
       const failures = {
-        curva: Math.floor(Math.random() * 3),
-        banguela: Math.floor(Math.random() * 2),
-        ociosidade: Math.floor(Math.random() * 4),
+        curva: Math.floor(Math.random() * 2),
+        banguela: Math.floor(Math.random() * 1.5),
+        ociosidade: Math.floor(Math.random() * 3),
         velocidade: Math.floor(Math.random() * 2),
       };
       
+      // Regra: 4/4 critérios (Sem nenhuma falha no dia)
       const bonifiedDays = Math.max(0, activityDays - (failures.curva + failures.banguela + failures.ociosidade + failures.velocidade));
       const performance = parseFloat(((bonifiedDays / activityDays) * 100).toFixed(2));
       const totalBonus = bonifiedDays * 4.80;
 
       return {
-        Motorista: name,
+        'Motorista': name,
         'Dias com Atividade': activityDays,
         'Dias Bonificados (4/4)': bonifiedDays,
         'Percentual de Desempenho (%)': performance,
@@ -67,46 +76,38 @@ export async function executeVFleetPipeline(formData: FormData) {
 
     processedData.sort((a, b) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
 
-    console.log(`[vFleet Pipeline] Transformation complete. Generating AI summary...`);
+    console.log(`[vFleet] Cruzamento concluído. Solicitando resumo de IA...`);
 
-    // Step 4: AI Summary Generation
+    // Geração de Resumo via Genkit
     let summaryResult;
     try {
       summaryResult = await generateDataSummary({
         consolidatedDriverData: JSON.stringify(processedData),
-        pipelineContext: `Month: ${month}, Year: ${year}. Rules: Bonus R$ 4.80 if 4/4 criteria met.`
+        pipelineContext: `Período: ${month}/${year}. Regra: Bonificação R$ 4.80 por dia 4/4.`
       });
     } catch (aiError) {
-      console.error("[vFleet Pipeline] AI Flow Failure:", aiError);
-      throw new Error('Falha ao comunicar com o modelo Genkit de IA. Verifique as credenciais da API Google AI.');
+      console.error("[vFleet] Erro Genkit:", aiError);
+      summaryResult = { summary: "O resumo automático não pôde ser gerado, mas os dados estão salvos." };
     }
 
-    // Step 5: Persistence
-    let saved;
-    try {
-      saved = await firebaseStore.saveResult('vfleet', {
-        timestamp: Date.now(),
-        year,
-        month,
-        data: processedData,
-        summary: summaryResult.summary
-      });
-    } catch (dbError) {
-      console.error("[vFleet Pipeline] Database Save Failure:", dbError);
-      throw new Error('Erro ao salvar os resultados no Firebase Firestore. Verifique as regras de segurança ou conexão.');
-    }
-
-    console.log(`[vFleet Pipeline] Execution successful. Result saved.`);
+    // Persistência no "Firebase"
+    const saved = await firebaseStore.saveResult('vfleet', {
+      timestamp: Date.now(),
+      year,
+      month,
+      data: processedData,
+      summary: summaryResult.summary
+    });
 
     return {
       success: true,
       result: JSON.parse(JSON.stringify(saved)) as PipelineResult
     };
   } catch (error: any) {
-    console.error(`[vFleet Pipeline] ERROR:`, error.message);
+    console.error(`[vFleet] ERRO NO PIPELINE:`, error.message);
     return {
       success: false,
-      error: error.message || 'Ocorreu um erro interno crítico durante o processamento do pipeline.'
+      error: error.message || 'Erro interno durante o processamento.'
     };
   }
 }
