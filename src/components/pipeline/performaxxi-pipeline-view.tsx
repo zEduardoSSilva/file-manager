@@ -9,7 +9,8 @@ import {
   FileCode,
   Files,
   Loader2,
-  Zap
+  Zap,
+  Download
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -22,6 +23,7 @@ import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
+import { downloadMultipleSheets } from "@/lib/excel-utils"
 
 export function PerformaxxiPipelineView() {
   const [year, setYear] = React.useState(2026)
@@ -49,12 +51,12 @@ export function PerformaxxiPipelineView() {
     }
   }
 
-  const runPipeline = async () => {
+  const runPipeline = async (downloadOnly = false) => {
     if (files.length === 0) return;
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog("Iniciando Pipeline PERFORMAXXI ÚNICO...")
+    addLog(`Iniciando Pipeline PERFORMAXXI ÚNICO${downloadOnly ? ' (MODO TESTE)' : ''}...`)
 
     try {
       addLog("Conectando ao Firebase Studio...", "info")
@@ -75,8 +77,21 @@ export function PerformaxxiPipelineView() {
       if (response.success) {
         setLastResult(response.result as PipelineResult)
         setProgress(100)
-        addLog("Processamento Performaxxi concluído com sucesso.", "success")
-        toast({ title: "Concluído", description: "Dados Performaxxi processados." });
+        
+        if (downloadOnly) {
+          addLog("Gerando Excel detalhado (Motoristas/Ajudantes)...", "success")
+          downloadMultipleSheets([
+            { data: response.result.data, name: '05_Consolidado_Motorista' },
+            { data: response.result.helpersData || [], name: '07_Consolidado_Ajudante' }
+          ], `Teste_Performaxxi_${month}_${year}`)
+        } else {
+          addLog("Processamento Performaxxi concluído com sucesso.", "success")
+        }
+
+        toast({ 
+          title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
+          description: downloadOnly ? "O Excel de teste foi baixado." : "Dados Performaxxi processados." 
+        });
       } else {
         throw new Error(response.error)
       }
@@ -158,8 +173,20 @@ export function PerformaxxiPipelineView() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="bg-muted/5 border-t pt-6">
-              <Button className="w-full h-12 text-base font-semibold bg-accent hover:bg-accent/90 text-accent-foreground" onClick={runPipeline} disabled={isExecuting || files.length === 0}>
+            <CardFooter className="bg-muted/5 border-t pt-6 flex flex-col sm:flex-row gap-3">
+              <Button 
+                variant="outline" 
+                className="flex-1 border-accent/30 text-accent hover:bg-accent/5" 
+                onClick={() => runPipeline(true)} 
+                disabled={isExecuting || files.length === 0}
+              >
+                <Download className="mr-2 size-4" /> Baixar Excel (Teste)
+              </Button>
+              <Button 
+                className="flex-[2] h-12 text-base font-semibold bg-accent hover:bg-accent/90 text-accent-foreground shadow-sm" 
+                onClick={() => runPipeline(false)} 
+                disabled={isExecuting || files.length === 0}
+              >
                 {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Analisando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise Performaxxi</>}
               </Button>
             </CardFooter>
@@ -173,7 +200,7 @@ export function PerformaxxiPipelineView() {
                  <FileCode className="size-3" /> Monitor de Execução
                </span>
             </div>
-            <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed">
+            <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <span className="text-muted-foreground italic">Pronto para processar dados Performaxxi.</span>
               ) : (

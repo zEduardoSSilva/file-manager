@@ -9,7 +9,8 @@ import {
   FileCode,
   Files,
   Loader2,
-  Truck
+  Truck,
+  Download
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -22,6 +23,7 @@ import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
+import { downloadExcel } from "@/lib/excel-utils"
 
 export function VFleetPipelineView() {
   const [year, setYear] = React.useState(2026)
@@ -49,12 +51,12 @@ export function VFleetPipelineView() {
     }
   }
 
-  const runPipeline = async () => {
+  const runPipeline = async (downloadOnly = false) => {
     if (files.length === 0) return;
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog("Iniciando Pipeline VFLEET PILOT...")
+    addLog(`Iniciando Pipeline VFLEET PILOT${downloadOnly ? ' (MODO TESTE)' : ''}...`)
 
     try {
       addLog("Conectando ao Firebase Studio...", "info")
@@ -75,8 +77,18 @@ export function VFleetPipelineView() {
       if (response.success) {
         setLastResult(response.result as PipelineResult)
         setProgress(100)
-        addLog("Transformação vFleet concluída e salva no Firebase.", "success")
-        toast({ title: "Concluído", description: "Dados vFleet processados com sucesso." });
+        
+        if (downloadOnly) {
+          addLog("Gerando Excel para download local...", "success")
+          downloadExcel(response.result.data, `Teste_vFleet_${month}_${year}`)
+        } else {
+          addLog("Transformação vFleet concluída e salva no Firebase.", "success")
+        }
+        
+        toast({ 
+          title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
+          description: downloadOnly ? "O Excel de teste foi baixado." : "Dados vFleet processados com sucesso." 
+        });
       } else {
         throw new Error(response.error)
       }
@@ -158,8 +170,20 @@ export function VFleetPipelineView() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="bg-muted/5 border-t pt-6">
-              <Button className="w-full h-12 text-base font-semibold" onClick={runPipeline} disabled={isExecuting || files.length === 0}>
+            <CardFooter className="bg-muted/5 border-t pt-6 flex flex-col sm:flex-row gap-3">
+              <Button 
+                variant="outline" 
+                className="flex-1 border-primary/30 text-primary hover:bg-primary/5" 
+                onClick={() => runPipeline(true)} 
+                disabled={isExecuting || files.length === 0}
+              >
+                <Download className="mr-2 size-4" /> Baixar Excel (Teste)
+              </Button>
+              <Button 
+                className="flex-[2] h-12 text-base font-semibold" 
+                onClick={() => runPipeline(false)} 
+                disabled={isExecuting || files.length === 0}
+              >
                 {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Iniciar Transformação</>}
               </Button>
             </CardFooter>

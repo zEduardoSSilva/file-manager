@@ -26,7 +26,8 @@ import {
   ChevronRight,
   User,
   Zap,
-  Clock
+  Clock,
+  FileStack
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -38,6 +39,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
     { id: 'vfleet', name: 'vFleet Pilot', icon: Truck },
     { id: 'performaxxi', name: 'Performaxxi', icon: Zap },
     { id: 'ponto', name: 'Ponto e Absenteísmo', icon: Clock },
+    { id: 'consolidador', name: 'Consolidador Final', icon: FileStack },
   ]
 
   return (
