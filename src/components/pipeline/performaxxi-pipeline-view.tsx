@@ -74,15 +74,16 @@ export function PerformaxxiPipelineView() {
 
       const response = await executePipeline(formData, 'performaxxi')
       
-      if (response.success) {
-        setLastResult(response.result as PipelineResult)
+      if (response.success && response.result) {
+        const result = response.result;
+        setLastResult(result)
         setProgress(100)
         
         if (downloadOnly) {
           addLog("Gerando Excel detalhado (Motoristas/Ajudantes)...", "success")
           downloadMultipleSheets([
-            { data: response.result.data, name: '05_Consolidado_Motorista' },
-            { data: response.result.helpersData || [], name: '07_Consolidado_Ajudante' }
+            { data: result.data, name: '05_Consolidado_Motorista' },
+            { data: result.helpersData || [], name: '07_Consolidado_Ajudante' }
           ], `Teste_Performaxxi_${month}_${year}`)
         } else {
           addLog("Processamento Performaxxi concluído com sucesso.", "success")
@@ -93,7 +94,7 @@ export function PerformaxxiPipelineView() {
           description: downloadOnly ? "O Excel de teste foi baixado." : "Dados Performaxxi processados." 
         });
       } else {
-        throw new Error(response.error)
+        throw new Error(response.success === false ? response.error : 'Erro desconhecido')
       }
     } catch (error: any) {
       addLog(`FALHA: ${error.message}`, "error")

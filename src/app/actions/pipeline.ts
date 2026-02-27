@@ -4,7 +4,11 @@
 import { firebaseStore, DriverConsolidated, PipelineResult, AbsenteismoData } from '@/lib/firebase';
 import { generateDataSummary } from '@/ai/flows/ai-generated-data-summary';
 
-export async function executePipeline(formData: FormData, pipelineType: 'vfleet' | 'performaxxi' | 'ponto') {
+export type PipelineResponse = 
+  | { success: true; result: PipelineResult }
+  | { success: false; error: string };
+
+export async function executePipeline(formData: FormData, pipelineType: 'vfleet' | 'performaxxi' | 'ponto'): Promise<PipelineResponse> {
   try {
     const rawYear = formData.get('year');
     const rawMonth = formData.get('month');
@@ -54,6 +58,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       }));
     } else if (pipelineType === 'performaxxi') {
       processedDrivers = [{
+        'ID': 'M123',
         'Motorista': "CARLOS SILVA",
         'Empresa': 'Logistics Pro',
         'Dias com Atividade': 15,
@@ -67,6 +72,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       }];
     } else {
       processedDrivers = [{
+        'ID': 'M999',
         'Motorista': "RICARDO GOMES",
         'Dias com Atividade': 20,
         'Dias Bonif. Máxima (4/4)': 18,

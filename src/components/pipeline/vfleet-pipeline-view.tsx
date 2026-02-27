@@ -74,13 +74,14 @@ export function VFleetPipelineView() {
 
       const response = await executePipeline(formData, 'vfleet')
       
-      if (response.success) {
-        setLastResult(response.result as PipelineResult)
+      if (response.success && response.result) {
+        const result = response.result;
+        setLastResult(result)
         setProgress(100)
         
         if (downloadOnly) {
           addLog("Gerando Excel para download local...", "success")
-          downloadExcel(response.result.data, `Teste_vFleet_${month}_${year}`)
+          downloadExcel(result.data, `Teste_vFleet_${month}_${year}`)
         } else {
           addLog("Transformação vFleet concluída e salva no Firebase.", "success")
         }
@@ -90,7 +91,7 @@ export function VFleetPipelineView() {
           description: downloadOnly ? "O Excel de teste foi baixado." : "Dados vFleet processados com sucesso." 
         });
       } else {
-        throw new Error(response.error)
+        throw new Error(response.success === false ? response.error : 'Erro desconhecido');
       }
     } catch (error: any) {
       addLog(`FALHA NO PROCESSAMENTO: ${error.message}`, "error")
@@ -197,7 +198,7 @@ export function VFleetPipelineView() {
                  <FileCode className="size-3" /> Terminal de Eventos
                </span>
             </div>
-            <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed">
+            <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <span className="text-muted-foreground italic">Sistema pronto para execução.</span>
               ) : (
