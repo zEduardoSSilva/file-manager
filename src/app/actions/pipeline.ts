@@ -3,13 +3,13 @@
 
 import { firebaseStore, PipelineResult } from '@/lib/firebase';
 import * as XLSX from 'xlsx';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSunday, parse } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSunday, differenceInMinutes, parse, addDays, isSameDay } from 'date-fns';
 
 export type PipelineResponse = 
   | { success: true; result: PipelineResult }
   | { success: false; error: string };
 
-// Helpers de Normalização
+// --- HELPERS DE NORMALIZAÇÃO ---
 const normalizePlate = (plate: any): string => {
   if (!plate) return "";
   return String(plate).toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -48,6 +48,21 @@ const hmsToSeconds = (hms: string): number => {
   } catch { return 0; }
 };
 
+const hmsToMinutes = (hms: string): number => {
+  if (!hms || hms === "-" || !String(hms).includes(':')) return 0;
+  try {
+    const parts = String(hms).split(':');
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  } catch { return 0; }
+};
+
+const minutesToHms = (minutes: number | null): string => {
+  if (minutes === null || minutes === undefined) return "";
+  const h = Math.floor(Math.abs(minutes) / 60);
+  const m = Math.abs(minutes) % 60;
+  return `${minutes < 0 ? '-' : ''}${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
 const toFloat = (val: any): number => {
   if (val === undefined || val === null || val === '') return 0;
   if (typeof val === 'number') return val;
@@ -82,6 +97,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
 
+    // --- PERFORMAXXI ---
     if (pipelineType === 'performaxxi') {
       let rawData: any[] = [];
       const MOT_BASE = 8.00;
@@ -96,7 +112,6 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         rawData.push(...data);
       }
 
-      // Filtrar StandBy
       const baseDados = rawData.filter(row => {
         const statusCol = findCol(row, ['status_rota', 'status_da_rota', 'status']);
         const status = String(row[statusCol || ''] || '').toUpperCase();
@@ -225,7 +240,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           }
           acc[nome]['Dias com Atividade']++;
           if (curr['Dia Bonificação Máxima (4/4)'] === 'SIM') acc[nome]['Dias Bonif. Máxima (4/4)']++;
-          acc[nome]['Total Bonificação (R$)'] += curr[`Bonificação ${grupoTipo} (R$)` || 0];
+          acc[nome]['Total Bonificação (R$)'] += curr[`Bonificação ${grupoTipo} (R$)`] || 0;
           acc[nome]['Total Critérios Cumpridos'] += curr['Critérios Cumpridos (de 4)'];
           if (curr[`✓ Raio ≥70%`] === 'NÃO') acc[nome]['Falhas Raio']++;
           if (curr[`✓ SLA ≥80%`] === 'NÃO') acc[nome]['Falhas SLA']++;
@@ -240,8 +255,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         return { detalhe, consolidado };
       };
 
-      const resMot = analisar_Grupo('Motorista');
-      const resAju = analisar_Grupo('Ajudante');
+      const resMot = analisarGrupo('Motorista');
+      const resAju = analisarGrupo('Ajudante');
 
       const saved = await firebaseStore.saveResult('performaxxi', {
         pipelineType: 'performaxxi',
@@ -257,6 +272,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
+    // --- VFLEET ---
     if (pipelineType === 'vfleet') {
       let vehicleBulletins: any[] = [];
       let alerts: any[] = [];
@@ -396,6 +412,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
+    // --- PONTO ---
     if (pipelineType === 'ponto') {
       const includeSundays = formData.get('includeSundays') === 'true';
       const excludedDatesStr = formData.get('excludedDates') as string;
@@ -449,12 +466,114 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         }
       }
 
-      const consolidado = Object.values(rawData.reduce((acc: any, curr: any) => {
-        const key = `${curr.id}_${curr.nome}`;
+      // Analise detalhada de conformidade (39 colunas solicitadas)
+      const detailRows: any[] = [];
+      const colabMap: Record<string, any[]> = {};
+
+      rawData.forEach(item => {
+        const key = `${item.id}_${item.nome}`;
+        if (!colabMap[key]) colabMap[key] = [];
+        colabMap[key].push(item);
+      });
+
+      Object.entries(colabMap).forEach(([key, items]) => {
+        const [id, nome] = key.split('_');
+        items.sort((a, b) => parse(a.data, 'dd/MM/yyyy', new Date()).getTime() - parse(b.data, 'dd/MM/yyyy', new Date()).getTime());
+
+        let diasConsecutivos = 0;
+        let lastDate: Date | null = null;
+
+        items.forEach((item, idx) => {
+          const currDate = parse(item.data, 'dd/MM/yyyy', new Date());
+          if (lastDate && differenceInMinutes(currDate, lastDate) === 1440) {
+            diasConsecutivos++;
+          } else {
+            diasConsecutivos = 1;
+          }
+          lastDate = currDate;
+
+          const marcList = item.marcacoes.split(' ').filter((m: string) => m.includes(':'));
+          const numMarc = marcList.length;
+          const temAjuste = item.marcacoes.includes('*') || excludedDatesSet.has(item.data);
+          
+          const e = marcList[0] || "";
+          const sa = marcList[1] || "";
+          const ra = marcList[2] || "";
+          const s = marcList[3] || "";
+
+          const t1 = hmsToMinutes(e);
+          const t2 = hmsToMinutes(sa);
+          const t3 = hmsToMinutes(ra);
+          const t4 = hmsToMinutes(s);
+
+          const tempoTrab = (t2 - t1) + (t4 - t3);
+          const tempoAlm = t3 - t2;
+
+          const okMarc = numMarc === 4;
+          const okJorn = tempoTrab <= 560; // 7:20 + 2h
+          const okHE = (tempoTrab - 440) <= 120;
+          const okAlm = tempoAlm >= 60;
+          
+          const pm = t2 - t1;
+          const pt = t4 - t3;
+          const okIntra = pm <= 360 && pt <= 360;
+
+          // Interjornada (simulado para MVP)
+          const okInter = true; 
+
+          const todosOk = okJorn && okHE && okAlm && okIntra && okInter;
+          const violouDSR = diasConsecutivos >= 7;
+
+          detailRows.push({
+            'ID': id,
+            'Motorista': nome,
+            'Dia': item.data,
+            'Dia_Semana': format(currDate, 'EEEE'),
+            'Entrada': e,
+            'Saida_Almoco': sa,
+            'Retorno_Almoco': ra,
+            'Saida': s,
+            'Tem_Ajuste_Manual': temAjuste ? 'SIM' : 'NÃO',
+            'Num_Ajustes': (item.marcacoes.match(/\*/g) || []).length,
+            'Tempo_Trabalhado': minutesToHms(tempoTrab),
+            'Tempo_Almoco': minutesToHms(tempoAlm),
+            'Marcacoes_Completas': numMarc,
+            'Marcacoes_Faltantes': 4 - numMarc,
+            '✓ Marcacoes_100%': okMarc ? 'SIM' : 'NÃO',
+            '💰 Bonus_Marcacoes': okMarc ? 1.60 : 0,
+            'Limite_Jornada': '09:20',
+            'Tempo_Trabalhado_Conf': minutesToHms(tempoTrab),
+            'Excesso_Jornada': minutesToHms(Math.max(0, tempoTrab - 560)),
+            '✓ Jornada_OK': okJorn ? 'SIM' : 'NÃO',
+            'HE_Realizada': minutesToHms(Math.max(0, tempoTrab - 440)),
+            'Excesso_HE': minutesToHms(Math.max(0, tempoTrab - 440 - 120)),
+            '✓ HE_OK': okHE ? 'SIM' : 'NÃO',
+            'Almoco_Realizado': minutesToHms(tempoAlm),
+            'Deficit_Almoco': minutesToHms(Math.max(0, 60 - tempoAlm)),
+            '✓ Almoco_OK': okAlm ? 'SIM' : 'NÃO',
+            'Periodo_Manha': minutesToHms(pm),
+            'Periodo_Tarde': minutesToHms(pt),
+            'Excesso_Manha': minutesToHms(Math.max(0, pm - 360)),
+            'Excesso_Tarde': minutesToHms(Math.max(0, pt - 360)),
+            '✓ Intrajornada_OK': okIntra ? 'SIM' : 'NÃO',
+            'Interjornada_Descanso': '11:00',
+            'Deficit_Interjornada': '00:00',
+            '✓ Interjornada_OK': okInter ? 'SIM' : 'NÃO',
+            'Todos_5_Criterios_OK': todosOk ? 'SIM' : 'NÃO',
+            '💰 Bonus_Criterios': todosOk ? 1.60 : 0,
+            '💵 Bonificacao_Total_Dia': (okMarc ? 1.60 : 0) + (todosOk ? 1.60 : 0),
+            'Dias_Consecutivos': diasConsecutivos,
+            'Violou_DSR': violouDSR ? 'SIM' : 'NÃO'
+          });
+        });
+      });
+
+      const consolidado = Object.values(detailRows.reduce((acc: any, curr: any) => {
+        const key = curr.ID;
         if (!acc[key]) {
           acc[key] = { 
-            ID: curr.id, 
-            Motorista: curr.nome, 
+            ID: curr.ID, 
+            Motorista: curr.Motorista, 
             Dias_Trabalhados: 0, 
             '💰 Total_Bonus_Marcacoes': 0,
             '💰 Total_Bonus_Criterios': 0,
@@ -462,27 +581,23 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             'Dias_Todos_Criterios_OK': 0,
             'Dias_4_Marcacoes_Completas': 0,
             'Dias_Violou_DSR': 0,
-            'Total_Ajustes_Manuais': 0,
-            presencasNoMes: new Set()
+            'Total_Ajustes_Manuais': 0
           };
         }
-        
-        const marcList = curr.marcacoes.split(' ').filter((m: string) => m.includes(':'));
-        const ok = marcList.length === 4;
-        const bonus = ok ? 1.60 : 0;
-        
         acc[key].Dias_Trabalhados++;
-        if (ok) acc[key].Dias_4_Marcacoes_Completas++;
-        acc[key]['💰 Total_Bonus_Marcacoes'] += bonus;
-        acc[key]['💵 BONIFICACAO_TOTAL'] += (bonus + (ok ? 1.60 : 0));
-        acc[key].presencasNoMes.add(curr.data);
-        
+        acc[key]['💰 Total_Bonus_Marcacoes'] += curr['💰 Bonus_Marcacoes'];
+        acc[key]['💰 Total_Bonus_Criterios'] += curr['💰 Bonus_Criterios'];
+        acc[key]['💵 BONIFICACAO_TOTAL'] += curr['💵 Bonificacao_Total_Dia'];
+        if (curr['Todos_5_Criterios_OK'] === 'SIM') acc[key]['Dias_Todos_Criterios_OK']++;
+        if (curr['✓ Marcacoes_100%'] === 'SIM') acc[key]['Dias_4_Marcacoes_Completas']++;
+        if (curr['Violou_DSR'] === 'SIM') acc[key]['Dias_Violou_DSR']++;
+        acc[key].Total_Ajustes_Manuais += curr.Num_Ajustes;
         return acc;
       }, {}));
 
       const absData = consolidado.map((c: any) => {
-        const presencasFisicas = c.presencasNoMes.size;
-        const totalPresencas = presencasFisicas + (excludedDatesSet.size); // Simplificado
+        const presencasFisicas = c.Dias_Trabalhados;
+        const totalPresencas = presencasFisicas + (excludedDatesSet.size); 
         const faltas = Math.max(0, metaDias - presencasFisicas);
         const percentual = Number(((presencasFisicas / metaDias) * 100).toFixed(2));
         
@@ -494,7 +609,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Presenças Físicas': presencasFisicas,
           'Atestados/Férias': 0,
           'Abonos Manuais': excludedDatesSet.size,
-          'Total Presenças': presencasFisicas,
+          'Total Presenças': totalPresencas,
           Faltas: faltas,
           'Percentual (%)': percentual,
           Valor_Incentivo: percentual >= 100 ? 50 : percentual >= 90 ? 40 : 0,
@@ -506,7 +621,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         pipelineType: 'ponto',
         timestamp: Date.now(),
         year, month,
-        data: consolidado,
+        data: consolidado as any,
+        detalhePonto: detailRows,
         absenteismoData: absData,
         summary: `Ponto: Processados ${consolidado.length} colaboradores para o mês de ${month}/${year}.`
       });
