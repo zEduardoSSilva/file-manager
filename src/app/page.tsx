@@ -92,7 +92,7 @@ export default function Home() {
                   </div>
                   <div className="text-left">
                     <p className="font-semibold">Parâmetros de Sistema</p>
-                    <p className="text-sm text-muted-foreground">Configurar regras de bonificação (R$ 16,00).</p>
+                    <p className="text-sm text-muted-foreground">Configurar regras de bonificação (R$ 4.80).</p>
                   </div>
                   <ArrowUpRight className="ml-auto size-4 text-muted-foreground" />
                 </div>
