@@ -3,29 +3,21 @@
 // In a real app, you would initialize Firebase here.
 
 export interface DriverConsolidated {
-  ID?: string;
-  Motorista?: string;
-  Ajudante?: string;
-  Empresa?: string;
-  'Dias com Atividade': number;
-  'Dias Bonif. Máxima (4/4)'?: number;
-  'Percentual de Desempenho (%)': number;
-  'Total Bonificação (R$)': number;
-  'Total Critérios Cumpridos'?: number;
-  'Falhas Raio'?: number;
-  'Falhas SLA'?: number;
-  'Falhas Tempo'?: number;
-  'Falhas Sequência'?: number;
-  // vFleet legacy fields
-  'Falhas Curva Brusca'?: number;
-  'Falhas Banguela'?: number;
-  'Falhas Ociosidade'?: number;
-  'Falhas Exc. Velocidade'?: number;
-  // Ponto fields
-  'Dias Bonif. Ponto (4/4)'?: number;
-  'Total Bônus Marcações'?: number;
-  'Total Bônus Critérios'?: number;
-  'Total Ajustes Manuais'?: number;
+  'ID': string;
+  'Motorista'?: string;
+  'Ajudante'?: string;
+  'Empresa'?: string;
+  'Dias_Trabalhados': number;
+  '💰 Total_Bonus_Marcacoes': number;
+  '💰 Total_Bonus_Criterios': number;
+  '💵 BONIFICACAO_TOTAL': number;
+  'Dias_Todos_Criterios_OK': number;
+  'Dias_4_Marcacoes_Completas': number;
+  'Dias_Violou_DSR': number;
+  'Total_Ajustes_Manuais': number;
+  // Legacy fields for mapping
+  'Dias com Atividade'?: number;
+  'Percentual de Desempenho (%)'?: number;
 }
 
 export interface AbsenteismoData {
