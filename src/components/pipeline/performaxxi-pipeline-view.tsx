@@ -205,7 +205,7 @@ export function PerformaxxiPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel Unificado
+                <Download className="mr-2 size-4" /> Exportar Excel
               </Button>
               <Button 
                 className="flex-[2] h-12 text-base font-semibold bg-accent hover:bg-accent/90 text-accent-foreground shadow-sm" 
@@ -231,7 +231,7 @@ export function PerformaxxiPipelineView() {
                   <p>Aguardando relatórios do Performaxxi.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
                     <strong>Sugestão:</strong><br/>
-                    • RelatorioAnaliticoRotaPedidos.xlsx
+                    • RelatorioAnaliticoRotaPedidos
                   </div>
                 </div>
               ) : (

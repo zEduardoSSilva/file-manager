@@ -190,7 +190,7 @@ export function VFleetPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-primary">
-                    <span>Processando Telemetria</span>
+                    <span>Processando com Firebase</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -204,14 +204,14 @@ export function VFleetPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel Analítico
+                <Download className="mr-2 size-4" /> Exportar Excel
               </Button>
               <Button 
                 className="flex-[2] h-12 text-base font-semibold shadow-md" 
                 onClick={() => runPipeline(false)} 
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise vFleet</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise vFleet</>}
               </Button>
             </CardFooter>
           </Card>
@@ -230,8 +230,8 @@ export function VFleetPipelineView() {
                   <p>Aguardando arquivos do vFleet.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
                     <strong>Sugestão:</strong><br/>
-                    • Boletim_do_Veiculo_*.xlsx<br/>
-                    • Historico_Alertas_*.csv
+                    • Boletim_do_Veiculo
+                    • Historico_Alertas
                   </div>
                 </div>
               ) : (

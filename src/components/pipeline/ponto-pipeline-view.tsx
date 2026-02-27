@@ -278,7 +278,7 @@ export function PontoPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-indigo-600">
-                    <span>Processando Ponto</span>
+                    <span>Processando com Firebase</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -292,14 +292,14 @@ export function PontoPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel (Teste)
+                <Download className="mr-2 size-4" /> Exportar Excel
               </Button>
               <Button 
                 className="flex-[2] h-12 text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md" 
                 onClick={() => runPipeline(false)} 
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise de Ponto</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise de Ponto</>}
               </Button>
             </CardFooter>
           </Card>
@@ -318,7 +318,7 @@ export function PontoPipelineView() {
                   <p>Aguardando arquivos de Ponto.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
                     <strong>Sugestão:</strong><br/>
-                    • Ponto_Original_*-*.csv
+                    • Ponto_Original
                   </div>
                 </div>
               ) : (
