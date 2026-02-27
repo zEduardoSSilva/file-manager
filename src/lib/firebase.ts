@@ -1,6 +1,5 @@
 
 // Simulation of Firebase store to manage pipeline results
-// In a real app, you would initialize Firebase here.
 
 export interface DriverConsolidated {
   'ID': string;
@@ -15,7 +14,6 @@ export interface DriverConsolidated {
   'Dias_4_Marcacoes_Completas': number;
   'Dias_Violou_DSR': number;
   'Total_Ajustes_Manuais': number;
-  // Legacy fields for mapping
   'Dias com Atividade'?: number;
   'Percentual de Desempenho (%)'?: number;
 }
@@ -40,6 +38,7 @@ export interface PipelineResult {
   data: DriverConsolidated[];
   helpersData?: DriverConsolidated[];
   absenteismoData?: AbsenteismoData[];
+  detalhePonto?: any[]; // Campo para armazenar o dia a dia
   summary?: string;
 }
 

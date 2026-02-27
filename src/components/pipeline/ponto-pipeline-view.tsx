@@ -56,16 +56,15 @@ export function PontoPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline PONTO E ABSENTEÍSMO${downloadOnly ? ' (MODO TESTE)' : ''}...`)
+    addLog(`Iniciando Pipeline PONTO E ABSENTEÍSMO...`)
 
     try {
-      addLog("Conectando ao Firebase Studio...", "info")
+      addLog("Lendo múltiplos arquivos de Ponto...", "info")
       await new Promise(r => setTimeout(r, 400))
       setProgress(15)
       
-      addLog("Filtrando linhas de cabeçalho e abreviações de dias da semana.", "info")
-      addLog("Contabilizando apenas dias com marcações de ponto ativas.", "info")
-      addLog("Regra: R$ 3,20 (Motorista) / R$ 4,80 (Ajudante) por dia de trabalho.", "info")
+      addLog("Aplicando Score de deduplicação (estilo Python)...", "info")
+      addLog("Capturando abonos, férias e atestados para absenteísmo.", "info")
       
       setProgress(40)
       const formData = new FormData()
@@ -81,8 +80,9 @@ export function PontoPipelineView() {
         setProgress(100)
 
         if (downloadOnly) {
-          addLog("Gerando Excel Consolidado (Motoristas + Ajudantes)...", "success")
+          addLog("Gerando Excel com 03_Detalhe e 04_Consolidado...", "success")
           downloadMultipleSheets([
+            { data: result.detalhePonto || [], name: '03_Detalhe_Ponto' },
             { data: result.data, name: '04_Consolidado' },
             { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
           ], `Ponto_Consolidado_${month}_${year}`)
@@ -116,7 +116,7 @@ export function PontoPipelineView() {
                 Configuração de Ponto
               </CardTitle>
               <CardDescription>
-                Consolidação de Jornada e Absenteísmo (Visão Unificada)
+                Consolidação de Jornada e Absenteísmo (Deduplicação por Score)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -135,7 +135,7 @@ export function PontoPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold">CSVs Ponto_Original ({files.length})</Label>
+                  <Label className="text-base font-semibold">Arquivos de Ponto ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
                     <Upload className="mr-2 size-4" /> Selecionar Lote
                   </Button>
@@ -146,7 +146,7 @@ export function PontoPipelineView() {
                   {files.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                       <Files className="size-10 mb-2 opacity-20" />
-                      <p className="text-sm">Anexe os arquivos CSV de Ponto Original.</p>
+                      <p className="text-sm">Anexe os arquivos Excel de Ponto.</p>
                     </div>
                   ) : (
                     <ScrollArea className="h-[150px] p-4">
@@ -182,7 +182,7 @@ export function PontoPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel (04_Consolidado)
+                <Download className="mr-2 size-4" /> Baixar Excel (Teste)
               </Button>
               <Button 
                 className="flex-[2] h-12 text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md" 

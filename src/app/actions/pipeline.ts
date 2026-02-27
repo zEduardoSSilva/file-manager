@@ -26,11 +26,15 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
     
-    let processedDrivers: DriverConsolidated[] = [];
-    let absenteismoData: AbsenteismoData[] = [];
+    // Mapa para consolidar dados: ID -> Data -> Melhor Registro
+    const rawDataMap: Record<string, { 
+      id: string, 
+      nome: string, 
+      days: Record<string, any> 
+    }> = {};
 
-    // Blacklist de termos que NÃO são nomes de funcionários
     const blackList = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM', 'TOTAL', 'PAG', 'DATA', 'NOME', 'HRAP001', 'STATUS', 'SITUAÇÃO'];
+    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'CRÉDITO', 'BH', 'DEBITO', 'DÉBITO'];
 
     for (const file of files) {
       const buffer = await fileToBuffer(file);
@@ -38,135 +42,163 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
 
-      if (pipelineType === 'ponto') {
-        let currentId = '';
-        let currentName = '';
-        let driverStats: Record<string, any> = {};
+      let currentId = '';
+      let currentName = '';
 
-        jsonData.forEach((row) => {
-          const col0 = String(row[0] || '').trim();
-          const col1 = String(row[1] || '').trim();
-          const col2 = String(row[2] || '').trim();
+      jsonData.forEach((row) => {
+        const col0 = String(row[0] || '').trim();
+        const col1 = String(row[1] || '').trim();
+        const col2 = String(row[2] || '').trim();
 
-          // REGRA DE OURO: Identifica Colaborador REAL (ID em A e Nome em B)
-          // Critérios para ser um colaborador:
-          // 1. Col0 ser numérico
-          // 2. Col0 não conter barra (não é data)
-          // 3. Col1 não estar na blacklist
-          // 4. Col1 ter mais de 5 caracteres (evita códigos como "1" ou "404")
-          const isNumericId = /^\d+$/.test(col0);
-          const isNotDate = !col0.includes('/');
-          const hasRealName = col1.length > 5 && !blackList.includes(col1.toUpperCase().substring(0, 3));
-          const isNotInternalCode = isNumericId && parseInt(col0) > 10; // IDs de funcionários costumam ser maiores que códigos de situação
+        // Identificação de Colaborador (ID em A, Nome em B)
+        const isNumericId = /^\d+$/.test(col0);
+        const isNotDate = !col0.includes('/');
+        const hasRealName = col1.length > 5 && !blackList.includes(col1.toUpperCase().substring(0, 3));
+        const isNotInternalCode = isNumericId && parseInt(col0) > 10;
 
-          if (isNumericId && isNotDate && hasRealName && isNotInternalCode) {
-            currentId = col0;
-            currentName = col1;
-            if (!driverStats[currentId]) {
-              driverStats[currentId] = {
-                id: currentId,
-                nome: currentName,
-                diasRegistrados: 0,
-                diasTrab: 0,
-                bonusMarc: 0,
-                bonusCrit: 0,
-                criteriosOk: 0,
-                marcacoesOk: 0,
-                dsrViolado: 0,
-                ajustesManuais: 0,
-                presencas: 0
+        if (isNumericId && isNotDate && hasRealName && isNotInternalCode) {
+          currentId = col0;
+          currentName = col1;
+          if (!rawDataMap[currentId]) {
+            rawDataMap[currentId] = { id: currentId, nome: currentName, days: {} };
+          }
+        }
+
+        // Identificação de Linha de Data (Data em A)
+        if (currentId && col0.includes('/')) {
+          const parts = col0.split('/');
+          const rowMonth = parseInt(parts[1]);
+          // Filtra pelo mês selecionado
+          if (rowMonth === month) {
+            const timesStr = col2.trim();
+            const times = timesStr.split(/\s+/).filter(t => t.includes(':'));
+            const manualCount = (timesStr.match(/\*/g) || []).length;
+            
+            // Score para deduplicação (prioriza linhas com mais batidas)
+            const score = times.length;
+            
+            // Busca situação nas colunas D, E, F...
+            let situacao = '';
+            for (let i = 3; i < row.length; i++) {
+              const val = String(row[i] || '').trim();
+              if (val && !/^\d+$/.test(val) && !val.includes(':')) {
+                situacao = val.toUpperCase();
+                break;
+              }
+            }
+
+            const existingDay = rawDataMap[currentId].days[col0];
+            if (!existingDay || score >= (existingDay.score || 0)) {
+              rawDataMap[currentId].days[col0] = {
+                data: col0,
+                diaSemana: col1,
+                marcacoes: times,
+                numMarcacoes: times.length,
+                ajustes: manualCount,
+                situacao: situacao,
+                score: score,
+                isAjudante: currentName.toUpperCase().includes('AJUDANTE') || false // Simulação lógica se for ajudante
               };
             }
           }
-
-          // Identifica linha de Ponto Diário (Data DD/MMM em A)
-          // Se tiver '/' e tivermos um ID ativo, PROCESSA O DIA
-          if (currentId && col0.includes('/')) {
-            const stats = driverStats[currentId];
-            stats.diasRegistrados++; // Conta TODOS os 21 registros do Rafael
-            
-            const timesStr = col2.trim();
-            const times = timesStr.split(/\s+/).filter(t => t.includes(':'));
-            
-            // Se tem marcações, é dia trabalhado efetivo
-            if (times.length > 0) {
-              stats.diasTrab++;
-              stats.presencas++;
-
-              // Regra 4/4 Marcações (R$ 1,60)
-              const is44 = times.length >= 4;
-              if (is44) {
-                stats.marcacoesOk++;
-                stats.bonusMarc += 1.60;
-              }
-
-              // Conta ajustes manuais (asteriscos)
-              const manualCount = (timesStr.match(/\*/g) || []).length;
-              stats.ajustesManuais += manualCount;
-
-              // Regra Critérios OK (Simulação simplificada: 4/4 e zero ajustes manuais)
-              const isCriteriaOk = is44 && (manualCount === 0); 
-              if (isCriteriaOk) {
-                stats.criteriosOk++;
-                stats.bonusCrit += 1.60;
-              }
-            } else {
-              // Situações de abono/justificativa (BH, Débito BH, etc.)
-              // Analisamos as colunas de situação (D, E, F)
-              const situacao = String(row[4] || row[3] || '').toUpperCase();
-              const situacaoContemPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'CRÉDITO'].some(s => situacao.includes(s));
-              
-              if (situacaoContemPresenca) {
-                 stats.presencas++;
-              }
-            }
-          }
-        });
-
-        // Converte o objeto acumulado para a lista final
-        Object.values(driverStats).forEach((s: any) => {
-          if (s.diasRegistrados > 0) {
-            processedDrivers.push({
-              ID: s.id,
-              Motorista: s.nome,
-              Dias_Trabalhados: s.diasRegistrados, // Aqui agora deve vir os 21
-              '💰 Total_Bonus_Marcacoes': Number(s.bonusMarc.toFixed(2)),
-              '💰 Total_Bonus_Criterios': Number(s.bonusCrit.toFixed(2)),
-              '💵 BONIFICACAO_TOTAL': Number((s.bonusMarc + s.bonusCrit).toFixed(2)),
-              Dias_Todos_Criterios_OK: s.criteriosOk,
-              Dias_4_Marcacoes_Completas: s.marcacoesOk,
-              Dias_Violou_DSR: s.dsrViolado,
-              Total_Ajustes_Manuais: s.ajustesManuais,
-              'Dias com Atividade': s.diasTrab,
-              'Percentual de Desempenho (%)': Number(((s.criteriosOk / Math.max(1, s.diasRegistrados)) * 100).toFixed(1)) || 0
-            });
-
-            absenteismoData.push({
-              ID: s.id,
-              Nome: s.nome,
-              Grupo: 'Motorista',
-              Total_Dias: s.diasRegistrados,
-              Presencas: s.presencas,
-              Faltas: Math.max(0, s.diasRegistrados - s.presencas),
-              Percentual: Number(((s.presencas / Math.max(1, s.diasRegistrados)) * 100).toFixed(1)),
-              Valor_Incentivo: s.presencas >= 26 ? 50 : s.presencas >= 24 ? 40 : 0
-            });
-          }
-        });
-      }
+        }
+      });
     }
 
-    if (processedDrivers.length === 0) throw new Error('Não foi possível extrair dados. Verifique se o arquivo segue o formato de Apuração Colaborador.');
+    // Processamento Final (Consolidação)
+    const processedDrivers: DriverConsolidated[] = [];
+    const absenteismoData: AbsenteismoData[] = [];
+    const detalhePonto: any[] = [];
 
-    let summaryText = "Processamento concluído. Verifique os bônus e absenteísmo.";
-    try {
-      const summaryResult = await generateDataSummary({
-        consolidatedDriverData: JSON.stringify(processedDrivers.slice(0, 5)),
-        pipelineContext: `Ponto ${month}/${year}. Unificado.`
+    Object.values(rawDataMap).forEach(colab => {
+      let stats = {
+        diasRegistrados: 0,
+        marcacoesOk: 0,
+        criteriosOk: 0,
+        bonusMarc: 0,
+        bonusCrit: 0,
+        ajustesManuais: 0,
+        presencas: 0,
+        diasComAtividade: 0
+      };
+
+      // Define valores baseados no tipo (Motorista vs Ajudante)
+      // Nota: No seu script Python, o valor diário muda. Aqui simulamos Motorista por padrão.
+      const isAjudante = colab.nome.toUpperCase().includes('AJUDANTE');
+      const valMarc = isAjudante ? 2.40 : 1.60;
+      const valCrit = isAjudante ? 2.40 : 1.60;
+
+      Object.values(colab.days).forEach(day => {
+        stats.diasRegistrados++;
+        
+        const is44 = day.numMarcacoes >= 4;
+        const isPresencaJustificada = situacoesPresenca.some(s => day.situacao.includes(s));
+        const hasPhysicalActivity = day.numMarcacoes > 0;
+
+        if (hasPhysicalActivity) {
+          stats.diasComAtividade++;
+          stats.presencas++;
+          stats.ajustesManuais += day.ajustes;
+          
+          if (is44) {
+            stats.marcacoesOk++;
+            stats.bonusMarc += valMarc;
+          }
+
+          // 5 Critérios (Simulados como: 4/4 batidas + zero ajustes)
+          if (is44 && day.ajustes === 0) {
+            stats.criteriosOk++;
+            stats.bonusCrit += valCrit;
+          }
+        } else if (isPresencaJustificada) {
+          stats.presencas++;
+        }
+
+        detalhePonto.push({
+          ID: colab.id,
+          Nome: colab.nome,
+          Data: day.data,
+          Dia_Semana: day.diaSemana,
+          Batidas: day.marcacoes.join(' '),
+          Situacao: day.situacao,
+          Ajustes: day.ajustes,
+          '4_Marcacoes_OK': is44 ? 'SIM' : 'NÃO',
+          'Critérios_OK': (is44 && day.ajustes === 0) ? 'SIM' : 'NÃO'
+        });
       });
-      summaryText = summaryResult.summary;
-    } catch (e) {}
 
+      if (stats.diasRegistrados > 0) {
+        processedDrivers.push({
+          ID: colab.id,
+          Motorista: colab.nome,
+          Dias_Trabalhados: stats.diasRegistrados, // 21 registros
+          '💰 Total_Bonus_Marcacoes': Number(stats.bonusMarc.toFixed(2)),
+          '💰 Total_Bonus_Criterios': Number(stats.bonusCrit.toFixed(2)),
+          '💵 BONIFICACAO_TOTAL': Number((stats.bonusMarc + stats.bonusCrit).toFixed(2)),
+          Dias_Todos_Criterios_OK: stats.criteriosOk,
+          Dias_4_Marcacoes_Completas: stats.marcacoesOk,
+          Dias_Violou_DSR: 0, // Cálculo de DSR requer lógica de datas consecutivas
+          Total_Ajustes_Manuais: stats.ajustesManuais,
+          'Dias com Atividade': stats.diasComAtividade,
+          'Percentual de Desempenho (%)': Number(((stats.criteriosOk / Math.max(1, stats.diasRegistrados)) * 100).toFixed(1))
+        });
+
+        absenteismoData.push({
+          ID: colab.id,
+          Nome: colab.nome,
+          Grupo: isAjudante ? 'Ajudante' : 'Motorista',
+          Total_Dias: stats.diasRegistrados,
+          Presencas: stats.presencas,
+          Faltas: Math.max(0, stats.diasRegistrados - stats.presencas),
+          Percentual: Number(((stats.presencas / Math.max(1, stats.diasRegistrados)) * 100).toFixed(1)),
+          Valor_Incentivo: stats.presencas >= 26 ? 50 : stats.presencas >= 24 ? 40 : 0
+        });
+      }
+    });
+
+    if (processedDrivers.length === 0) throw new Error('Nenhum dado encontrado para o mês selecionado.');
+
+    // Salva no banco
     const saved = await firebaseStore.saveResult(pipelineType, {
       pipelineType,
       timestamp: Date.now(),
@@ -174,7 +206,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       month,
       data: processedDrivers,
       absenteismoData,
-      summary: summaryText
+      detalhePonto, // Nova chave para o detalhamento
+      summary: "Processamento concluído com sucesso."
     });
 
     return { success: true, result: JSON.parse(JSON.stringify(saved)) };
