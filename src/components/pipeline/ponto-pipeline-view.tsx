@@ -10,7 +10,8 @@ import {
   Files,
   Loader2,
   Clock,
-  CalendarCheck
+  CalendarCheck,
+  Download
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -23,6 +24,7 @@ import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
+import { downloadMultipleSheets } from "@/lib/excel-utils"
 
 export function PontoPipelineView() {
   const [year, setYear] = React.useState(2026)
@@ -50,12 +52,12 @@ export function PontoPipelineView() {
     }
   }
 
-  const runPipeline = async () => {
+  const runPipeline = async (downloadOnly = false) => {
     if (files.length === 0) return;
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog("Iniciando Pipeline PONTO E ABSENTEÍSMO...")
+    addLog(`Iniciando Pipeline PONTO E ABSENTEÍSMO${downloadOnly ? ' (MODO TESTE)' : ''}...`)
 
     try {
       addLog("Conectando ao Firebase Studio...", "info")
@@ -74,13 +76,28 @@ export function PontoPipelineView() {
 
       const response = await executePipeline(formData, 'ponto')
       
-      if (response.success) {
-        setLastResult(response.result as PipelineResult)
+      if (response.success && response.result) {
+        const result = response.result;
+        setLastResult(result)
         setProgress(100)
-        addLog("Processamento de Ponto concluído. Absenteísmo consolidado.", "success")
-        toast({ title: "Concluído", description: "Dados de Ponto e Absenteísmo processados." });
+
+        if (downloadOnly) {
+          addLog("Gerando Excel de Ponto e Absenteísmo...", "success")
+          downloadMultipleSheets([
+            { data: result.data, name: '04_Consolidado_Motorista' },
+            { data: result.helpersData || [], name: '08_Consolidado_Ajudante' },
+            { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
+          ], `Teste_Ponto_${month}_${year}`)
+        } else {
+          addLog("Processamento de Ponto concluído e salvo no Firebase.", "success")
+        }
+
+        toast({ 
+          title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
+          description: downloadOnly ? "O Excel de teste foi baixado." : "Dados de Ponto e Absenteísmo processados." 
+        });
       } else {
-        throw new Error(response.error)
+        throw new Error(response.success === false ? response.error : 'Erro desconhecido')
       }
     } catch (error: any) {
       addLog(`FALHA NO PONTO: ${error.message}`, "error")
@@ -160,8 +177,20 @@ export function PontoPipelineView() {
                 </div>
               )}
             </CardContent>
-            <CardFooter className="bg-muted/5 border-t pt-6">
-              <Button className="w-full h-12 text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white" onClick={runPipeline} disabled={isExecuting || files.length === 0}>
+            <CardFooter className="bg-muted/5 border-t pt-6 flex flex-col sm:flex-row gap-3">
+              <Button 
+                variant="outline" 
+                className="flex-1 border-indigo-200 text-indigo-600 hover:bg-indigo-50" 
+                onClick={() => runPipeline(true)} 
+                disabled={isExecuting || files.length === 0}
+              >
+                <Download className="mr-2 size-4" /> Baixar Excel (Teste)
+              </Button>
+              <Button 
+                className="flex-[2] h-12 text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md" 
+                onClick={() => runPipeline(false)} 
+                disabled={isExecuting || files.length === 0}
+              >
                 {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise de Ponto</>}
               </Button>
             </CardFooter>
@@ -175,7 +204,7 @@ export function PontoPipelineView() {
                  <FileCode className="size-3" /> Monitor de Ponto
                </span>
             </div>
-            <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed">
+            <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <span className="text-muted-foreground italic">Aguardando arquivos de ponto para iniciar.</span>
               ) : (
