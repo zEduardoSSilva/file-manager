@@ -2,7 +2,7 @@
 
 import { firebaseStore, DriverConsolidated, PipelineResult, AbsenteismoData } from '@/lib/firebase';
 import * as XLSX from 'xlsx';
-import { format, isSunday, parse } from 'date-fns';
+import { format, isSunday, parse, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
 
 export type PipelineResponse = 
   | { success: true; result: PipelineResult }
@@ -58,15 +58,33 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const excludedDates: string[] = rawExcludedDates ? JSON.parse(rawExcludedDates as string) : [];
     const includeSundays = rawIncludeSundays === 'true';
     
+    // 1. Geração da Agenda Oficial do Mês (Calendário Completo)
+    const startDate = startOfMonth(new Date(year, month - 1));
+    const endDate = endOfMonth(startDate);
+    const fullCalendar = eachDayOfInterval({ start: startDate, end: endDate });
+    
+    const agendaOficial = fullCalendar.filter(date => {
+      const dStr = format(date, 'dd/MM/yyyy');
+      const isExcl = excludedDates.includes(dStr);
+      const isSun = isSunday(date);
+      
+      if (isExcl) return false;
+      if (!includeSundays && isSun) return false;
+      
+      return true;
+    }).map(d => format(d, 'dd/MM/yyyy'));
+    
+    const totalWorkingDays = agendaOficial.length;
+
     const colabMap: Record<string, { 
       id: string, 
       nome: string, 
       days: Record<string, any> 
     }> = {};
 
-    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'PRESENÇA', 'AUXILIO', 'AUXÍLIO', 'FALTA ABONADA'];
+    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'PRESENÇA', 'AUXILIO', 'AUXÍLIO', 'FALTA ABONADA', 'ABONADA'];
 
-    // 1. Extração Bruta
+    // 2. Extração dos Arquivos
     for (const file of files) {
       const buffer = await fileToBuffer(file);
       const workbook = XLSX.read(buffer, { type: 'buffer' });
@@ -81,7 +99,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const col1 = String(row[1] || '').trim();
         const col2 = String(row[2] || '').trim();
 
-        // Identificação do Colaborador
+        // Identificação do Colaborador (ID numérico e Nome longo)
         if (/^\d+$/.test(col0) && !col0.includes('/') && col1.length > 5 && parseInt(col0) > 30) {
           currentId = col0;
           currentName = col1;
@@ -107,7 +125,6 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             }
 
             const existing = colabMap[currentId].days[dateStr];
-            // Score de deduplicação: prioriza o registro com mais batidas
             if (!existing || times.length >= (existing.score || 0)) {
               colabMap[currentId].days[dateStr] = {
                 data: dateStr,
@@ -123,28 +140,10 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       });
     }
 
-    // 2. Processamento
+    // 3. Processamento Final
     const detalhePonto: any[] = [];
     const consolidado: any[] = [];
     const absenteismo: AbsenteismoData[] = [];
-
-    // Datas únicas no mês para cálculo de dias úteis base (Denominador)
-    const allDatesInMonth = new Set<string>();
-    Object.values(colabMap).forEach(c => Object.keys(c.days).forEach(d => allDatesInMonth.add(d)));
-    
-    // Filtrar domingos e feriados (excluídos) da base de cálculo (Agenda Oficial do Mês)
-    const agendaOficial = Array.from(allDatesInMonth).filter(dStr => {
-      const date = parse(dStr, 'dd/MM/yyyy', new Date());
-      const isExcl = excludedDates.includes(dStr);
-      const isSun = isSunday(date);
-      
-      if (isExcl) return false;
-      if (!includeSundays && isSun) return false;
-      
-      return true;
-    });
-    
-    const totalWorkingDays = agendaOficial.length || 26;
 
     const MOT_VAL = 1.60;
     const AJU_VAL = 2.40;
@@ -173,16 +172,12 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       };
 
       let lastExit: number | null = null;
-      let consecutiveDays = 0;
 
+      // Primeiro, processar os dias que existem no arquivo
       sortedDates.forEach((dStr) => {
         const d = colab.days[dStr];
-        const dateObj = parse(dStr, 'dd/MM/yyyy', new Date());
-        const isExcl = excludedDates.includes(dStr);
-        const isSun = isSunday(dateObj);
         const estaNaAgenda = agendaOficial.includes(dStr);
 
-        // Lógica de trabalho (Horários)
         const e = h2m(d.marcacoes[0]);
         const sa = h2m(d.marcacoes[1]);
         const ra = h2m(d.marcacoes[2]);
@@ -221,7 +216,6 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const isPresencaJust = situacoesPresenca.some(sit => d.situacao.includes(sit));
         const hasPhysActivity = d.marcacoes.length > 0;
 
-        // Se o dia está na agenda oficial ou teve atividade física, processamos
         if (hasPhysActivity) {
           stats.presencasFisicas++;
           stats.bonusMarc += (marcOk ? valMarc : 0);
@@ -245,7 +239,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Saida_Almoco': d.marcacoes[1] || '',
           'Retorno_Almoco': d.marcacoes[2] || '',
           'Saida': d.marcacoes[3] || '',
-          'Tem_Ajuste_Manual': (d.ajustes > 0 || isExcl) ? 'SIM' : 'NÃO',
+          'Tem_Ajuste_Manual': (d.ajustes > 0 || excludedDates.includes(dStr)) ? 'SIM' : 'NÃO',
           'Num_Ajustes': d.ajustes,
           'Tempo_Trabalhado': m2h(tempoTrabalhado),
           'Tempo_Almoco': m2h(tempoAlmoco),
@@ -274,7 +268,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Todos_5_Criterios_OK': todosCritOk ? 'SIM' : 'NÃO',
           '💰 Bonus_Criterios': (todosCritOk ? valCrit : 0).toFixed(2),
           '💵 Bonificacao_Total_Dia': ((marcOk ? valMarc : 0) + (todosCritOk ? valCrit : 0)).toFixed(2),
-          'Dias_Consecutivos': 0, // Placeholder para lógica de DSR futura se necessário
+          'Dias_Consecutivos': 0,
           'Violou_DSR': 'NÃO'
         });
 
@@ -323,7 +317,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       data: consolidado,
       absenteismoData: absenteismo,
       detalhePonto,
-      summary: `Processamento concluído. ${consolidado.length} colaboradores analisados. Base de dias úteis (Denominador): ${totalWorkingDays}. Feriados/Abonos: ${excludedDates.length}.`
+      summary: `Processamento concluído. Denominador oficial: ${totalWorkingDays} dias úteis.`
     });
 
     return { success: true, result: JSON.parse(JSON.stringify(saved)) };
