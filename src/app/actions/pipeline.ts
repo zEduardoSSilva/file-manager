@@ -14,6 +14,21 @@ async function fileToBuffer(file: File): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
+// Helper para normalizar datas para o formato DD/MM/YYYY
+const normalizeDateStr = (dateStr: string, defaultYear: number): string => {
+  const clean = dateStr.trim();
+  if (!clean.includes('/')) return clean;
+  
+  const parts = clean.split('/');
+  const day = parts[0].padStart(2, '0');
+  const month = parts[1].padStart(2, '0');
+  let year = parts[2] ? parts[2] : String(defaultYear);
+  
+  if (year.length === 2) year = `20${year}`;
+  
+  return `${day}/${month}/${year}`;
+};
+
 export async function executePipeline(formData: FormData, pipelineType: 'vfleet' | 'performaxxi' | 'ponto'): Promise<PipelineResponse> {
   try {
     const rawYear = formData.get('year');
@@ -26,21 +41,21 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
     
-    // Mapa para consolidar dados: ID -> Data -> Melhor Registro
+    // Mapa para consolidar dados: ID -> Data Normalizada -> Melhor Registro
     const rawDataMap: Record<string, { 
       id: string, 
       nome: string, 
       days: Record<string, any> 
     }> = {};
 
-    const blackList = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM', 'TOTAL', 'PAG', 'DATA', 'NOME', 'HRAP001', 'STATUS', 'SITUAÇÃO'];
-    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'CRÉDITO', 'BH', 'DEBITO', 'DÉBITO'];
+    const blackList = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM', 'TOTAL', 'PAG', 'DATA', 'NOME', 'STATUS', 'SITUAÇÃO', 'HORA', 'DSR'];
+    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'CRÉDITO', 'BH', 'DEBITO', 'DÉBITO', 'PRESENÇA'];
 
     for (const file of files) {
       const buffer = await fileToBuffer(file);
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false }) as any[][];
 
       let currentId = '';
       let currentName = '';
@@ -51,10 +66,11 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const col2 = String(row[2] || '').trim();
 
         // Identificação de Colaborador (ID em A, Nome em B)
+        // Critérios baseados no script Python: numérico, sem barra, nome longo
         const isNumericId = /^\d+$/.test(col0);
         const isNotDate = !col0.includes('/');
         const hasRealName = col1.length > 5 && !blackList.includes(col1.toUpperCase().substring(0, 3));
-        const isNotInternalCode = isNumericId && parseInt(col0) > 10;
+        const isNotInternalCode = isNumericId && parseInt(col0) > 30; // IDs de funcionários costumam ser maiores que códigos de dia ou internos
 
         if (isNumericId && isNotDate && hasRealName && isNotInternalCode) {
           currentId = col0;
@@ -64,12 +80,13 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           }
         }
 
-        // Identificação de Linha de Data (Data em A)
-        if (currentId && col0.includes('/')) {
-          const parts = col0.split('/');
-          const rowMonth = parseInt(parts[1]);
-          // Filtra pelo mês selecionado
+        // Identificação de Linha de Data (Data em A, formato DD/MM ou DD/MM/YYYY)
+        const dateMatch = col0.match(/^(\d{1,2})\/(\d{1,2})(\/\d{2,4})?$/);
+        if (currentId && dateMatch) {
+          const rowMonth = parseInt(dateMatch[2]);
+          
           if (rowMonth === month) {
+            const normalizedDate = normalizeDateStr(col0, year);
             const timesStr = col2.trim();
             const times = timesStr.split(/\s+/).filter(t => t.includes(':'));
             const manualCount = (timesStr.match(/\*/g) || []).length;
@@ -81,23 +98,24 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             let situacao = '';
             for (let i = 3; i < row.length; i++) {
               const val = String(row[i] || '').trim();
-              if (val && !/^\d+$/.test(val) && !val.includes(':')) {
+              if (val && !/^\d+$/.test(val) && !val.includes(':') && val.length > 2) {
                 situacao = val.toUpperCase();
                 break;
               }
             }
 
-            const existingDay = rawDataMap[currentId].days[col0];
+            const existingDay = rawDataMap[currentId].days[normalizedDate];
+            // Se não existe ou se o novo registro tem mais informação (score), atualiza
             if (!existingDay || score >= (existingDay.score || 0)) {
-              rawDataMap[currentId].days[col0] = {
-                data: col0,
+              rawDataMap[currentId].days[normalizedDate] = {
+                data: normalizedDate,
                 diaSemana: col1,
                 marcacoes: times,
                 numMarcacoes: times.length,
                 ajustes: manualCount,
                 situacao: situacao,
                 score: score,
-                isAjudante: currentName.toUpperCase().includes('AJUDANTE') || false // Simulação lógica se for ajudante
+                isAjudante: currentName.toUpperCase().includes('AJUDANTE') || false
               };
             }
           }
@@ -122,13 +140,19 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         diasComAtividade: 0
       };
 
-      // Define valores baseados no tipo (Motorista vs Ajudante)
-      // Nota: No seu script Python, o valor diário muda. Aqui simulamos Motorista por padrão.
       const isAjudante = colab.nome.toUpperCase().includes('AJUDANTE');
       const valMarc = isAjudante ? 2.40 : 1.60;
       const valCrit = isAjudante ? 2.40 : 1.60;
 
-      Object.values(colab.days).forEach(day => {
+      // Ordena as datas para o processamento e visualização correta
+      const sortedDates = Object.keys(colab.days).sort((a, b) => {
+        const [d1, m1, y1] = a.split('/').map(Number);
+        const [d2, m2, y2] = b.split('/').map(Number);
+        return new Date(y1, m1 - 1, d1).getTime() - new Date(y2, m2 - 1, d2).getTime();
+      });
+
+      sortedDates.forEach(dateKey => {
+        const day = colab.days[dateKey];
         stats.diasRegistrados++;
         
         const is44 = day.numMarcacoes >= 4;
@@ -145,7 +169,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             stats.bonusMarc += valMarc;
           }
 
-          // 5 Critérios (Simulados como: 4/4 batidas + zero ajustes)
+          // 5 Critérios (Simulação baseada no script Python: 4 batidas + zero ajustes)
           if (is44 && day.ajustes === 0) {
             stats.criteriosOk++;
             stats.bonusCrit += valCrit;
@@ -171,13 +195,13 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         processedDrivers.push({
           ID: colab.id,
           Motorista: colab.nome,
-          Dias_Trabalhados: stats.diasRegistrados, // 21 registros
+          Dias_Trabalhados: stats.diasRegistrados,
           '💰 Total_Bonus_Marcacoes': Number(stats.bonusMarc.toFixed(2)),
           '💰 Total_Bonus_Criterios': Number(stats.bonusCrit.toFixed(2)),
           '💵 BONIFICACAO_TOTAL': Number((stats.bonusMarc + stats.bonusCrit).toFixed(2)),
           Dias_Todos_Criterios_OK: stats.criteriosOk,
           Dias_4_Marcacoes_Completas: stats.marcacoesOk,
-          Dias_Violou_DSR: 0, // Cálculo de DSR requer lógica de datas consecutivas
+          Dias_Violou_DSR: 0,
           Total_Ajustes_Manuais: stats.ajustesManuais,
           'Dias com Atividade': stats.diasComAtividade,
           'Percentual de Desempenho (%)': Number(((stats.criteriosOk / Math.max(1, stats.diasRegistrados)) * 100).toFixed(1))
@@ -196,9 +220,9 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       }
     });
 
-    if (processedDrivers.length === 0) throw new Error('Nenhum dado encontrado para o mês selecionado.');
+    if (processedDrivers.length === 0) throw new Error('Nenhum dado encontrado para o mês selecionado. Verifique se o ID do colaborador e as datas estão corretos no arquivo.');
 
-    // Salva no banco
+    // Salva no banco simulado
     const saved = await firebaseStore.saveResult(pipelineType, {
       pipelineType,
       timestamp: Date.now(),
@@ -206,12 +230,13 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       month,
       data: processedDrivers,
       absenteismoData,
-      detalhePonto, // Nova chave para o detalhamento
-      summary: "Processamento concluído com sucesso."
+      detalhePonto,
+      summary: `Processamento de Ponto concluído. Foram identificados ${processedDrivers.length} colaboradores.`
     });
 
     return { success: true, result: JSON.parse(JSON.stringify(saved)) };
   } catch (error: any) {
+    console.error('Erro no Pipeline:', error);
     return { success: false, error: error.message };
   }
 }
