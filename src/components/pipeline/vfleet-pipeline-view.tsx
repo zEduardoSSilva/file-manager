@@ -12,7 +12,8 @@ import {
   ChevronDown,
   Trash2,
   FileCode,
-  FileText
+  FileText,
+  Files
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -30,6 +31,7 @@ import { executeVFleetPipeline } from "@/app/actions/pipeline"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
+import { Badge } from "@/components/ui/badge"
 
 export function VFleetPipelineView() {
   const [year, setYear] = React.useState(2026)
@@ -46,7 +48,12 @@ export function VFleetPipelineView() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setFiles(Array.from(e.target.files))
+      const newFiles = Array.from(e.target.files)
+      setFiles(prev => [...prev, ...newFiles])
+      toast({
+        title: "Arquivos adicionados",
+        description: `${newFiles.length} novos arquivos foram incluídos na lista.`,
+      })
     }
   }
 
@@ -68,7 +75,7 @@ export function VFleetPipelineView() {
     try {
       addLog("Carregando arquivos de entrada...")
       await new Promise(r => setTimeout(r, 600))
-      addLog(`Processando ${files.length} arquivos...`)
+      addLog(`Processando ${files.length} arquivos simultaneamente...`)
       
       const formData = new FormData()
       formData.append('year', year.toString())
@@ -78,30 +85,32 @@ export function VFleetPipelineView() {
       const response = await executeVFleetPipeline(formData)
       
       if (response.success) {
-        addLog("Etapa 1: Atualizando motoristas no Boletim do Veículo...")
+        addLog("Etapa 1: Analisando arquivos de alertas...")
         await new Promise(r => setTimeout(r, 400))
-        addLog("Etapa 2: Gerando Boletim do Motorista...")
+        addLog("Etapa 2: Consolidando com controle de entregas...")
         await new Promise(r => setTimeout(r, 400))
-        addLog("Etapa 3: Consolidando alertas e corrigindo IDs...")
+        addLog("Etapa 3: Calculando bonificações (R$ 4.80/dia)...")
         await new Promise(r => setTimeout(r, 400))
-        addLog("Etapa 4: Executando análise de condução (4/4 critérios)...")
+        addLog("Etapa 4: Gerando relatório de desempenho final...")
         await new Promise(r => setTimeout(r, 600))
-        addLog("Exportando dados para o Firebase...")
+        addLog("Salvando resultados no Firebase...")
         
         setLastResult(response.result as PipelineResult)
         addLog("Pipeline concluído com sucesso!")
         
         toast({
           title: "Pipeline Finalizado",
-          description: "Os dados foram salvos no Firebase.",
+          description: "Os dados foram processados e salvos.",
         });
+      } else {
+        throw new Error(response.error)
       }
-    } catch (error) {
-      addLog("ERRO: Falha crítica na execução do pipeline.")
+    } catch (error: any) {
+      addLog(`ERRO: ${error.message || "Falha crítica na execução."}`)
       toast({
         variant: "destructive",
         title: "Erro na Execução",
-        description: "Ocorreu uma falha ao processar os arquivos.",
+        description: error.message || "Ocorreu uma falha ao processar os arquivos.",
       });
     } finally {
       setIsExecuting(false)
@@ -116,7 +125,7 @@ export function VFleetPipelineView() {
             <CardHeader>
               <CardTitle>Execução de Pipeline</CardTitle>
               <CardDescription>
-                Configure os parâmetros e adicione os arquivos base para o processamento.
+                Selecione todos os arquivos de alertas e o controle de entregas para iniciar.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -151,11 +160,25 @@ export function VFleetPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base">Arquivos de Entrada</Label>
-                  <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
-                    <Upload className="mr-2 size-4" />
-                    Adicionar Arquivos
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Label className="text-base">Arquivos de Entrada</Label>
+                    {files.length > 0 && (
+                      <Badge variant="secondary" className="font-mono">
+                        {files.length} arquivos
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    {files.length > 0 && (
+                      <Button variant="ghost" size="sm" onClick={() => setFiles([])} className="text-destructive hover:text-destructive">
+                        Limpar Tudo
+                      </Button>
+                    )}
+                    <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
+                      <Upload className="mr-2 size-4" />
+                      Adicionar Arquivos
+                    </Button>
+                  </div>
                   <input 
                     id="file-upload" 
                     type="file" 
@@ -166,26 +189,40 @@ export function VFleetPipelineView() {
                   />
                 </div>
 
-                <div className="border rounded-lg bg-muted/30 p-4">
+                <div className="border rounded-lg bg-muted/30 overflow-hidden">
                   {files.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                      <FileSpreadsheet className="size-12 mb-2 opacity-20" />
+                    <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                      <Files className="size-12 mb-2 opacity-20" />
                       <p>Nenhum arquivo selecionado</p>
+                      <p className="text-xs">Arraste arquivos ou use o botão acima</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {files.map((file, idx) => (
-                        <div key={idx} className="flex items-center justify-between bg-background p-2 rounded border">
-                          <div className="flex items-center gap-3">
-                            {file.name.endsWith('.csv') ? <FileText className="size-4 text-blue-500" /> : <FileSpreadsheet className="size-4 text-green-600" />}
-                            <span className="text-sm font-medium truncate max-w-[200px]">{file.name}</span>
+                    <ScrollArea className="h-[240px] p-4">
+                      <div className="space-y-2">
+                        {files.map((file, idx) => (
+                          <div key={idx} className="flex items-center justify-between bg-background p-3 rounded-md border shadow-sm">
+                            <div className="flex items-center gap-3 overflow-hidden">
+                              {file.name.endsWith('.csv') ? 
+                                <FileText className="size-4 text-blue-500 shrink-0" /> : 
+                                <FileSpreadsheet className="size-4 text-green-600 shrink-0" />
+                              }
+                              <div className="flex flex-col">
+                                <span className="text-sm font-medium truncate max-w-[300px]">{file.name}</span>
+                                <span className="text-[10px] text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
+                              </div>
+                            </div>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="size-8"
+                              onClick={() => setFiles(files.filter((_, i) => i !== idx))}
+                            >
+                              <Trash2 className="size-4 text-destructive" />
+                            </Button>
                           </div>
-                          <Button variant="ghost" size="icon" onClick={() => setFiles(files.filter((_, i) => i !== idx))}>
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
                   )}
                 </div>
               </div>
@@ -197,7 +234,7 @@ export function VFleetPipelineView() {
                 disabled={isExecuting || files.length === 0}
               >
                 {isExecuting ? (
-                  <>Executando Processamento...</>
+                  <>Processando {files.length} arquivos...</>
                 ) : (
                   <>
                     <Play className="mr-2 size-5 fill-current" />
