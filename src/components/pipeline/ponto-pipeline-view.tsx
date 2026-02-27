@@ -10,7 +10,6 @@ import {
   Files,
   Loader2,
   Clock,
-  CalendarCheck,
   Download
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -64,9 +63,9 @@ export function PontoPipelineView() {
       await new Promise(r => setTimeout(r, 400))
       setProgress(15)
       
-      addLog("Analisando Jornada, HE, Almoço, Inter e Intrajornada.", "info")
-      addLog("Regra: R$ 3,20 (Motorista) / R$ 4,80 (Ajudante) por dia.", "info")
-      addLog("Cálculo de Absenteísmo: Feriados e Domingos excluídos.", "info")
+      addLog("Filtrando linhas de cabeçalho e abreviações de dias da semana.", "info")
+      addLog("Contabilizando apenas dias com marcações de ponto ativas.", "info")
+      addLog("Regra: R$ 3,20 (Motorista) / R$ 4,80 (Ajudante) por dia de trabalho.", "info")
       
       setProgress(40)
       const formData = new FormData()
@@ -82,19 +81,18 @@ export function PontoPipelineView() {
         setProgress(100)
 
         if (downloadOnly) {
-          addLog("Gerando Excel de Ponto e Absenteísmo...", "success")
+          addLog("Gerando Excel Consolidado (Motoristas + Ajudantes)...", "success")
           downloadMultipleSheets([
-            { data: result.data, name: '04_Consolidado_Motorista' },
-            { data: result.helpersData || [], name: '08_Consolidado_Ajudante' },
+            { data: result.data, name: '04_Consolidado' },
             { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
-          ], `Teste_Ponto_${month}_${year}`)
+          ], `Ponto_Consolidado_${month}_${year}`)
         } else {
-          addLog("Processamento de Ponto concluído e salvo no Firebase.", "success")
+          addLog("Processamento concluído. Verifique o resultado abaixo.", "success")
         }
 
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel de teste foi baixado." : "Dados de Ponto e Absenteísmo processados." 
+          description: downloadOnly ? "O Excel consolidado foi baixado." : "Processamento finalizado." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido')
@@ -118,7 +116,7 @@ export function PontoPipelineView() {
                 Configuração de Ponto
               </CardTitle>
               <CardDescription>
-                Gestão de Jornada (Motorista/Ajudante) e Incentivo de Presença
+                Consolidação de Jornada e Absenteísmo (Visão Unificada)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -184,7 +182,7 @@ export function PontoPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel (Teste)
+                <Download className="mr-2 size-4" /> Baixar Excel (04_Consolidado)
               </Button>
               <Button 
                 className="flex-[2] h-12 text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md" 
@@ -206,7 +204,7 @@ export function PontoPipelineView() {
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
-                <span className="text-muted-foreground italic">Aguardando arquivos de ponto para iniciar.</span>
+                <span className="text-muted-foreground italic">Aguardando arquivos para iniciar.</span>
               ) : (
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (
