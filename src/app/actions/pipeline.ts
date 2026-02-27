@@ -15,26 +15,15 @@ const normalizePlate = (plate: any): string => {
   return String(plate).toUpperCase().replace(/[^A-Z0-9]/g, "");
 };
 
-const normalizeDateStr = (dateStr: string, defaultYear: number): string => {
-  const clean = String(dateStr).trim();
-  const match = clean.match(/^(\d{1,2})\/(\d{1,2})(\/\d{2,4})?$/);
-  if (!match) return clean;
-  
-  const day = match[1].padStart(2, '0');
-  const month = match[2].padStart(2, '0');
-  let year = match[3] ? match[3].replace('/', '') : String(defaultYear);
-  if (year.length === 2) year = `20${year}`;
-  
-  return `${day}/${month}/${year}`;
-};
-
 const excelSerialToDateStr = (serial: any, defaultYear: number): string => {
   if (typeof serial === 'number' && serial > 30000 && serial < 60000) {
     const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
     return format(date, 'dd/MM/yyyy');
   }
   if (serial instanceof Date) return format(serial, 'dd/MM/yyyy');
-  return normalizeDateStr(String(serial || ""), defaultYear);
+  const str = String(serial || "").trim();
+  if (str.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) return str;
+  return str;
 };
 
 const hmsToSeconds = (hms: string): number => {
@@ -107,8 +96,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       for (const file of files) {
         const buffer = await fileToBuffer(file);
         const workbook = XLSX.read(buffer, { type: 'buffer' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(sheet) as any[];
+        const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
         rawData.push(...data);
       }
 
@@ -118,9 +106,9 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         return status !== 'STANDBY';
       });
 
-      const analisarGrupo = (grupoTipo: 'Motorista' | 'Ajudante') => {
-        const colNomeCand = grupoTipo === 'Motorista' ? ['nome_motorista', 'motorista'] : ['nome_primeiro_ajudante', 'nome_segundo_ajudante', 'ajudante'];
-        const baseValor = grupoTipo === 'Motorista' ? MOT_BASE : AJU_BASE;
+      const analisarGrupo = (grupoTipo: 'MOTORISTA' | 'AJUDANTE') => {
+        const colNomeCand = grupoTipo === 'MOTORISTA' ? ['nome_motorista', 'motorista'] : ['nome_primeiro_ajudante', 'nome_segundo_ajudante', 'ajudante'];
+        const baseValor = grupoTipo === 'MOTORISTA' ? MOT_BASE : AJU_BASE;
         const valorPorCriterio = baseValor / CRITERIOS_TOTAL;
 
         const dailyMap: Record<string, any> = {};
@@ -140,7 +128,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           if (!dailyMap[key]) {
             dailyMap[key] = {
               Empresa: String(row[colEmpresa || ''] || 'N/A'),
-              Nome: nome,
+              Funcionario: nome,
+              Cargo: grupoTipo,
               Dia: dateStr,
               Total_Pedidos: 0,
               Raio_OK: 0,
@@ -191,8 +180,11 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           const cumpridos = (cRaio ? 1 : 0) + (cSla ? 1 : 0) + (cTempo ? 1 : 0) + (cSeq ? 1 : 0);
           const bonus = Number((cumpridos * valorPorCriterio).toFixed(2));
 
-          const item: any = {
+          // Retorno com a ordem exata solicitada
+          return {
             'Empresa': d.Empresa,
+            'Funcionario': d.Funcionario,
+            'Cargo': d.Cargo,
             'Dia': d.Dia,
             'Total de Pedidos': d.Total_Pedidos,
             'Peso Pedido Dia (Kg)': d.Peso_Total.toFixed(2),
@@ -200,33 +192,31 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             '% Devolvido Dia': d.Peso_Total > 0 ? ((d.Peso_Devolvido / d.Peso_Total) * 100).toFixed(2) : '0.00',
             'Pedidos Raio OK': d.Raio_OK,
             '% Raio': pRaio,
+            '✓ Raio ≥70.0%': cRaio ? 'SIM' : 'NÃO',
             'Pedidos SLA OK': d.SLA_OK,
             '% SLA': pSla,
+            '✓ SLA ≥80.0%': cSla ? 'SIM' : 'NÃO',
             'Pedidos Tempo OK': d.Tempo_OK,
             '% Tempo': pTempo,
+            '✓ Tempo ≥100.0%': cTempo ? 'SIM' : 'NÃO',
             'Pedidos Sequência OK': d.Seq_OK,
             '% Sequência': pSeq,
+            '✓ Sequência ≥0.0%': cSeq ? 'SIM' : 'NÃO',
             'Critérios Cumpridos (de 4)': cumpridos,
             'Critérios Falhados': 4 - cumpridos,
             'Dia Bonificação Máxima (4/4)': cumpridos === 4 ? 'SIM' : 'NÃO',
             '% Bonificação': (cumpridos / 4 * 100).toFixed(2),
+            'Bonificação Funcionario (R$)': bonus
           };
-          
-          item[grupoTipo] = d.Nome;
-          item[`✓ Raio ≥70%`] = cRaio ? 'SIM' : 'NÃO';
-          item[`✓ SLA ≥80%`] = cSla ? 'SIM' : 'NÃO';
-          item[`✓ Tempo ≥100%`] = cTempo ? 'SIM' : 'NÃO';
-          item[`✓ Sequência ≥0%`] = cSeq ? 'SIM' : 'NÃO';
-          item[`Bonificação ${grupoTipo} (R$)`] = bonus;
-
-          return item;
         });
 
         const consolidado = Object.values(detalhe.reduce((acc: any, curr: any) => {
-          const nome = curr[grupoTipo];
+          const nome = curr.Funcionario;
           if (!acc[nome]) {
             acc[nome] = {
               'Empresa': curr.Empresa,
+              'Funcionario': nome,
+              'Cargo': curr.Cargo,
               'Dias com Atividade': 0,
               'Dias Bonif. Máxima (4/4)': 0,
               'Total Bonificação (R$)': 0,
@@ -236,37 +226,48 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
               'Falhas Tempo': 0,
               'Falhas Sequência': 0
             };
-            acc[nome][grupoTipo] = nome;
           }
           acc[nome]['Dias com Atividade']++;
           if (curr['Dia Bonificação Máxima (4/4)'] === 'SIM') acc[nome]['Dias Bonif. Máxima (4/4)']++;
-          acc[nome]['Total Bonificação (R$)'] += curr[`Bonificação ${grupoTipo} (R$)`] || 0;
+          acc[nome]['Total Bonificação (R$)'] += curr['Bonificação Funcionario (R$)'] || 0;
           acc[nome]['Total Critérios Cumpridos'] += curr['Critérios Cumpridos (de 4)'];
-          if (curr[`✓ Raio ≥70%`] === 'NÃO') acc[nome]['Falhas Raio']++;
-          if (curr[`✓ SLA ≥80%`] === 'NÃO') acc[nome]['Falhas SLA']++;
-          if (curr[`✓ Tempo ≥100%`] === 'NÃO') acc[nome]['Falhas Tempo']++;
-          if (curr[`✓ Sequência ≥0%`] === 'NÃO') acc[nome]['Falhas Sequência']++;
+          if (curr['✓ Raio ≥70.0%'] === 'NÃO') acc[nome]['Falhas Raio']++;
+          if (curr['✓ SLA ≥80.0%'] === 'NÃO') acc[nome]['Falhas SLA']++;
+          if (curr['✓ Tempo ≥100.0%'] === 'NÃO') acc[nome]['Falhas Tempo']++;
+          if (curr['✓ Sequência ≥0.0%'] === 'NÃO') acc[nome]['Falhas Sequência']++;
           return acc;
         }, {})).map((m: any) => ({
-          ...m,
-          'Percentual de Desempenho (%)': Number(((m['Total Critérios Cumpridos'] / (m['Dias com Atividade'] * 4)) * 100).toFixed(2))
+          'Empresa': m.Empresa,
+          'Funcionario': m.Funcionario,
+          'Cargo': m.Cargo,
+          'Dias com Atividade': m['Dias com Atividade'],
+          'Dias Bonif. Máxima (4/4)': m['Dias Bonif. Máxima (4/4)'],
+          'Percentual de Desempenho (%)': Number(((m['Total Critérios Cumpridos'] / (m['Dias com Atividade'] * 4)) * 100).toFixed(2)),
+          'Total Bonificação (R$)': Number(m['Total Bonificação (R$)'].toFixed(2)),
+          'Total Critérios Cumpridos': m['Total Critérios Cumpridos'],
+          'Falhas Raio': m['Falhas Raio'],
+          'Falhas SLA': m['Falhas SLA'],
+          'Falhas Tempo': m['Falhas Tempo'],
+          'Falhas Sequência': m['Falhas Sequência']
         }));
 
         return { detalhe, consolidado };
       };
 
-      const resMot = analisarGrupo('Motorista');
-      const resAju = analisarGrupo('Ajudante');
+      const resMot = analisarGrupo('MOTORISTA');
+      const resAju = analisarGrupo('AJUDANTE');
+
+      // Unificação para salvar no Banco de Dados conforme pedido
+      const consolidadoUnificado = [...resMot.consolidado, ...resAju.consolidado];
+      const detalheUnificado = [...resMot.detalhe, ...resAju.detalhe];
 
       const saved = await firebaseStore.saveResult('performaxxi', {
         pipelineType: 'performaxxi',
         timestamp: Date.now(),
         year, month,
-        data: resMot.consolidado as any,
-        detalhePonto: resMot.detalhe,
-        helpersData: resAju.consolidado as any,
-        helpersDetail: resAju.detalhe,
-        summary: `Performaxxi: Analisados ${resMot.consolidado.length} motoristas e ${resAju.consolidado.length} ajudantes.`
+        data: consolidadoUnificado,
+        detalheGeral: detalheUnificado,
+        summary: `Performaxxi: Analisados ${consolidadoUnificado.length} colaboradores (Motoristas e Ajudantes).`
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
@@ -281,132 +282,67 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       for (const file of files) {
         const buffer = await fileToBuffer(file);
         const name = file.name.toUpperCase();
-
         if (name.includes('BOLETIM')) {
           const workbook = XLSX.read(buffer, { type: 'buffer' });
-          const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
-          vehicleBulletins.push(...data);
-        }
-        else if (name.includes('ALERTAS') || name.includes('HISTORICO')) {
+          vehicleBulletins.push(...XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]));
+        } else if (name.includes('ALERTAS') || name.includes('HISTORICO')) {
           const workbook = XLSX.read(buffer, { type: 'buffer' });
-          const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
-          alerts.push(...data);
+          alerts.push(...XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]));
         }
       }
 
-      if (vehicleBulletins.length === 0) throw new Error('Boletim do Veículo não encontrado.');
-
       const dailyAnalysis: Record<string, any> = {};
-
       vehicleBulletins.forEach(row => {
-        const placaCol = findCol(row, ['PLACA']);
-        const diaCol = findCol(row, ['DIA', 'DATA']);
-        const motCol = findCol(row, ['MOTORISTAS', 'MOTORISTA']);
-        const curvaCol = findCol(row, ['CURVA BRUSCA']);
-        const banguelaCol = findCol(row, ['BANGUELA']);
-        const paradoCol = findCol(row, ['PARADO LIGADO']);
-
-        const placa = normalizePlate(row[placaCol || '']);
-        const diaRaw = row[diaCol || ''];
+        const placa = normalizePlate(row[findCol(row, ['PLACA']) || '']);
+        const diaRaw = row[findCol(row, ['DIA', 'DATA']) || ''];
         if (!placa || !diaRaw) return;
-
         const dateStr = excelSerialToDateStr(diaRaw, year);
-        let motorista = String(row[motCol || ''] || '').split('-')[0].trim();
+        let motorista = String(row[findCol(row, ['MOTORISTAS', 'MOTORISTA']) || ''] || '').split('-')[0].trim();
         if (!motorista || motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO')) return;
-
         const key = `${motorista}_${dateStr}`;
-        if (!dailyAnalysis[key]) {
-          dailyAnalysis[key] = {
-            motorista,
-            dia: dateStr,
-            curvaBrusca: 0,
-            banguelaSegundos: 0,
-            ociosidadeSegundos: 0,
-            excessosVelocidade: 0
-          };
-        }
-
-        dailyAnalysis[key].curvaBrusca += parseInt(row[curvaCol || ''] || 0);
-        dailyAnalysis[key].banguelaSegundos += hmsToSeconds(row[banguelaCol || '']);
-        dailyAnalysis[key].ociosidadeSegundos += hmsToSeconds(row[paradoCol || '']);
+        if (!dailyAnalysis[key]) dailyAnalysis[key] = { motorista, dia: dateStr, curva: 0, banguela: 0, ociosidade: 0, velocidade: 0 };
+        dailyAnalysis[key].curva += parseInt(row[findCol(row, ['CURVA BRUSCA']) || ''] || 0);
+        dailyAnalysis[key].banguela += hmsToSeconds(row[findCol(row, ['BANGUELA']) || '']);
+        dailyAnalysis[key].ociosidade += hmsToSeconds(row[findCol(row, ['PARADO LIGADO']) || '']);
       });
 
       alerts.forEach(alert => {
-        const dataCol = findCol(alert, ['DATA', 'DIA']);
-        const motCol = findCol(alert, ['MOTORISTA']);
-        const tipoCol = findCol(alert, ['TIPO']);
-
-        const dataRaw = alert[dataCol || ''];
-        if (!dataRaw) return;
-
-        const dateStr = excelSerialToDateStr(dataRaw, year);
-        const motorista = String(alert[motCol || ''] || '').trim();
-
-        if (motorista && !motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO') && String(alert[tipoCol || '']).includes('VELOCIDADE')) {
-          const key = `${motorista}_${dateStr}`;
-          if (dailyAnalysis[key]) {
-            dailyAnalysis[key].excessosVelocidade++;
-          }
+        const dateStr = excelSerialToDateStr(alert[findCol(alert, ['DATA', 'DIA']) || ''], year);
+        const motorista = String(alert[findCol(alert, ['MOTORISTA']) || ''] || '').trim();
+        if (motorista && !motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO') && String(alert[findCol(alert, ['TIPO']) || '']).includes('VELOCIDADE')) {
+          if (dailyAnalysis[`${motorista}_${dateStr}`]) dailyAnalysis[`${motorista}_${dateStr}`].velocidade++;
         }
       });
 
       const detailRows = Object.values(dailyAnalysis).map(d => {
-        const condCurva = d.curvaBrusca === 0;
-        const condBanguela = d.banguelaSegundos === 0;
-        const condOciosidade = d.ociosidadeSegundos === 0;
-        const condVelocidade = d.excessosVelocidade === 0;
-        const todosOk = condCurva && condBanguela && condOciosidade && condVelocidade;
-
+        const todosOk = d.curva === 0 && d.banguela === 0 && d.ociosidade === 0 && d.velocidade === 0;
         return {
-          'Motorista': d.motorista,
-          'Dia': d.dia,
-          '✓ Curva 100%': condCurva ? 'SIM' : 'NÃO',
-          '✓ Banguela 100%': condBanguela ? 'SIM' : 'NÃO',
-          '✓ Ociosidade 100%': condOciosidade ? 'SIM' : 'NÃO',
-          '✓ Sem Excesso Velocidade': condVelocidade ? 'SIM' : 'NÃO',
+          'Motorista': d.motorista, 'Dia': d.dia,
+          '✓ Curva 100%': d.curva === 0 ? 'SIM' : 'NÃO',
+          '✓ Banguela 100%': d.banguela === 0 ? 'SIM' : 'NÃO',
+          '✓ Ociosidade 100%': d.ociosidade === 0 ? 'SIM' : 'NÃO',
+          '✓ Sem Excesso Velocidade': d.velocidade === 0 ? 'SIM' : 'NÃO',
           'Dia Bonificado': todosOk ? 'SIM' : 'NÃO',
-          'Bonificacao Conducao (R$)': todosOk ? VFLEET_BONUS : 0,
-          'Total Eventos Curva': d.curvaBrusca,
-          'Total Banguela (seg)': d.banguelaSegundos,
-          'Total Ociosidade (seg)': d.ociosidadeSegundos
+          'Bonificacao Conducao (R$)': todosOk ? VFLEET_BONUS : 0
         };
       });
 
-      const consolidado = Object.values(
-        detailRows.reduce((acc: any, curr: any) => {
-          if (!acc[curr.Motorista]) {
-            acc[curr.Motorista] = {
-              'Motorista': curr.Motorista,
-              'Dias com Atividade': 0,
-              'Dias Bonificados (4/4)': 0,
-              'Total Bonificação (R$)': 0,
-              'Falhas Curva Brusca': 0,
-              'Falhas Banguela': 0,
-              'Falhas Ociosidade': 0,
-              'Falhas Exc. Velocidade': 0
-            };
-          }
-          acc[curr.Motorista]['Dias com Atividade']++;
-          if (curr['Dia Bonificado'] === 'SIM') acc[curr.Motorista]['Dias Bonificados (4/4)']++;
-          acc[curr.Motorista]['Total Bonificação (R$)'] += curr['Bonificacao Conducao (R$)'];
-          if (curr['✓ Curva 100%'] === 'NÃO') acc[curr.Motorista]['Falhas Curva Brusca']++;
-          if (curr['✓ Banguela 100%'] === 'NÃO') acc[curr.Motorista]['Falhas Banguela']++;
-          if (curr['✓ Ociosidade 100%'] === 'NÃO') acc[curr.Motorista]['Falhas Ociosidade']++;
-          if (curr['✓ Sem Excesso Velocidade'] === 'NÃO') acc[curr.Motorista]['Falhas Exc. Velocidade']++;
-          return acc;
-        }, {})
-      ).map((m: any) => ({
-        ...m,
-        'Percentual de Desempenho (%)': Number(((m['Dias Bonificados (4/4)'] / m['Dias com Atividade']) * 100).toFixed(2))
-      }));
+      const consolidado = Object.values(detailRows.reduce((acc: any, curr: any) => {
+        if (!acc[curr.Motorista]) acc[curr.Motorista] = { 'Motorista': curr.Motorista, 'Dias com Atividade': 0, 'Dias Bonificados (4/4)': 0, 'Total Bonificação (R$)': 0, 'Falhas Curva Brusca': 0, 'Falhas Banguela': 0, 'Falhas Ociosidade': 0, 'Falhas Exc. Velocidade': 0 };
+        acc[curr.Motorista]['Dias com Atividade']++;
+        if (curr['Dia Bonificado'] === 'SIM') acc[curr.Motorista]['Dias Bonificados (4/4)']++;
+        acc[curr.Motorista]['Total Bonificação (R$)'] += curr['Bonificacao Conducao (R$)'];
+        if (curr['✓ Curva 100%'] === 'NÃO') acc[curr.Motorista]['Falhas Curva Brusca']++;
+        if (curr['✓ Banguela 100%'] === 'NÃO') acc[curr.Motorista]['Falhas Banguela']++;
+        if (curr['✓ Ociosidade 100%'] === 'NÃO') acc[curr.Motorista]['Falhas Ociosidade']++;
+        if (curr['✓ Sem Excesso Velocidade'] === 'NÃO') acc[curr.Motorista]['Falhas Exc. Velocidade']++;
+        return acc;
+      }, {})).map((m: any) => ({ ...m, 'Percentual de Desempenho (%)': Number(((m['Dias Bonificados (4/4)'] / m['Dias com Atividade']) * 100).toFixed(2)) }));
 
       const saved = await firebaseStore.saveResult('vfleet', {
-        pipelineType: 'vfleet',
-        timestamp: Date.now(),
-        year, month,
-        data: consolidado as any,
-        detalhePonto: detailRows,
-        summary: `vFleet: Analisados ${consolidado.length} motoristas a partir do Boletim e Alertas.`
+        pipelineType: 'vfleet', timestamp: Date.now(), year, month,
+        data: consolidado, detailGeral: detailRows,
+        summary: `vFleet: Analisados ${consolidado.length} motoristas.`
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
@@ -415,216 +351,91 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     // --- PONTO ---
     if (pipelineType === 'ponto') {
       const includeSundays = formData.get('includeSundays') === 'true';
-      const excludedDatesStr = formData.get('excludedDates') as string;
-      const excludedDatesSet = new Set(JSON.parse(excludedDatesStr || '[]'));
-      
+      const excludedDatesSet = new Set(JSON.parse(formData.get('excludedDates') as string || '[]'));
       const start = startOfMonth(new Date(year, month - 1));
       const end = endOfMonth(start);
-      const agendaOficial = eachDayOfInterval({ start, end })
-        .filter(d => {
-          const formatted = format(d, 'dd/MM/yyyy');
-          if (excludedDatesSet.has(formatted)) return false;
-          if (!includeSundays && isSunday(d)) return false;
-          return true;
-        })
-        .map(d => format(d, 'dd/MM/yyyy'));
+      const agendaOficial = eachDayOfInterval({ start, end }).filter(d => {
+        const f = format(d, 'dd/MM/yyyy');
+        return !excludedDatesSet.has(f) && (includeSundays || !isSunday(d));
+      }).map(d => format(d, 'dd/MM/yyyy'));
 
       const metaDias = agendaOficial.length;
       let rawData: any[] = [];
-
       for (const file of files) {
-        const buffer = await fileToBuffer(file);
-        const workbook = XLSX.read(buffer, { type: 'buffer' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
-
-        let currentId = '';
-        let currentName = '';
-
-        for (const row of data) {
-          const col0 = String(row[0] || '').trim();
-          const col1 = String(row[1] || '').trim();
-
-          if (col0 && /^\d+$/.test(col0) && col1 && col1.length > 5 && !col0.includes('/')) {
-            currentId = col0;
-            currentName = col1;
-            continue;
-          }
-
-          if (currentId && col0 && col0.includes('/')) {
-            const dateStr = excelSerialToDateStr(row[0], year);
-            if (dateStr.split('/')[1] === month.toString().padStart(2, '0')) {
-              rawData.push({
-                id: currentId,
-                nome: currentName,
-                data: dateStr,
-                marcacoes: String(row[2] || ''),
-                situacao: String(row[4] || '')
-              });
+        const workbook = XLSX.read(await fileToBuffer(file), { type: 'buffer' });
+        const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as any[][];
+        let id = '', nome = '';
+        data.forEach(row => {
+          const c0 = String(row[0] || '').trim(), c1 = String(row[1] || '').trim();
+          if (c0 && /^\d+$/.test(c0) && c1.length > 5 && !c0.includes('/')) { id = c0; nome = c1; }
+          else if (id && c0.includes('/')) {
+            const dt = excelSerialToDateStr(row[0], year);
+            if (dt.split('/')[1] === month.toString().padStart(2, '0')) {
+              rawData.push({ id, nome, data: dt, marcacoes: String(row[2] || ''), situacao: String(row[4] || '') });
             }
           }
-        }
+        });
       }
 
-      // Analise detalhada de conformidade (39 colunas solicitadas)
       const detailRows: any[] = [];
       const colabMap: Record<string, any[]> = {};
+      rawData.forEach(it => { const k = `${it.id}_${it.nome}`; if (!colabMap[k]) colabMap[k] = []; colabMap[k].push(it); });
 
-      rawData.forEach(item => {
-        const key = `${item.id}_${item.nome}`;
-        if (!colabMap[key]) colabMap[key] = [];
-        colabMap[key].push(item);
-      });
-
-      Object.entries(colabMap).forEach(([key, items]) => {
-        const [id, nome] = key.split('_');
-        items.sort((a, b) => parse(a.data, 'dd/MM/yyyy', new Date()).getTime() - parse(b.data, 'dd/MM/yyyy', new Date()).getTime());
-
-        let diasConsecutivos = 0;
-        let lastDate: Date | null = null;
-
-        items.forEach((item, idx) => {
-          const currDate = parse(item.data, 'dd/MM/yyyy', new Date());
-          if (lastDate && differenceInMinutes(currDate, lastDate) === 1440) {
-            diasConsecutivos++;
-          } else {
-            diasConsecutivos = 1;
-          }
+      Object.entries(colabMap).forEach(([k, items]) => {
+        const [id, nome] = k.split('_');
+        items.sort((a,b) => parse(a.data, 'dd/MM/yyyy', new Date()).getTime() - parse(b.data, 'dd/MM/yyyy', new Date()).getTime());
+        let diasCons = 0, lastDate: Date | null = null;
+        items.forEach(it => {
+          const currDate = parse(it.data, 'dd/MM/yyyy', new Date());
+          if (lastDate && differenceInMinutes(currDate, lastDate) === 1440) diasCons++; else diasCons = 1;
           lastDate = currDate;
-
-          const marcList = item.marcacoes.split(' ').filter((m: string) => m.includes(':'));
-          const numMarc = marcList.length;
-          const temAjuste = item.marcacoes.includes('*') || excludedDatesSet.has(item.data);
-          
-          const e = marcList[0] || "";
-          const sa = marcList[1] || "";
-          const ra = marcList[2] || "";
-          const s = marcList[3] || "";
-
-          const t1 = hmsToMinutes(e);
-          const t2 = hmsToMinutes(sa);
-          const t3 = hmsToMinutes(ra);
-          const t4 = hmsToMinutes(s);
-
-          const tempoTrab = (t2 - t1) + (t4 - t3);
-          const tempoAlm = t3 - t2;
-
-          const okMarc = numMarc === 4;
-          const okJorn = tempoTrab <= 560; // 7:20 + 2h
-          const okHE = (tempoTrab - 440) <= 120;
-          const okAlm = tempoAlm >= 60;
-          
-          const pm = t2 - t1;
-          const pt = t4 - t3;
-          const okIntra = pm <= 360 && pt <= 360;
-
-          // Interjornada (simulado para MVP)
-          const okInter = true; 
-
-          const todosOk = okJorn && okHE && okAlm && okIntra && okInter;
-          const violouDSR = diasConsecutivos >= 7;
-
+          const marc = it.marcacoes.split(' ').filter((m: string) => m.includes(':'));
+          const e = marc[0] || "", sa = marc[1] || "", ra = marc[2] || "", s = marc[3] || "";
+          const t1 = hmsToMinutes(e), t2 = hmsToMinutes(sa), t3 = hmsToMinutes(ra), t4 = hmsToMinutes(s);
+          const tt = (t2-t1)+(t4-t3), ta = t3-t2;
+          const okM = marc.length === 4, okJ = tt <= 560, okH = (tt-440) <= 120, okA = ta >= 60, okI = (t2-t1) <= 360 && (t4-t3) <= 360;
+          const todosOk = okJ && okH && okA && okI;
           detailRows.push({
-            'ID': id,
-            'Motorista': nome,
-            'Dia': item.data,
-            'Dia_Semana': format(currDate, 'EEEE'),
-            'Entrada': e,
-            'Saida_Almoco': sa,
-            'Retorno_Almoco': ra,
-            'Saida': s,
-            'Tem_Ajuste_Manual': temAjuste ? 'SIM' : 'NÃO',
-            'Num_Ajustes': (item.marcacoes.match(/\*/g) || []).length,
-            'Tempo_Trabalhado': minutesToHms(tempoTrab),
-            'Tempo_Almoco': minutesToHms(tempoAlm),
-            'Marcacoes_Completas': numMarc,
-            'Marcacoes_Faltantes': 4 - numMarc,
-            '✓ Marcacoes_100%': okMarc ? 'SIM' : 'NÃO',
-            '💰 Bonus_Marcacoes': okMarc ? 1.60 : 0,
-            'Limite_Jornada': '09:20',
-            'Tempo_Trabalhado_Conf': minutesToHms(tempoTrab),
-            'Excesso_Jornada': minutesToHms(Math.max(0, tempoTrab - 560)),
-            '✓ Jornada_OK': okJorn ? 'SIM' : 'NÃO',
-            'HE_Realizada': minutesToHms(Math.max(0, tempoTrab - 440)),
-            'Excesso_HE': minutesToHms(Math.max(0, tempoTrab - 440 - 120)),
-            '✓ HE_OK': okHE ? 'SIM' : 'NÃO',
-            'Almoco_Realizado': minutesToHms(tempoAlm),
-            'Deficit_Almoco': minutesToHms(Math.max(0, 60 - tempoAlm)),
-            '✓ Almoco_OK': okAlm ? 'SIM' : 'NÃO',
-            'Periodo_Manha': minutesToHms(pm),
-            'Periodo_Tarde': minutesToHms(pt),
-            'Excesso_Manha': minutesToHms(Math.max(0, pm - 360)),
-            'Excesso_Tarde': minutesToHms(Math.max(0, pt - 360)),
-            '✓ Intrajornada_OK': okIntra ? 'SIM' : 'NÃO',
-            'Interjornada_Descanso': '11:00',
-            'Deficit_Interjornada': '00:00',
-            '✓ Interjornada_OK': okInter ? 'SIM' : 'NÃO',
-            'Todos_5_Criterios_OK': todosOk ? 'SIM' : 'NÃO',
-            '💰 Bonus_Criterios': todosOk ? 1.60 : 0,
-            '💵 Bonificacao_Total_Dia': (okMarc ? 1.60 : 0) + (todosOk ? 1.60 : 0),
-            'Dias_Consecutivos': diasConsecutivos,
-            'Violou_DSR': violouDSR ? 'SIM' : 'NÃO'
+            'ID': id, 'Motorista': nome, 'Dia': it.data, 'Dia_Semana': format(currDate, 'EEEE'),
+            'Entrada': e, 'Saida_Almoco': sa, 'Retorno_Almoco': ra, 'Saida': s,
+            'Tem_Ajuste_Manual': it.marcacoes.includes('*') || excludedDatesSet.has(it.data) ? 'SIM' : 'NÃO',
+            'Num_Ajustes': (it.marcacoes.match(/\*/g) || []).length, 'Tempo_Trabalhado': minutesToHms(tt), 'Tempo_Almoco': minutesToHms(ta),
+            'Marcacoes_Completas': marc.length, 'Marcacoes_Faltantes': 4-marc.length, '✓ Marcacoes_100%': okM ? 'SIM' : 'NÃO',
+            '💰 Bonus_Marcacoes': okM ? 1.60 : 0, 'Limite_Jornada': '09:20', 'Tempo_Trabalhado_Conf': minutesToHms(tt),
+            'Excesso_Jornada': minutesToHms(Math.max(0, tt-560)), '✓ Jornada_OK': okJ ? 'SIM' : 'NÃO',
+            'HE_Realizada': minutesToHms(Math.max(0, tt-440)), 'Excesso_HE': minutesToHms(Math.max(0, tt-440-120)), '✓ HE_OK': okH ? 'SIM' : 'NÃO',
+            'Almoco_Realizado': minutesToHms(ta), 'Deficit_Almoco': minutesToHms(Math.max(0, 60-ta)), '✓ Almoco_OK': okA ? 'SIM' : 'NÃO',
+            'Periodo_Manha': minutesToHms(t2-t1), 'Periodo_Tarde': minutesToHms(t4-t3), 'Excesso_Manha': minutesToHms(Math.max(0, (t2-t1)-360)),
+            'Excesso_Tarde': minutesToHms(Math.max(0, (t4-t3)-360)), '✓ Intrajornada_OK': okI ? 'SIM' : 'NÃO',
+            'Interjornada_Descanso': '11:00', 'Deficit_Interjornada': '00:00', '✓ Interjornada_OK': 'SIM',
+            'Todos_5_Criterios_OK': todosOk ? 'SIM' : 'NÃO', '💰 Bonus_Criterios': todosOk ? 1.60 : 0,
+            '💵 Bonificacao_Total_Dia': (okM ? 1.60 : 0) + (todosOk ? 1.60 : 0), 'Dias_Consecutivos': diasCons, 'Violou_DSR': diasCons >= 7 ? 'SIM' : 'NÃO'
           });
         });
       });
 
       const consolidado = Object.values(detailRows.reduce((acc: any, curr: any) => {
-        const key = curr.ID;
-        if (!acc[key]) {
-          acc[key] = { 
-            ID: curr.ID, 
-            Motorista: curr.Motorista, 
-            Dias_Trabalhados: 0, 
-            '💰 Total_Bonus_Marcacoes': 0,
-            '💰 Total_Bonus_Criterios': 0,
-            '💵 BONIFICACAO_TOTAL': 0,
-            'Dias_Todos_Criterios_OK': 0,
-            'Dias_4_Marcacoes_Completas': 0,
-            'Dias_Violou_DSR': 0,
-            'Total_Ajustes_Manuais': 0
-          };
-        }
-        acc[key].Dias_Trabalhados++;
-        acc[key]['💰 Total_Bonus_Marcacoes'] += curr['💰 Bonus_Marcacoes'];
-        acc[key]['💰 Total_Bonus_Criterios'] += curr['💰 Bonus_Criterios'];
-        acc[key]['💵 BONIFICACAO_TOTAL'] += curr['💵 Bonificacao_Total_Dia'];
-        if (curr['Todos_5_Criterios_OK'] === 'SIM') acc[key]['Dias_Todos_Criterios_OK']++;
-        if (curr['✓ Marcacoes_100%'] === 'SIM') acc[key]['Dias_4_Marcacoes_Completas']++;
-        if (curr['Violou_DSR'] === 'SIM') acc[key]['Dias_Violou_DSR']++;
-        acc[key].Total_Ajustes_Manuais += curr.Num_Ajustes;
+        if (!acc[curr.ID]) acc[curr.ID] = { ID: curr.ID, Motorista: curr.Motorista, Dias_Trabalhados: 0, '💰 Total_Bonus_Marcacoes': 0, '💰 Total_Bonus_Criterios': 0, '💵 BONIFICACAO_TOTAL': 0, 'Dias_Todos_Criterios_OK': 0, 'Dias_4_Marcacoes_Completas': 0, 'Dias_Violou_DSR': 0, 'Total_Ajustes_Manuais': 0 };
+        acc[curr.ID].Dias_Trabalhados++;
+        acc[curr.ID]['💰 Total_Bonus_Marcacoes'] += curr['💰 Bonus_Marcacoes'];
+        acc[curr.ID]['💰 Total_Bonus_Criterios'] += curr['💰 Bonus_Criterios'];
+        acc[curr.ID]['💵 BONIFICACAO_TOTAL'] += curr['💵 Bonificacao_Total_Dia'];
+        if (curr.Todos_5_Criterios_OK === 'SIM') acc[curr.ID].Dias_Todos_Criterios_OK++;
+        if (curr['✓ Marcacoes_100%'] === 'SIM') acc[curr.ID].Dias_4_Marcacoes_Completas++;
+        if (curr.Violou_DSR === 'SIM') acc[curr.ID].Dias_Violou_DSR++;
+        acc[curr.ID].Total_Ajustes_Manuais += curr.Num_Ajustes;
         return acc;
       }, {}));
 
       const absData = consolidado.map((c: any) => {
-        const presencasFisicas = c.Dias_Trabalhados;
-        const totalPresencas = presencasFisicas + (excludedDatesSet.size); 
-        const faltas = Math.max(0, metaDias - presencasFisicas);
-        const percentual = Number(((presencasFisicas / metaDias) * 100).toFixed(2));
-        
-        return {
-          ID: c.ID,
-          Nome: c.Motorista,
-          Grupo: 'MOTORISTA',
-          Total_Dias: metaDias,
-          'Presenças Físicas': presencasFisicas,
-          'Atestados/Férias': 0,
-          'Abonos Manuais': excludedDatesSet.size,
-          'Total Presenças': totalPresencas,
-          Faltas: faltas,
-          'Percentual (%)': percentual,
-          Valor_Incentivo: percentual >= 100 ? 50 : percentual >= 90 ? 40 : 0,
-          Datas_Abonos_Manuais: Array.from(excludedDatesSet).join(', ') || '-'
-        };
+        const perc = Number(((c.Dias_Trabalhados / metaDias) * 100).toFixed(2));
+        return { ID: c.ID, Nome: c.Motorista, Grupo: 'MOTORISTA', Total_Dias: metaDias, 'Presenças Físicas': c.Dias_Trabalhados, 'Atestados/Férias': 0, 'Abonos Manuais': excludedDatesSet.size, 'Total Presenças': c.Dias_Trabalhados + excludedDatesSet.size, Faltas: Math.max(0, metaDias-c.Dias_Trabalhados), 'Percentual (%)': perc, Valor_Incentivo: perc >= 100 ? 50 : perc >= 90 ? 40 : 0, Datas_Abonos_Manuais: Array.from(excludedDatesSet).join(', ') };
       });
 
       const saved = await firebaseStore.saveResult('ponto', {
-        pipelineType: 'ponto',
-        timestamp: Date.now(),
-        year, month,
-        data: consolidado as any,
-        detalhePonto: detailRows,
-        absenteismoData: absData,
-        summary: `Ponto: Processados ${consolidado.length} colaboradores para o mês de ${month}/${year}.`
+        pipelineType: 'ponto', timestamp: Date.now(), year, month,
+        data: consolidado, absenteismoData: absData, detailGeral: detailRows,
+        summary: `Ponto: Processados ${consolidado.length} colaboradores.`
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };

@@ -1,12 +1,13 @@
 
 // Simulation of Firebase store to manage pipeline results
+// In a real scenario, this would use the Firebase Admin SDK or Client SDK with proper security rules.
 
 export interface DriverConsolidated {
   'ID'?: string;
   'Empresa'?: string;
-  'Motorista'?: string;
-  'Ajudante'?: string;
-  'Dias_Trabalhados'?: number;
+  'Funcionario'?: string;
+  'Motorista'?: string; // Mantido para compatibilidade com vFleet/Ponto se necessário
+  'Cargo'?: 'MOTORISTA' | 'AJUDANTE';
   'Dias com Atividade'?: number;
   'Dias Bonif. Máxima (4/4)'?: number;
   'Percentual de Desempenho (%)'?: number;
@@ -16,6 +17,8 @@ export interface DriverConsolidated {
   'Falhas SLA'?: number;
   'Falhas Tempo'?: number;
   'Falhas Sequência'?: number;
+  // Colunas de Ponto
+  'Dias_Trabalhados'?: number;
   '💰 Total_Bonus_Marcacoes'?: number;
   '💰 Total_Bonus_Criterios'?: number;
   '💵 BONIFICACAO_TOTAL'?: number;
@@ -46,22 +49,32 @@ export interface PipelineResult {
   timestamp: number;
   year: number;
   month: number;
-  data: DriverConsolidated[];
+  data: any[];
   absenteismoData?: AbsenteismoData[];
-  detalhePonto?: any[];
-  helpersData?: DriverConsolidated[];
-  helpersDetail?: any[];
+  detalheGeral?: any[]; // Aba unificada Detalhe
   summary?: string;
 }
 
 const storage: Record<string, PipelineResult> = {};
 
+/**
+ * Interface para gerenciar o armazenamento de resultados no Firebase.
+ * Nota: Como este é um protótipo, simulamos a persistência, mas o código 
+ * está preparado para ser conectado ao Firestore.
+ */
 export const firebaseStore = {
   saveResult: async (id: string, result: Omit<PipelineResult, 'id'>) => {
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // Simulação de latência de rede do Firebase
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    
     const newId = `${result.pipelineType}_${result.year}_${result.month}_${Date.now()}`;
-    storage[newId] = { ...result, id: newId };
-    return storage[newId];
+    const finalResult = { ...result, id: newId };
+    
+    // Armazena na memória (simulando Firestore)
+    storage[newId] = finalResult;
+    
+    console.log(`[FIREBASE] Resultado salvo com sucesso: ${newId}`);
+    return finalResult;
   },
 
   getResult: async (id: string): Promise<PipelineResult | null> => {

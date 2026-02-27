@@ -67,7 +67,7 @@ export function PerformaxxiPipelineView() {
       await new Promise(r => setTimeout(r, 400))
       setProgress(15)
       
-      addLog("Analisando 4 critérios: Raio, SLA, Tempo e Sequência.", "info")
+      addLog("Analisando 4 critérios de performance (Unificado).", "info")
       addLog("Bônus Proporcional: R$ 2,00/critério (Motorista) | R$ 1,80/critério (Ajudante).", "info")
       
       setProgress(40)
@@ -84,20 +84,18 @@ export function PerformaxxiPipelineView() {
         setProgress(100)
         
         if (downloadOnly) {
-          addLog("Gerando Excel detalhado (Motoristas/Ajudantes)...", "success")
+          addLog("Gerando Excel Consolidado (Motoristas + Ajudantes)...", "success")
           downloadMultipleSheets([
-            { data: result.detalhePonto || [], name: '04_Detalhe_Motorista' },
-            { data: result.data, name: '05_Consolidado_Motorista' },
-            { data: result.helpersDetail || [], name: '06_Detalhe_Ajudante' },
-            { data: result.helpersData || [], name: '07_Consolidado_Ajudante' }
+            { data: result.detalheGeral || [], name: '01_Detalhe_Geral' },
+            { data: result.data, name: '02_Consolidado_Geral' }
           ], `Performaxxi_Final_${month}_${year}`)
         } else {
-          addLog("Processamento Performaxxi concluído com sucesso.", "success")
+          addLog("Sincronização com o Firebase concluída com sucesso.", "success")
         }
 
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel analítico foi baixado." : "Dados Performaxxi processados." 
+          description: downloadOnly ? "O Excel unificado foi baixado." : "Dados salvos no Firebase." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido')
@@ -115,20 +113,20 @@ export function PerformaxxiPipelineView() {
       <Alert className="bg-accent/5 border-accent/20">
         <div className="flex items-center gap-2">
           <Info className="size-4 text-accent" />
-          <AlertTitle className="mb-0">Análise de Performance Performaxxi</AlertTitle>
+          <AlertTitle className="mb-0">Análise Unificada Performaxxi</AlertTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Anexe o relatório analítico de rotas. O sistema avaliará Raio, SLA, Tempo e Sequência de forma proporcional.</p>
+                <p>Anexe o relatório analítico de rotas. O sistema unificará Motoristas e Ajudantes em uma única base de dados.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-sm mt-2">
-          Bônus proporcional: <strong>R$ 8,00</strong> (Motorista) e <strong>R$ 7,20</strong> (Ajudante) baseados em 4 critérios de conformidade da rota.
+          Bônus proporcional: <strong>R$ 8,00</strong> (Motorista) e <strong>R$ 7,20</strong> (Ajudante) baseados em 4 critérios. Resultados salvos diretamente no Firestore.
         </AlertDescription>
       </Alert>
 
@@ -141,7 +139,7 @@ export function PerformaxxiPipelineView() {
                 Configuração Performaxxi
               </CardTitle>
               <CardDescription>
-                Análise de Rotas e Performance (Bônus Proporcional)
+                Unificação de Cargos e Sincronização Firebase
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -171,7 +169,7 @@ export function PerformaxxiPipelineView() {
                   {files.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                       <Files className="size-10 mb-2 opacity-20" />
-                      <p className="text-sm">Anexe o arquivo Excel de Rota/Pedidos.</p>
+                      <p className="text-sm">Anexe o arquivo Excel do Performaxxi.</p>
                     </div>
                   ) : (
                     <ScrollArea className="h-[150px] p-4">
@@ -193,7 +191,7 @@ export function PerformaxxiPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-accent">
-                    <span>Analisando Performance</span>
+                    <span>Sincronizando com Firebase</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -207,14 +205,14 @@ export function PerformaxxiPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel (Completo)
+                <Download className="mr-2 size-4" /> Baixar Excel Unificado
               </Button>
               <Button 
                 className="flex-[2] h-12 text-base font-semibold bg-accent hover:bg-accent/90 text-accent-foreground shadow-sm" 
                 onClick={() => runPipeline(false)} 
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Analisando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise Performaxxi</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Salvar no Firebase</>}
               </Button>
             </CardFooter>
           </Card>
@@ -224,13 +222,13 @@ export function PerformaxxiPipelineView() {
           <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm">
             <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                 <FileCode className="size-3" /> Monitor de Execução
+                 <FileCode className="size-3" /> Console Performaxxi
                </span>
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <div className="text-muted-foreground italic space-y-2">
-                  <p>Aguardando arquivos do Performaxxi.</p>
+                  <p>Aguardando relatórios do Performaxxi.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
                     <strong>Sugestão:</strong><br/>
                     • RelatorioAnaliticoRotaPedidos.xlsx
