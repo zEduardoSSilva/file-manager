@@ -72,8 +72,11 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         };
       });
 
-      // Lógica de Absenteísmo
-      absenteismoData = [...mockNames.map(n => ({ n, g: 'Motorista' as const }), ...mockNames.map(n => ({ n: n + " (Ajudante)", g: 'Ajudante' as const }))].map(item => {
+      // Lógica de Absenteísmo - Corrigido sintaxe de concatenação
+      absenteismoData = [
+        ...mockNames.map(n => ({ n, g: 'Motorista' as const })), 
+        ...mockNames.map(n => ({ n: n + " (Ajudante)", g: 'Ajudante' as const }))
+      ].map(item => {
         const total = 26; // Dias úteis
         const presences = Math.floor(Math.random() * 4) + 23;
         const perc = parseFloat(((presences / total) * 100).toFixed(2));
