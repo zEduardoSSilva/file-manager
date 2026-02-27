@@ -25,7 +25,8 @@ import {
   LogOut,
   ChevronRight,
   User,
-  Zap
+  Zap,
+  Clock
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -36,6 +37,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
   const pipelines = [
     { id: 'vfleet', name: 'vFleet Pilot', icon: Truck },
     { id: 'performaxxi', name: 'Performaxxi', icon: Zap },
+    { id: 'ponto', name: 'Ponto e Absenteísmo', icon: Clock },
   ]
 
   return (

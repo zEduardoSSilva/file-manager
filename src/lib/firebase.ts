@@ -3,11 +3,12 @@
 // In a real app, you would initialize Firebase here.
 
 export interface DriverConsolidated {
+  ID?: string;
   Motorista?: string;
   Ajudante?: string;
   Empresa?: string;
   'Dias com Atividade': number;
-  'Dias Bonif. Máxima (4/4)': number;
+  'Dias Bonif. Máxima (4/4)'?: number;
   'Percentual de Desempenho (%)': number;
   'Total Bonificação (R$)': number;
   'Total Critérios Cumpridos'?: number;
@@ -20,16 +21,33 @@ export interface DriverConsolidated {
   'Falhas Banguela'?: number;
   'Falhas Ociosidade'?: number;
   'Falhas Exc. Velocidade'?: number;
+  // Ponto fields
+  'Dias Bonif. Ponto (4/4)'?: number;
+  'Total Bônus Marcações'?: number;
+  'Total Bônus Critérios'?: number;
+  'Total Ajustes Manuais'?: number;
+}
+
+export interface AbsenteismoData {
+  ID: string;
+  Nome: string;
+  Grupo: 'Motorista' | 'Ajudante';
+  Total_Dias: number;
+  Presencas: number;
+  Faltas: number;
+  Percentual: number;
+  Valor_Incentivo: number;
 }
 
 export interface PipelineResult {
   id: string;
-  pipelineType: 'vfleet' | 'performaxxi';
+  pipelineType: 'vfleet' | 'performaxxi' | 'ponto';
   timestamp: number;
   year: number;
   month: number;
   data: DriverConsolidated[];
-  helpersData?: DriverConsolidated[]; // Specific for Performaxxi
+  helpersData?: DriverConsolidated[];
+  absenteismoData?: AbsenteismoData[];
   summary?: string;
 }
 
@@ -40,7 +58,7 @@ export const firebaseStore = {
   saveResult: async (id: string, result: Omit<PipelineResult, 'id'>) => {
     // Simulating delay
     await new Promise((resolve) => setTimeout(resolve, 800));
-    const newId = `${result.pipelineType}_${result.year}_${result.month}`;
+    const newId = `${result.pipelineType}_${result.year}_${result.month}_${Date.now()}`;
     storage[newId] = { ...result, id: newId };
     return storage[newId];
   },
