@@ -47,6 +47,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const rawYear = formData.get('year');
     const rawMonth = formData.get('month');
     const rawExcludedDates = formData.get('excludedDates');
+    const rawIncludeSundays = formData.get('includeSundays');
     const files = formData.getAll('files') as File[];
     
     if (!rawYear || !rawMonth) throw new Error('Período ausente.');
@@ -55,6 +56,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
     const excludedDates: string[] = rawExcludedDates ? JSON.parse(rawExcludedDates as string) : [];
+    const includeSundays = rawIncludeSundays === 'true';
     
     const colabMap: Record<string, { 
       id: string, 
@@ -132,8 +134,14 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const workingDaysBase = Array.from(allDatesInFiles).filter(dStr => {
       const date = parse(dStr, 'dd/MM/yyyy', new Date());
       const isExcl = excludedDates.includes(dStr);
-      return !isSunday(date) && !isExcl;
+      const isSun = isSunday(date);
+      
+      if (isExcl) return false;
+      if (!includeSundays && isSun) return false;
+      
+      return true;
     });
+    
     const totalWorkingDays = workingDaysBase.length || 26;
 
     const MOT_VAL = 1.60;
@@ -229,7 +237,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Saida_Almoco': d.marcacoes[1] || '',
           'Retorno_Almoco': d.marcacoes[2] || '',
           'Saida': d.marcacoes[3] || '',
-          'Tem_Ajuste_Manual': d.ajustes > 0 ? 'SIM' : 'NÃO',
+          'Tem_Ajuste_Manual': (d.ajustes > 0 || isExcl) ? 'SIM' : 'NÃO',
           'Num_Ajustes': d.ajustes,
           'Tempo_Trabalhado': m2h(tempoTrabalhado),
           'Tempo_Almoco': m2h(tempoAlmoco),
@@ -289,12 +297,12 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Total_Dias': totalWorkingDays,
           'Presenças Físicas': stats.presencasFisicas,
           'Atestados/Férias': stats.presencasJustificadas,
-          'Abonos Manuais': 0,
+          'Abonos Manuais': excludedDates.length,
           'Total Presenças': totalPres,
           'Faltas': Math.max(0, totalWorkingDays - totalPres),
           'Percentual (%)': perc,
           'Valor_Incentivo': perc >= 100 ? 50 : perc >= 90 ? 40 : perc >= 75 ? 25 : 0,
-          'Datas_Abonos_Manuais': '-'
+          'Datas_Abonos_Manuais': excludedDates.length > 0 ? excludedDates.join(', ') : '-'
         });
       }
     });
@@ -307,7 +315,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       data: consolidado,
       absenteismoData: absenteismo,
       detalhePonto,
-      summary: `Processamento concluído. ${consolidado.length} colaboradores analisados. Base de dias úteis: ${totalWorkingDays}.`
+      summary: `Processamento concluído. ${consolidado.length} colaboradores analisados. Base de dias úteis: ${totalWorkingDays}. Feriados/Abonos: ${excludedDates.length}.`
     });
 
     return { success: true, result: JSON.parse(JSON.stringify(saved)) };

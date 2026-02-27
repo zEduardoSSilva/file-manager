@@ -11,7 +11,8 @@ import {
   Clock,
   Download,
   Calendar as CalendarIcon,
-  X
+  X,
+  CheckCircle2
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -29,7 +30,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { cn } from "@/lib/utils"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 
 export function PontoPipelineView() {
@@ -37,6 +38,7 @@ export function PontoPipelineView() {
   const [month, setMonth] = React.useState(1)
   const [files, setFiles] = React.useState<File[]>([])
   const [excludedDates, setExcludedDates] = React.useState<Date[]>([])
+  const [includeSundays, setIncludeSundays] = React.useState(false)
   const [isExecuting, setIsExecuting] = React.useState(false)
   const [progress, setProgress] = React.useState(0)
   const [logs, setLogs] = React.useState<string[]>([])
@@ -69,19 +71,21 @@ export function PontoPipelineView() {
     try {
       addLog("Lendo arquivos de Ponto...", "info")
       if (excludedDates.length > 0) {
-        addLog(`Aplicando ${excludedDates.length} feriados/exclusões...`, "warn")
+        addLog(`Aplicando ${excludedDates.length} feriados/exclusões globais...`, "warn")
       }
+      addLog(`Configuração: Domingos como dias úteis? ${includeSundays ? 'SIM' : 'NÃO'}`, "info")
       
       await new Promise(r => setTimeout(r, 400))
       setProgress(20)
       
       addLog("Analisando Jornada, HE, Almoço e Descanso Interjornada...", "info")
-      addLog("Calculando bônus: R$ 3,20 (Motorista) / R$ 4,80 (Ajudante).", "info")
+      addLog("Calculando bônus e absenteísmo proporcional...", "info")
       
       setProgress(50)
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
+      formData.append('includeSundays', includeSundays.toString())
       
       const formattedExcluded = excludedDates.map(d => format(d, 'dd/MM/yyyy'))
       formData.append('excludedDates', JSON.stringify(formattedExcluded))
@@ -136,7 +140,7 @@ export function PontoPipelineView() {
                 Configuração de Ponto
               </CardTitle>
               <CardDescription>
-                Consolidação de Jornada e Absenteísmo (Lógica Python)
+                Consolidação de Jornada e Absenteísmo (Lógica Automatizada)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -153,10 +157,29 @@ export function PontoPipelineView() {
 
               <AIParamAssistant onParamsUpdate={(m, y) => { setMonth(m); setYear(y); }} currentMonth={month} currentYear={year} />
 
+              <div className="flex items-center space-x-2 p-3 rounded-lg border bg-muted/5">
+                <Checkbox 
+                  id="include-sundays" 
+                  checked={includeSundays} 
+                  onCheckedChange={(checked) => setIncludeSundays(!!checked)} 
+                />
+                <div className="grid gap-1.5 leading-none">
+                  <label
+                    htmlFor="include-sundays"
+                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                  >
+                    Considerar Domingos como dia útil
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Por padrão, domingos são ignorados no cálculo da base de dias trabalhados.
+                  </p>
+                </div>
+              </div>
+
               <div className="space-y-3">
                 <Label className="text-sm font-semibold flex items-center gap-2">
                   <CalendarIcon className="size-4 text-primary" />
-                  Gestão de Feriados e Abonos (Excluir do Absenteísmo)
+                  Gestão de Feriados e Abonos (Excluir do Período)
                 </Label>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {excludedDates.length === 0 ? (
@@ -180,7 +203,7 @@ export function PontoPipelineView() {
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm" className="w-full sm:w-auto">
-                      <CalendarIcon className="mr-2 size-4" /> Selecionar Feriados
+                      <CalendarIcon className="mr-2 size-4" /> Selecionar Datas para Abono/Feriado
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
