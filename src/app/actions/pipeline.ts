@@ -29,7 +29,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     let processedDrivers: DriverConsolidated[] = [];
     let absenteismoData: AbsenteismoData[] = [];
 
-    const blackList = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM', 'TOTAL', 'PAG', 'DATA', 'NOME', 'HRAP001'];
+    // Blacklist de termos que NÃO são nomes de funcionários
+    const blackList = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM', 'TOTAL', 'PAG', 'DATA', 'NOME', 'HRAP001', 'STATUS', 'SITUAÇÃO'];
 
     for (const file of files) {
       const buffer = await fileToBuffer(file);
@@ -47,14 +48,18 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           const col1 = String(row[1] || '').trim();
           const col2 = String(row[2] || '').trim();
 
-          // REGRA DE OURO: Identifica Colaborador (ID em A e Nome em B)
-          // Deve ser numérico MAS NÃO PODE ter barra (para não confundir com data 06/jan)
+          // REGRA DE OURO: Identifica Colaborador REAL (ID em A e Nome em B)
+          // Critérios para ser um colaborador:
+          // 1. Col0 ser numérico
+          // 2. Col0 não conter barra (não é data)
+          // 3. Col1 não estar na blacklist
+          // 4. Col1 ter mais de 5 caracteres (evita códigos como "1" ou "404")
           const isNumericId = /^\d+$/.test(col0);
           const isNotDate = !col0.includes('/');
-          const isNotBlacklisted = !blackList.includes(col1.toUpperCase().substring(0, 3));
-          const hasRealName = col1.length > 3;
+          const hasRealName = col1.length > 5 && !blackList.includes(col1.toUpperCase().substring(0, 3));
+          const isNotInternalCode = isNumericId && parseInt(col0) > 10; // IDs de funcionários costumam ser maiores que códigos de situação
 
-          if (isNumericId && isNotDate && isNotBlacklisted && hasRealName) {
+          if (isNumericId && isNotDate && hasRealName && isNotInternalCode) {
             currentId = col0;
             currentName = col1;
             if (!driverStats[currentId]) {
@@ -75,18 +80,20 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           }
 
           // Identifica linha de Ponto Diário (Data DD/MMM em A)
+          // Se tiver '/' e tivermos um ID ativo, PROCESSA O DIA
           if (currentId && col0.includes('/')) {
             const stats = driverStats[currentId];
-            stats.diasRegistrados++; // Conta o registro (os 21 dias do Rafael)
+            stats.diasRegistrados++; // Conta TODOS os 21 registros do Rafael
             
             const timesStr = col2.trim();
             const times = timesStr.split(/\s+/).filter(t => t.includes(':'));
             
+            // Se tem marcações, é dia trabalhado efetivo
             if (times.length > 0) {
               stats.diasTrab++;
               stats.presencas++;
 
-              // Regra 4/4 Marcações
+              // Regra 4/4 Marcações (R$ 1,60)
               const is44 = times.length >= 4;
               if (is44) {
                 stats.marcacoesOk++;
@@ -97,28 +104,32 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
               const manualCount = (timesStr.match(/\*/g) || []).length;
               stats.ajustesManuais += manualCount;
 
-              // Simulação de critérios OK (R$ 1,60)
+              // Regra Critérios OK (Simulação simplificada: 4/4 e zero ajustes manuais)
               const isCriteriaOk = is44 && (manualCount === 0); 
               if (isCriteriaOk) {
                 stats.criteriosOk++;
                 stats.bonusCrit += 1.60;
               }
             } else {
-              // Situações de abono/justificativa
-              const situacao = String(row[5] || row[4] || '').toUpperCase();
-              if (['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO'].some(s => situacao.includes(s))) {
+              // Situações de abono/justificativa (BH, Débito BH, etc.)
+              // Analisamos as colunas de situação (D, E, F)
+              const situacao = String(row[4] || row[3] || '').toUpperCase();
+              const situacaoContemPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'CRÉDITO'].some(s => situacao.includes(s));
+              
+              if (situacaoContemPresenca) {
                  stats.presencas++;
               }
             }
           }
         });
 
+        // Converte o objeto acumulado para a lista final
         Object.values(driverStats).forEach((s: any) => {
           if (s.diasRegistrados > 0) {
             processedDrivers.push({
               ID: s.id,
               Motorista: s.nome,
-              Dias_Trabalhados: s.diasRegistrados, // Mostra o total de registros (ex: 21)
+              Dias_Trabalhados: s.diasRegistrados, // Aqui agora deve vir os 21
               '💰 Total_Bonus_Marcacoes': Number(s.bonusMarc.toFixed(2)),
               '💰 Total_Bonus_Criterios': Number(s.bonusCrit.toFixed(2)),
               '💵 BONIFICACAO_TOTAL': Number((s.bonusMarc + s.bonusCrit).toFixed(2)),
