@@ -59,10 +59,10 @@ export function VFleetPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline vFLEET PILOT (Match Placa+Data)...`)
+    addLog(`Iniciando Pipeline vFLEET PILOT (Boletim + Alertas)...`)
 
     try {
-      addLog("Identificando arquivos de Entregas, Boletim e Alertas...", "info")
+      addLog("Identificando arquivos anexados...", "info")
       await new Promise(r => setTimeout(r, 400))
       setProgress(15)
       
@@ -108,21 +108,21 @@ export function VFleetPipelineView() {
       <Alert className="bg-primary/5 border-primary/20">
         <div className="flex items-center gap-2">
           <Info className="size-4 text-primary" />
-          <AlertTitle className="mb-0">Pipeline Único vFleet</AlertTitle>
+          <AlertTitle className="mb-0">Análise de Condução vFleet</AlertTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Anexe 3 tipos de arquivos: Boletim do Veículo, Consolidado de Entregas (para match de motoristas) e Histórico de Alertas.</p>
+                <p>Anexe arquivos do tipo Boletim do Veículo e Histórico de Alertas. O sistema analisará os critérios de condução automaticamente.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-sm mt-2">
-          O sistema cruzará <strong>Placa + Data</strong> para identificar motoristas e aplicar os critérios de 
-          Curva, Banguela, Ociosidade e Velocidade (R$ 4,80/dia - Tudo ou Nada).
+          Esta análise processa falhas de <strong>Curva, Banguela, Ociosidade e Velocidade</strong>. 
+          O bônus de R$ 4,80 é concedido para dias sem nenhuma violação.
         </AlertDescription>
       </Alert>
 
@@ -135,7 +135,7 @@ export function VFleetPipelineView() {
                 Configuração vFleet
               </CardTitle>
               <CardDescription>
-                Cruzamento de dados para Remuneração Variável de Condução
+                Análise de Telemetria e Comportamento do Motorista
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -154,7 +154,7 @@ export function VFleetPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold text-primary">Arquivos para Análise ({files.length})</Label>
+                  <Label className="text-base font-semibold text-primary">Arquivos de Entrada ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
                     <Upload className="mr-2 size-4" /> Selecionar Lote
                   </Button>
@@ -165,7 +165,7 @@ export function VFleetPipelineView() {
                   {files.length === 0 ? (
                     <div className="text-center space-y-2">
                       <Files className="size-10 mx-auto opacity-20" />
-                      <p className="text-sm text-muted-foreground italic">Anexe: Boletim Veículo + Entregas + Alertas</p>
+                      <p className="text-sm text-muted-foreground italic">Arraste ou selecione o Boletim e os Alertas</p>
                     </div>
                   ) : (
                     <ScrollArea className="w-full h-[150px]">
@@ -190,7 +190,7 @@ export function VFleetPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-primary">
-                    <span>Sincronizando Dados vFleet</span>
+                    <span>Processando Telemetria</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -227,11 +227,10 @@ export function VFleetPipelineView() {
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <div className="text-muted-foreground italic space-y-2">
-                  <p>Aguardando arquivos para iniciar o processamento.</p>
+                  <p>Aguardando arquivos do vFleet.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
-                    <strong>Requisitos:</strong><br/>
-                    • Boletim_do_Veiculo_*.csv<br/>
-                    • Consolidado_Entregas_*.xlsx<br/>
+                    <strong>Sugestão:</strong><br/>
+                    • Boletim_do_Veiculo_*.xlsx<br/>
                     • Historico_Alertas_*.csv
                   </div>
                 </div>

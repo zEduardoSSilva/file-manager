@@ -8,7 +8,7 @@ export type PipelineResponse =
   | { success: true; result: PipelineResult }
   | { success: false; error: string };
 
-// Helpers de Normalização (Espelhando o Python)
+// Helpers de Normalização
 const normalizePlate = (plate: any): string => {
   if (!plate) return "";
   return String(plate).toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -27,12 +27,24 @@ const normalizeDateStr = (dateStr: string, defaultYear: number): string => {
   return `${day}/${month}/${year}`;
 };
 
+const excelSerialToDateStr = (serial: any, defaultYear: number): string => {
+  if (typeof serial === 'number' && serial > 30000 && serial < 60000) {
+    // Converte serial do Excel para data JS (ajustando para o bug de 1900 do Excel)
+    const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
+    return format(date, 'dd/MM/yyyy');
+  }
+  if (serial instanceof Date) return format(serial, 'dd/MM/yyyy');
+  return normalizeDateStr(String(serial || ""), defaultYear);
+};
+
 const hmsToSeconds = (hms: string): number => {
   if (!hms || hms === "-") return 0;
   try {
     const parts = String(hms).split(':');
-    if (parts.length !== 3) return 0;
-    return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+    if (parts.length === 3) {
+      return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+    }
+    return 0;
   } catch { return 0; }
 };
 
@@ -53,44 +65,22 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
 
-    // --- Lógica vFleet (Telemetria + Boletim + Entregas) ---
     if (pipelineType === 'vfleet') {
-      const plateDateMap: Record<string, string> = {}; // Chave: PLACA_DATA -> Valor: MOTORISTA
       let vehicleBulletins: any[] = [];
       let alerts: any[] = [];
       const VFLEET_BONUS = 4.80;
 
-      // 1. Triagem e Carregamento de Arquivos
       for (const file of files) {
         const buffer = await fileToBuffer(file);
         const name = file.name.toUpperCase();
 
-        if (name.includes('CONSOLIDADO') || name.includes('ENTREGAS')) {
-          // Arquivo de Entregas (Excel) - Fonte de quem estava no veículo
-          const workbook = XLSX.read(buffer, { type: 'buffer' });
-          const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
-          data.forEach(row => {
-            const placa = normalizePlate(row['PLACA'] || row['PLACA SISTEMA']);
-            const dataRaw = row['DATA DE ENTREGA'] || row['DATA'];
-            if (!placa || !dataRaw) return;
-            
-            const dateStr = dataRaw instanceof Date 
-              ? format(dataRaw, 'dd/MM/yyyy') 
-              : normalizeDateStr(String(dataRaw), year);
-            
-            const motorista = String(row['MOTORISTA'] || '').trim();
-            if (motorista) plateDateMap[`${placa}_${dateStr}`] = motorista;
-          });
-        } 
-        else if (name.includes('BOLETIM')) {
-          // Boletim do Veículo (CSV/Excel)
-          const workbook = XLSX.read(buffer, { type: 'buffer' });
+        if (name.includes('BOLETIM')) {
+          const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
           const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
           vehicleBulletins.push(...data);
         }
         else if (name.includes('ALERTAS') || name.includes('HISTORICO')) {
-          // Alertas de Telemetria (CSV/Excel)
-          const workbook = XLSX.read(buffer, { type: 'buffer' });
+          const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
           const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
           alerts.push(...data);
         }
@@ -98,7 +88,6 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
 
       if (vehicleBulletins.length === 0) throw new Error('Boletim do Veículo não encontrado.');
 
-      // 2. Processamento e Cruzamento
       const dailyAnalysis: Record<string, any> = {};
 
       vehicleBulletins.forEach(row => {
@@ -106,15 +95,9 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const diaRaw = row['DIA'] || row['DATA'];
         if (!placa || !diaRaw) return;
 
-        const dateStr = normalizeDateStr(String(diaRaw), year);
-        const chavePlacaData = `${placa}_${dateStr}`;
+        const dateStr = excelSerialToDateStr(diaRaw, year);
         
-        // Match do motorista
         let motorista = String(row['MOTORISTAS'] || row['MOTORISTA'] || '').split('-')[0].trim();
-        if (plateDateMap[chavePlacaData]) {
-          motorista = plateDateMap[chavePlacaData];
-        }
-
         if (!motorista || motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO')) return;
 
         const key = `${motorista}_${dateStr}`;
@@ -129,27 +112,19 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           };
         }
 
-        // Soma eventos do boletim
         dailyAnalysis[key].curvaBrusca += parseInt(row['CURVA BRUSCA'] || 0);
         dailyAnalysis[key].banguelaSegundos += hmsToSeconds(row['BANGUELA']);
         dailyAnalysis[key].ociosidadeSegundos += hmsToSeconds(row['PARADO LIGADO']);
       });
 
-      // 3. Cruzamento com Alertas (Excesso de Velocidade)
       alerts.forEach(alert => {
-        const placa = normalizePlate(alert['PLACA']);
-        const dataRaw = alert['DATA'];
-        if (!placa || !dataRaw) return;
+        const dataRaw = alert['DATA'] || alert['DIA'];
+        if (!dataRaw) return;
 
-        const dateStr = normalizeDateStr(String(dataRaw), year);
-        const chavePlacaData = `${placa}_${dateStr}`;
-        
-        let motorista = String(alert['MOTORISTA'] || '').trim();
-        if (!motorista || motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO')) {
-          motorista = plateDateMap[chavePlacaData] || "";
-        }
+        const dateStr = excelSerialToDateStr(dataRaw, year);
+        const motorista = String(alert['MOTORISTA'] || '').trim();
 
-        if (motorista && alert['TIPO'] === 'EXCESSO_VELOCIDADE') {
+        if (motorista && !motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO') && alert['TIPO'] === 'EXCESSO_VELOCIDADE') {
           const key = `${motorista}_${dateStr}`;
           if (dailyAnalysis[key]) {
             dailyAnalysis[key].excessosVelocidade++;
@@ -157,13 +132,11 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         }
       });
 
-      // 4. Consolidação Final (Tudo ou Nada)
       const detailRows = Object.values(dailyAnalysis).map(d => {
         const condCurva = d.curvaBrusca === 0;
         const condBanguela = d.banguelaSegundos === 0;
         const condOciosidade = d.ociosidadeSegundos === 0;
         const condVelocidade = d.excessosVelocidade === 0;
-
         const todosOk = condCurva && condBanguela && condOciosidade && condVelocidade;
 
         return {
@@ -215,20 +188,131 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         year, month,
         data: consolidado as any,
         detalhePonto: detailRows,
-        summary: `vFleet: ${consolidado.length} motoristas processados com cruzamento de Placa+Data.`
+        summary: `vFleet: Analisados ${consolidado.length} motoristas a partir do Boletim e Alertas.`
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    // --- Lógica Ponto (Simplificada para brevidade, mantendo a estrutura atual) ---
-    // (A lógica de Ponto permanece conforme as iterações anteriores, focando aqui no upgrade do vFleet)
     if (pipelineType === 'ponto') {
-       // ... (Lógica de ponto já está implementada corretamente no seu código)
-       // Para não estourar o limite de tokens, mantemos a lógica funcional que já ajustamos.
+      const includeSundays = formData.get('includeSundays') === 'true';
+      const excludedDatesStr = formData.get('excludedDates') as string;
+      const excludedDatesSet = new Set(JSON.parse(excludedDatesStr || '[]'));
+      
+      const start = startOfMonth(new Date(year, month - 1));
+      const end = endOfMonth(start);
+      const agendaOficial = eachDayOfInterval({ start, end })
+        .filter(d => {
+          const formatted = format(d, 'dd/MM/yyyy');
+          if (excludedDatesSet.has(formatted)) return false;
+          if (!includeSundays && isSunday(d)) return false;
+          return true;
+        })
+        .map(d => format(d, 'dd/MM/yyyy'));
+
+      const metaDias = agendaOficial.length;
+      let rawData: any[] = [];
+
+      for (const file of files) {
+        const buffer = await fileToBuffer(file);
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+
+        let currentId = '';
+        let currentName = '';
+
+        for (const row of data) {
+          const col0 = String(row[0] || '').trim();
+          const col1 = String(row[1] || '').trim();
+
+          if (col0 && /^\d+$/.test(col0) && col1 && col1.length > 5 && !col0.includes('/')) {
+            currentId = col0;
+            currentName = col1;
+            continue;
+          }
+
+          if (currentId && col0 && col0.includes('/')) {
+            const dateStr = excelSerialToDateStr(row[0], year);
+            if (dateStr.split('/')[1] === month.toString().padStart(2, '0')) {
+              rawData.push({
+                id: currentId,
+                nome: currentName,
+                data: dateStr,
+                marcacoes: String(row[2] || ''),
+                situacao: String(row[4] || '')
+              });
+            }
+          }
+        }
+      }
+
+      const consolidado = Object.values(rawData.reduce((acc: any, curr: any) => {
+        const key = `${curr.id}_${curr.nome}`;
+        if (!acc[key]) {
+          acc[key] = { 
+            ID: curr.id, 
+            Motorista: curr.nome, 
+            Dias_Trabalhados: 0, 
+            '💰 Total_Bonus_Marcacoes': 0,
+            '💰 Total_Bonus_Criterios': 0,
+            '💵 BONIFICACAO_TOTAL': 0,
+            'Dias_Todos_Criterios_OK': 0,
+            'Dias_4_Marcacoes_Completas': 0,
+            'Dias_Violou_DSR': 0,
+            'Total_Ajustes_Manuais': 0,
+            presencasNoMes: new Set()
+          };
+        }
+        
+        const marcList = curr.marcacoes.split(' ').filter((m: string) => m.includes(':'));
+        const ok = marcList.length === 4;
+        const bonus = ok ? 1.60 : 0;
+        
+        acc[key].Dias_Trabalhados++;
+        if (ok) acc[key].Dias_4_Marcacoes_Completas++;
+        acc[key]['💰 Total_Bonus_Marcacoes'] += bonus;
+        acc[key]['💵 BONIFICACAO_TOTAL'] += (bonus + (ok ? 1.60 : 0));
+        acc[key].presencasNoMes.add(curr.data);
+        
+        return acc;
+      }, {}));
+
+      const absData = consolidado.map((c: any) => {
+        const presencasFisicas = c.presencasNoMes.size;
+        const totalPresencas = presencasFisicas + 0; // Simplificado: sem atestados manuais aqui
+        const faltas = Math.max(0, metaDias - totalPresencas);
+        const percentual = Number(((totalPresencas / metaDias) * 100).toFixed(2));
+        
+        return {
+          ID: c.ID,
+          Nome: c.Motorista,
+          Grupo: 'MOTORISTA',
+          Total_Dias: metaDias,
+          'Presenças Físicas': presencasFisicas,
+          'Atestados/Férias': 0,
+          'Abonos Manuais': 0,
+          'Total Presenças': totalPresencas,
+          Faltas: faltas,
+          'Percentual (%)': percentual,
+          Valor_Incentivo: percentual >= 100 ? 50 : percentual >= 90 ? 40 : 0,
+          Datas_Abonos_Manuais: Array.from(excludedDatesSet).join(', ') || '-'
+        };
+      });
+
+      const saved = await firebaseStore.saveResult('ponto', {
+        pipelineType: 'ponto',
+        timestamp: Date.now(),
+        year, month,
+        data: consolidado,
+        absenteismoData: absData,
+        summary: `Ponto: Processados ${consolidado.length} colaboradores para o mês de ${month}/${year}.`
+      });
+
+      return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    throw new Error('Pipeline não implementado ou tipo inválido.');
+    throw new Error('Pipeline não implementado.');
   } catch (error: any) {
     console.error('Erro no Pipeline:', error);
     return { success: false, error: error.message };
