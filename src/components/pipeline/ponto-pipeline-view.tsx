@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -10,7 +9,9 @@ import {
   Files,
   Loader2,
   Clock,
-  Download
+  Download,
+  Calendar as CalendarIcon,
+  X
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -24,11 +25,18 @@ import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
 import { downloadMultipleSheets } from "@/lib/excel-utils"
+import { Calendar } from "@/components/ui/calendar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { format } from "date-fns"
+import { ptBR } from "date-fns/locale"
+import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 
 export function PontoPipelineView() {
   const [year, setYear] = React.useState(2026)
   const [month, setMonth] = React.useState(1)
   const [files, setFiles] = React.useState<File[]>([])
+  const [excludedDates, setExcludedDates] = React.useState<Date[]>([])
   const [isExecuting, setIsExecuting] = React.useState(false)
   const [progress, setProgress] = React.useState(0)
   const [logs, setLogs] = React.useState<string[]>([])
@@ -60,6 +68,10 @@ export function PontoPipelineView() {
 
     try {
       addLog("Lendo arquivos de Ponto...", "info")
+      if (excludedDates.length > 0) {
+        addLog(`Aplicando ${excludedDates.length} feriados/exclusões...`, "warn")
+      }
+      
       await new Promise(r => setTimeout(r, 400))
       setProgress(20)
       
@@ -70,6 +82,10 @@ export function PontoPipelineView() {
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
+      
+      const formattedExcluded = excludedDates.map(d => format(d, 'dd/MM/yyyy'))
+      formData.append('excludedDates', JSON.stringify(formattedExcluded))
+      
       files.forEach(f => formData.append('files', f))
 
       const response = await executePipeline(formData, 'ponto')
@@ -105,6 +121,10 @@ export function PontoPipelineView() {
     }
   }
 
+  const removeDate = (dateToRemove: Date) => {
+    setExcludedDates(prev => prev.filter(d => d.getTime() !== dateToRemove.getTime()))
+  }
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -133,7 +153,49 @@ export function PontoPipelineView() {
 
               <AIParamAssistant onParamsUpdate={(m, y) => { setMonth(m); setYear(y); }} currentMonth={month} currentYear={year} />
 
-              <div className="space-y-4">
+              <div className="space-y-3">
+                <Label className="text-sm font-semibold flex items-center gap-2">
+                  <CalendarIcon className="size-4 text-primary" />
+                  Gestão de Feriados e Abonos (Excluir do Absenteísmo)
+                </Label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {excludedDates.length === 0 ? (
+                    <span className="text-xs text-muted-foreground italic">Nenhum feriado selecionado.</span>
+                  ) : (
+                    excludedDates.sort((a,b) => a.getTime() - b.getTime()).map((date, i) => (
+                      <Badge key={i} variant="secondary" className="flex items-center gap-1 pr-1">
+                        {format(date, 'dd/MM/yyyy')}
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="size-4 p-0 h-4 w-4 rounded-full hover:bg-destructive hover:text-white"
+                          onClick={() => removeDate(date)}
+                        >
+                          <X className="size-2" />
+                        </Button>
+                      </Badge>
+                    ))
+                  )}
+                </div>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="w-full sm:w-auto">
+                      <CalendarIcon className="mr-2 size-4" /> Selecionar Feriados
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="multiple"
+                      selected={excludedDates}
+                      onSelect={(dates) => setExcludedDates(dates || [])}
+                      locale={ptBR}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="space-y-4 pt-2">
                 <div className="flex items-center justify-between">
                   <Label className="text-base font-semibold">Arquivos de Ponto ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
