@@ -58,12 +58,11 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const excludedDates: string[] = rawExcludedDates ? JSON.parse(rawExcludedDates as string) : [];
     const includeSundays = rawIncludeSundays === 'true';
     
-    // 1. Geração da Agenda Oficial do Mês (Calendário Completo)
+    // 1. Geração da Agenda Oficial do Mês (Denominador)
     const startDate = startOfMonth(new Date(year, month - 1));
     const endDate = endOfMonth(startDate);
     const fullCalendar = eachDayOfInterval({ start: startDate, end: endDate });
     
-    // O Denominador (Total_Dias) são os dias onde o trabalho é ESPERADO.
     const agendaOficial = fullCalendar.filter(date => {
       const dStr = format(date, 'dd/MM/yyyy');
       const isExcl = excludedDates.includes(dStr);
@@ -100,7 +99,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const col1 = String(row[1] || '').trim();
         const col2 = String(row[2] || '').trim();
 
-        // Identificação do Colaborador
+        // Identificação do Colaborador (Filtro rigoroso contra datas e códigos)
         if (/^\d+$/.test(col0) && !col0.includes('/') && col1.length > 5 && parseInt(col0) > 30) {
           currentId = col0;
           currentName = col1;
@@ -126,7 +125,6 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             }
 
             const existing = colabMap[currentId].days[dateStr];
-            // Score para manter o registro mais completo do dia
             if (!existing || times.length >= (existing.score || 0)) {
               colabMap[currentId].days[dateStr] = {
                 data: dateStr,
@@ -169,8 +167,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         marcOkCount: 0,
         ajustesTotais: 0,
         presencasFisicas: 0,
-        presencasJustificadas: 0,
-        totalPresencasEfetivas: 0 // Usado para absenteísmo
+        presencasJustificadas: 0
       };
 
       let lastExit: number | null = null;
@@ -179,10 +176,6 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const d = colab.days[dStr];
         const [day, m, y] = dStr.split('/').map(Number);
         const dateObj = new Date(y, m - 1, day);
-        const isSun = isSunday(dateObj);
-        
-        // Se não consideramos domingos, ignoramos batidas de domingo para o absenteísmo
-        const ignorarNoAbs = !includeSundays && isSun;
 
         const e = h2m(d.marcacoes[0]);
         const sa = h2m(d.marcacoes[1]);
@@ -230,11 +223,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           if (todosCritOk) stats.critOkCount++;
           if (marcOk) stats.marcOkCount++;
           stats.ajustesTotais += d.ajustes;
-          
-          if (!ignorarNoAbs) stats.totalPresencasEfetivas++;
         } else if (isPresencaJust) {
           stats.presencasJustificadas++;
-          if (!ignorarNoAbs) stats.totalPresencasEfetivas++;
         }
 
         detalhePonto.push({
@@ -296,10 +286,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           'Total_Ajustes_Manuais': stats.ajustesTotais
         });
 
-        // Absenteísmo: Total Presenças (Físicas + Justificadas + Abonos Manuais Selecionados no UI)
-        // Como o denominador já exclui feriados, o "Abono Manual" aqui age como uma presença bônus 
-        // ou o sistema simplesmente considera que o motorista trabalhou os dias úteis.
-        const totalPresencasFinal = stats.totalPresencasEfetivas + excludedDates.length;
+        // Absenteísmo corrigido: Toda presença física ou justificada abate a falta do denominador útil.
+        const totalPresencasFinal = stats.presencasFisicas + stats.presencasJustificadas + excludedDates.length;
         const faltas = Math.max(0, totalWorkingDays - totalPresencasFinal);
         const perc = Number(((Math.min(totalWorkingDays, totalPresencasFinal) / totalWorkingDays) * 100).toFixed(2));
 
