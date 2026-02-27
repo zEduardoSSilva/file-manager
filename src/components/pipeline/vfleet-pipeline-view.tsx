@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -10,7 +9,8 @@ import {
   Files,
   Loader2,
   Truck,
-  Download
+  Download,
+  Info
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -24,6 +24,7 @@ import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
 import { downloadExcel } from "@/lib/excel-utils"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 export function VFleetPipelineView() {
   const [year, setYear] = React.useState(2026)
@@ -56,17 +57,13 @@ export function VFleetPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline VFLEET PILOT${downloadOnly ? ' (MODO TESTE)' : ''}...`)
+    addLog(`Iniciando Pipeline VFLEET PILOT...`)
 
     try {
-      addLog("Conectando ao Firebase Studio...", "info")
-      await new Promise(r => setTimeout(r, 400))
-      setProgress(20)
+      addLog("Analisando colunas de Telemetria (Curva, Banguela, Ociosidade, Velocidade)...", "info")
+      addLog(`Processando ${files.length} arquivo(s)...`)
       
-      addLog("Validando colunas vFleet (Curva, Banguela, Ociosidade, Velocidade)...", "info")
-      addLog(`Processando lote de ${files.length} arquivos...`)
-      
-      setProgress(50)
+      setProgress(40)
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
@@ -80,21 +77,21 @@ export function VFleetPipelineView() {
         setProgress(100)
         
         if (downloadOnly) {
-          addLog("Gerando Excel para download local...", "success")
-          downloadExcel(result.data, `Teste_vFleet_${month}_${year}`)
+          addLog("Gerando Excel de Condução...", "success")
+          downloadExcel(result.data, `vFleet_Conducao_${month}_${year}`)
         } else {
-          addLog("Transformação vFleet concluída e salva no Firebase.", "success")
+          addLog("Transformação vFleet concluída com sucesso.", "success")
         }
         
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel de teste foi baixado." : "Dados vFleet processados com sucesso." 
+          description: downloadOnly ? "O Excel de teste foi baixado." : "Dados vFleet processados." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido');
       }
     } catch (error: any) {
-      addLog(`FALHA NO PROCESSAMENTO: ${error.message}`, "error")
+      addLog(`FALHA: ${error.message}`, "error")
       setProgress(0)
     } finally {
       setIsExecuting(false)
@@ -103,6 +100,15 @@ export function VFleetPipelineView() {
 
   return (
     <div className="space-y-6">
+      <Alert className="bg-primary/5 border-primary/20">
+        <Info className="size-4 text-primary" />
+        <AlertTitle>Dica de Importação</AlertTitle>
+        <AlertDescription className="text-sm">
+          Para o vFleet, anexe o <strong>Relatório de Condução / Alertas</strong>. 
+          O sistema procura as colunas: <em>Motorista</em>, <em>Data</em> e as falhas (Curva, Banguela, Ociosidade, Velocidade).
+        </AlertDescription>
+      </Alert>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <Card className="shadow-sm border-border/60">
@@ -112,7 +118,7 @@ export function VFleetPipelineView() {
                 Configuração vFleet
               </CardTitle>
               <CardDescription>
-                Consolidação de Alertas e Controle para Remuneração Variável (R$ 4,80)
+                Consolidação de Alertas de Condução para Remuneração Variável (R$ 4,80/dia)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -131,25 +137,25 @@ export function VFleetPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold">Arquivos do Mês ({files.length})</Label>
+                  <Label className="text-base font-semibold text-primary">Relatórios de Telemetria ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
-                    <Upload className="mr-2 size-4" /> Anexar Lote
+                    <Upload className="mr-2 size-4" /> Anexar Arquivos
                   </Button>
                   <input id="file-upload" type="file" multiple className="hidden" onChange={handleFileChange} />
                 </div>
 
-                <div className="border rounded-lg bg-muted/10 min-h-[120px]">
+                <div className="border-2 border-dashed rounded-lg bg-muted/10 min-h-[120px] flex items-center justify-center">
                   {files.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                       <Files className="size-10 mb-2 opacity-20" />
-                      <p className="text-sm italic">Arraste ou anexe os boletins e alertas.</p>
+                      <p className="text-sm italic">Anexe os arquivos Excel de Alertas vFleet.</p>
                     </div>
                   ) : (
-                    <ScrollArea className="h-[150px] p-4">
-                      <div className="space-y-2">
+                    <ScrollArea className="w-full h-[150px] p-4">
+                      <div className="grid grid-cols-1 gap-2">
                         {files.map((file, idx) => (
                           <div key={idx} className="flex items-center justify-between bg-white p-2 px-3 rounded-md border text-sm">
-                            <span className="truncate max-w-[240px] font-medium">{file.name}</span>
+                            <span className="truncate max-w-[300px] font-medium">{file.name}</span>
                             <Button variant="ghost" size="icon" className="size-8" onClick={() => setFiles(files.filter((_, i) => i !== idx))}>
                               <Trash2 className="size-4 text-destructive/70" />
                             </Button>
@@ -164,7 +170,7 @@ export function VFleetPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-primary">
-                    <span>Processando vFleet</span>
+                    <span>Processando Telemetria</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -178,14 +184,14 @@ export function VFleetPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel (Teste)
+                <Download className="mr-2 size-4" /> Baixar Consolidado Excel
               </Button>
               <Button 
-                className="flex-[2] h-12 text-base font-semibold" 
+                className="flex-[2] h-12 text-base font-semibold shadow-md" 
                 onClick={() => runPipeline(false)} 
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Iniciar Transformação</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Analisando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise vFleet</>}
               </Button>
             </CardFooter>
           </Card>
@@ -195,12 +201,12 @@ export function VFleetPipelineView() {
           <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm">
             <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                 <FileCode className="size-3" /> Terminal de Eventos
+                 <FileCode className="size-3" /> Console Telemetria
                </span>
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
-                <span className="text-muted-foreground italic">Sistema pronto para execução.</span>
+                <span className="text-muted-foreground italic">Sistema pronto para processar dados vFleet.</span>
               ) : (
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (
