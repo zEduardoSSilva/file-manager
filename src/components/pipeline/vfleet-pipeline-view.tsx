@@ -10,7 +10,8 @@ import {
   Loader2,
   Truck,
   Download,
-  Info
+  Info,
+  HelpCircle
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -23,8 +24,9 @@ import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
-import { downloadExcel } from "@/lib/excel-utils"
+import { downloadMultipleSheets } from "@/lib/excel-utils"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 export function VFleetPipelineView() {
   const [year, setYear] = React.useState(2026)
@@ -57,13 +59,13 @@ export function VFleetPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline VFLEET PILOT...`)
+    addLog(`Iniciando Pipeline vFLEET PILOT (Match Placa+Data)...`)
 
     try {
-      addLog("Analisando colunas de Telemetria (Curva, Banguela, Ociosidade, Velocidade)...", "info")
-      addLog(`Processando ${files.length} arquivo(s)...`)
+      addLog("Identificando arquivos de Entregas, Boletim e Alertas...", "info")
+      await new Promise(r => setTimeout(r, 400))
+      setProgress(15)
       
-      setProgress(40)
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
@@ -77,15 +79,18 @@ export function VFleetPipelineView() {
         setProgress(100)
         
         if (downloadOnly) {
-          addLog("Gerando Excel de Condução...", "success")
-          downloadExcel(result.data, `vFleet_Conducao_${month}_${year}`)
+          addLog("Gerando Excel Analítico vFleet...", "success")
+          downloadMultipleSheets([
+            { data: result.detalhePonto || [], name: '04_Detalhe_Diario' },
+            { data: result.data, name: '05_Consolidado_Motorista' }
+          ], `vFleet_Analitico_${month}_${year}`)
         } else {
-          addLog("Transformação vFleet concluída com sucesso.", "success")
+          addLog("Processamento vFleet concluído com sucesso.", "success")
         }
         
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel de teste foi baixado." : "Dados vFleet processados." 
+          description: downloadOnly ? "O Excel analítico foi baixado." : "Dados vFleet processados." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido');
@@ -101,11 +106,23 @@ export function VFleetPipelineView() {
   return (
     <div className="space-y-6">
       <Alert className="bg-primary/5 border-primary/20">
-        <Info className="size-4 text-primary" />
-        <AlertTitle>Dica de Importação</AlertTitle>
-        <AlertDescription className="text-sm">
-          Para o vFleet, anexe o <strong>Relatório de Condução / Alertas</strong>. 
-          O sistema procura as colunas: <em>Motorista</em>, <em>Data</em> e as falhas (Curva, Banguela, Ociosidade, Velocidade).
+        <div className="flex items-center gap-2">
+          <Info className="size-4 text-primary" />
+          <AlertTitle className="mb-0">Pipeline Único vFleet</AlertTitle>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p>Anexe 3 tipos de arquivos: Boletim do Veículo, Consolidado de Entregas (para match de motoristas) e Histórico de Alertas.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+        <AlertDescription className="text-sm mt-2">
+          O sistema cruzará <strong>Placa + Data</strong> para identificar motoristas e aplicar os critérios de 
+          Curva, Banguela, Ociosidade e Velocidade (R$ 4,80/dia - Tudo ou Nada).
         </AlertDescription>
       </Alert>
 
@@ -118,7 +135,7 @@ export function VFleetPipelineView() {
                 Configuração vFleet
               </CardTitle>
               <CardDescription>
-                Consolidação de Alertas de Condução para Remuneração Variável (R$ 4,80/dia)
+                Cruzamento de dados para Remuneração Variável de Condução
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -137,25 +154,28 @@ export function VFleetPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold text-primary">Relatórios de Telemetria ({files.length})</Label>
+                  <Label className="text-base font-semibold text-primary">Arquivos para Análise ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
-                    <Upload className="mr-2 size-4" /> Anexar Arquivos
+                    <Upload className="mr-2 size-4" /> Selecionar Lote
                   </Button>
                   <input id="file-upload" type="file" multiple className="hidden" onChange={handleFileChange} />
                 </div>
 
-                <div className="border-2 border-dashed rounded-lg bg-muted/10 min-h-[120px] flex items-center justify-center">
+                <div className="border-2 border-dashed rounded-lg bg-muted/10 min-h-[140px] flex flex-col items-center justify-center p-4">
                   {files.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                      <Files className="size-10 mb-2 opacity-20" />
-                      <p className="text-sm italic">Anexe os arquivos Excel de Alertas vFleet.</p>
+                    <div className="text-center space-y-2">
+                      <Files className="size-10 mx-auto opacity-20" />
+                      <p className="text-sm text-muted-foreground italic">Anexe: Boletim Veículo + Entregas + Alertas</p>
                     </div>
                   ) : (
-                    <ScrollArea className="w-full h-[150px] p-4">
+                    <ScrollArea className="w-full h-[150px]">
                       <div className="grid grid-cols-1 gap-2">
                         {files.map((file, idx) => (
                           <div key={idx} className="flex items-center justify-between bg-white p-2 px-3 rounded-md border text-sm">
-                            <span className="truncate max-w-[300px] font-medium">{file.name}</span>
+                            <div className="flex items-center gap-2 truncate">
+                              <FileCode className="size-3 text-muted-foreground" />
+                              <span className="truncate max-w-[300px] font-medium">{file.name}</span>
+                            </div>
                             <Button variant="ghost" size="icon" className="size-8" onClick={() => setFiles(files.filter((_, i) => i !== idx))}>
                               <Trash2 className="size-4 text-destructive/70" />
                             </Button>
@@ -170,7 +190,7 @@ export function VFleetPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-primary">
-                    <span>Processando Telemetria</span>
+                    <span>Sincronizando Dados vFleet</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -184,14 +204,14 @@ export function VFleetPipelineView() {
                 onClick={() => runPipeline(true)} 
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Consolidado Excel
+                <Download className="mr-2 size-4" /> Baixar Excel Analítico
               </Button>
               <Button 
                 className="flex-[2] h-12 text-base font-semibold shadow-md" 
                 onClick={() => runPipeline(false)} 
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Analisando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise vFleet</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise vFleet</>}
               </Button>
             </CardFooter>
           </Card>
@@ -201,12 +221,20 @@ export function VFleetPipelineView() {
           <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm">
             <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                 <FileCode className="size-3" /> Console Telemetria
+                 <FileCode className="size-3" /> Console de Execução
                </span>
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
-                <span className="text-muted-foreground italic">Sistema pronto para processar dados vFleet.</span>
+                <div className="text-muted-foreground italic space-y-2">
+                  <p>Aguardando arquivos para iniciar o processamento.</p>
+                  <div className="text-[10px] border-l-2 pl-2 mt-4">
+                    <strong>Requisitos:</strong><br/>
+                    • Boletim_do_Veiculo_*.csv<br/>
+                    • Consolidado_Entregas_*.xlsx<br/>
+                    • Historico_Alertas_*.csv
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (
