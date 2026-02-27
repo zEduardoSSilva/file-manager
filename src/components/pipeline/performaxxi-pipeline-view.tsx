@@ -10,7 +10,9 @@ import {
   Files,
   Loader2,
   Zap,
-  Download
+  Download,
+  Info,
+  HelpCircle
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -24,6 +26,8 @@ import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
 import { downloadMultipleSheets } from "@/lib/excel-utils"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 export function PerformaxxiPipelineView() {
   const [year, setYear] = React.useState(2026)
@@ -106,6 +110,26 @@ export function PerformaxxiPipelineView() {
 
   return (
     <div className="space-y-6">
+      <Alert className="bg-accent/5 border-accent/20">
+        <div className="flex items-center gap-2">
+          <Info className="size-4 text-accent" />
+          <AlertTitle className="mb-0">Análise de Performance Performaxxi</AlertTitle>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p>Anexe o relatório analítico de rotas. O sistema avaliará Raio, SLA, Tempo e Sequência para motoristas e ajudantes.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+        <AlertDescription className="text-sm mt-2">
+          Esta análise calcula bônus proporcionais de <strong>R$ 8,00</strong> para Motoristas e <strong>R$ 7,20</strong> para Ajudantes baseados na conformidade da rota.
+        </AlertDescription>
+      </Alert>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <Card className="shadow-sm border-border/60">
@@ -203,7 +227,13 @@ export function PerformaxxiPipelineView() {
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
-                <span className="text-muted-foreground italic">Pronto para processar dados Performaxxi.</span>
+                <div className="text-muted-foreground italic space-y-2">
+                  <p>Aguardando arquivos do Performaxxi.</p>
+                  <div className="text-[10px] border-l-2 pl-2 mt-4">
+                    <strong>Sugestão:</strong><br/>
+                    • Relatorio_Analitico_Rotas_*.xlsx
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (

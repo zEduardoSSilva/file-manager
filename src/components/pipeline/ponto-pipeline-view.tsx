@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -12,7 +13,9 @@ import {
   Download,
   Calendar as CalendarIcon,
   X,
-  CheckCircle2
+  CheckCircle2,
+  Info,
+  HelpCircle
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -32,6 +35,8 @@ import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 export function PontoPipelineView() {
   const [year, setYear] = React.useState(2026)
@@ -107,7 +112,7 @@ export function PontoPipelineView() {
             { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
           ], `Ponto_Consolidado_${month}_${year}`)
         } else {
-          addLog("Processamento concluído com sucesso.", "success")
+          addLog("Processamento concluído with sucesso.", "success")
         }
 
         toast({ 
@@ -131,6 +136,26 @@ export function PontoPipelineView() {
 
   return (
     <div className="space-y-6">
+      <Alert className="bg-indigo-50 border-indigo-200">
+        <div className="flex items-center gap-2">
+          <Info className="size-4 text-indigo-600" />
+          <AlertTitle className="mb-0 text-indigo-900">Gestão de Jornada e Absenteísmo</AlertTitle>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p>Anexe os CSVs de ponto original. O sistema consolidará a jornada diária e calculará o incentivo de absenteísmo proporcional.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+        <AlertDescription className="text-sm mt-2 text-indigo-800">
+          Esta análise cruza as marcações de ponto com as regras de jornada e aplica bônus por conformidade e incentivos financeiros de frequência.
+        </AlertDescription>
+      </Alert>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <Card className="shadow-sm border-border/60">
@@ -289,7 +314,13 @@ export function PontoPipelineView() {
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
-                <span className="text-muted-foreground italic">Aguardando arquivos para iniciar.</span>
+                <div className="text-muted-foreground italic space-y-2">
+                  <p>Aguardando arquivos de Ponto.</p>
+                  <div className="text-[10px] border-l-2 pl-2 mt-4">
+                    <strong>Sugestão:</strong><br/>
+                    • Ponto_Original_*-*.csv
+                  </div>
+                </div>
               ) : (
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (
