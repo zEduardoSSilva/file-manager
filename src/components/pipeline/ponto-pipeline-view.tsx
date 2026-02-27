@@ -59,14 +59,14 @@ export function PontoPipelineView() {
     addLog(`Iniciando Pipeline PONTO E ABSENTEÍSMO...`)
 
     try {
-      addLog("Lendo múltiplos arquivos de Ponto...", "info")
+      addLog("Lendo arquivos de Ponto...", "info")
       await new Promise(r => setTimeout(r, 400))
-      setProgress(15)
+      setProgress(20)
       
-      addLog("Aplicando Score de deduplicação (estilo Python)...", "info")
-      addLog("Capturando abonos, férias e atestados para absenteísmo.", "info")
+      addLog("Analisando Jornada, HE, Almoço e Descanso Interjornada...", "info")
+      addLog("Calculando bônus: R$ 3,20 (Motorista) / R$ 4,80 (Ajudante).", "info")
       
-      setProgress(40)
+      setProgress(50)
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
@@ -80,19 +80,19 @@ export function PontoPipelineView() {
         setProgress(100)
 
         if (downloadOnly) {
-          addLog("Gerando Excel com 03_Detalhe e 04_Consolidado...", "success")
+          addLog("Gerando Excel com abas Detalhe, Consolidado e Absenteísmo...", "success")
           downloadMultipleSheets([
             { data: result.detalhePonto || [], name: '03_Detalhe_Ponto' },
             { data: result.data, name: '04_Consolidado' },
             { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
           ], `Ponto_Consolidado_${month}_${year}`)
         } else {
-          addLog("Processamento concluído. Verifique o resultado abaixo.", "success")
+          addLog("Processamento concluído com sucesso.", "success")
         }
 
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel consolidado foi baixado." : "Processamento finalizado." 
+          description: downloadOnly ? "O Excel analítico foi baixado." : "Processamento finalizado." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido')
@@ -116,7 +116,7 @@ export function PontoPipelineView() {
                 Configuração de Ponto
               </CardTitle>
               <CardDescription>
-                Consolidação de Jornada e Absenteísmo (Deduplicação por Score)
+                Consolidação de Jornada e Absenteísmo (Lógica Python)
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">

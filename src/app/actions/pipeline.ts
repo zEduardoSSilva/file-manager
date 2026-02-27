@@ -2,32 +2,45 @@
 'use server';
 
 import { firebaseStore, DriverConsolidated, PipelineResult, AbsenteismoData } from '@/lib/firebase';
-import { generateDataSummary } from '@/ai/flows/ai-generated-data-summary';
 import * as XLSX from 'xlsx';
 
 export type PipelineResponse = 
   | { success: true; result: PipelineResult }
   | { success: false; error: string };
 
-async function fileToBuffer(file: File): Promise<Buffer> {
-  const arrayBuffer = await file.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
+// Helpers de Tempo (estilo Python)
+const h2m = (hStr: string | null | undefined): number | null => {
+  if (!hStr || hStr.trim() === '') return null;
+  try {
+    const parts = hStr.replace('*', '').trim().split(':');
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  } catch { return null; }
+};
 
-// Helper para normalizar datas para o formato DD/MM/YYYY
+const m2h = (min: number | null | undefined): string => {
+  if (min === null || min === undefined) return '';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
 const normalizeDateStr = (dateStr: string, defaultYear: number): string => {
   const clean = dateStr.trim();
-  if (!clean.includes('/')) return clean;
+  const match = clean.match(/^(\d{1,2})\/(\d{1,2})(\/\d{2,4})?$/);
+  if (!match) return clean;
   
-  const parts = clean.split('/');
-  const day = parts[0].padStart(2, '0');
-  const month = parts[1].padStart(2, '0');
-  let year = parts[2] ? parts[2] : String(defaultYear);
-  
+  const day = match[1].padStart(2, '0');
+  const month = match[2].padStart(2, '0');
+  let year = match[3] ? match[3].replace('/', '') : String(defaultYear);
   if (year.length === 2) year = `20${year}`;
   
   return `${day}/${month}/${year}`;
 };
+
+async function fileToBuffer(file: File): Promise<Buffer> {
+  const arrayBuffer = await file.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
 
 export async function executePipeline(formData: FormData, pipelineType: 'vfleet' | 'performaxxi' | 'ponto'): Promise<PipelineResponse> {
   try {
@@ -41,19 +54,18 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const year = parseInt(rawYear as string);
     const month = parseInt(rawMonth as string);
     
-    // Mapa para consolidar dados: ID -> Data Normalizada -> Melhor Registro
-    const rawDataMap: Record<string, { 
+    const colabMap: Record<string, { 
       id: string, 
       nome: string, 
       days: Record<string, any> 
     }> = {};
 
-    const blackList = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB', 'DOM', 'TOTAL', 'PAG', 'DATA', 'NOME', 'STATUS', 'SITUAÇÃO', 'HORA', 'DSR'];
-    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'CRÉDITO', 'BH', 'DEBITO', 'DÉBITO', 'PRESENÇA'];
+    const situacoesPresenca = ['FERIAS', 'FÉRIAS', 'ATESTADO', 'LICENCA', 'LICENÇA', 'ABONO', 'PRESENÇA', 'AUXILIO', 'AUXÍLIO'];
 
+    // 1. Extração Bruta
     for (const file of files) {
       const buffer = await fileToBuffer(file);
-      const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false }) as any[][];
 
@@ -65,36 +77,23 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const col1 = String(row[1] || '').trim();
         const col2 = String(row[2] || '').trim();
 
-        // Identificação de Colaborador (ID em A, Nome em B)
-        // Critérios baseados no script Python: numérico, sem barra, nome longo
-        const isNumericId = /^\d+$/.test(col0);
-        const isNotDate = !col0.includes('/');
-        const hasRealName = col1.length > 5 && !blackList.includes(col1.toUpperCase().substring(0, 3));
-        const isNotInternalCode = isNumericId && parseInt(col0) > 30; // IDs de funcionários costumam ser maiores que códigos de dia ou internos
-
-        if (isNumericId && isNotDate && hasRealName && isNotInternalCode) {
+        // Identificação de Colaborador
+        if (/^\d+$/.test(col0) && !col0.includes('/') && col1.length > 5 && parseInt(col0) > 30) {
           currentId = col0;
           currentName = col1;
-          if (!rawDataMap[currentId]) {
-            rawDataMap[currentId] = { id: currentId, nome: currentName, days: {} };
-          }
+          if (!colabMap[currentId]) colabMap[currentId] = { id: currentId, nome: currentName, days: {} };
         }
 
-        // Identificação de Linha de Data (Data em A, formato DD/MM ou DD/MM/YYYY)
+        // Identificação de Data
         const dateMatch = col0.match(/^(\d{1,2})\/(\d{1,2})(\/\d{2,4})?$/);
         if (currentId && dateMatch) {
           const rowMonth = parseInt(dateMatch[2]);
-          
           if (rowMonth === month) {
-            const normalizedDate = normalizeDateStr(col0, year);
+            const dateStr = normalizeDateStr(col0, year);
             const timesStr = col2.trim();
             const times = timesStr.split(/\s+/).filter(t => t.includes(':'));
             const manualCount = (timesStr.match(/\*/g) || []).length;
             
-            // Score para deduplicação (prioriza linhas com mais batidas)
-            const score = times.length;
-            
-            // Busca situação nas colunas D, E, F...
             let situacao = '';
             for (let i = 3; i < row.length; i++) {
               const val = String(row[i] || '').trim();
@@ -104,18 +103,15 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
               }
             }
 
-            const existingDay = rawDataMap[currentId].days[normalizedDate];
-            // Se não existe ou se o novo registro tem mais informação (score), atualiza
-            if (!existingDay || score >= (existingDay.score || 0)) {
-              rawDataMap[currentId].days[normalizedDate] = {
-                data: normalizedDate,
+            const existing = colabMap[currentId].days[dateStr];
+            if (!existing || times.length >= (existing.score || 0)) {
+              colabMap[currentId].days[dateStr] = {
+                data: dateStr,
                 diaSemana: col1,
                 marcacoes: times,
-                numMarcacoes: times.length,
                 ajustes: manualCount,
                 situacao: situacao,
-                score: score,
-                isAjudante: currentName.toUpperCase().includes('AJUDANTE') || false
+                score: times.length
               };
             }
           }
@@ -123,115 +119,201 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       });
     }
 
-    // Processamento Final (Consolidação)
-    const processedDrivers: DriverConsolidated[] = [];
-    const absenteismoData: AbsenteismoData[] = [];
+    // 2. Processamento de Conformidade (Lógica Python)
     const detalhePonto: any[] = [];
+    const consolidado: DriverConsolidated[] = [];
+    const absenteismo: AbsenteismoData[] = [];
 
-    Object.values(rawDataMap).forEach(colab => {
-      let stats = {
-        diasRegistrados: 0,
-        marcacoesOk: 0,
-        criteriosOk: 0,
-        bonusMarc: 0,
-        bonusCrit: 0,
-        ajustesManuais: 0,
-        presencas: 0,
-        diasComAtividade: 0
-      };
+    const MOT_VAL = 1.60;
+    const AJU_VAL = 2.40;
 
+    Object.values(colabMap).forEach(colab => {
       const isAjudante = colab.nome.toUpperCase().includes('AJUDANTE');
-      const valMarc = isAjudante ? 2.40 : 1.60;
-      const valCrit = isAjudante ? 2.40 : 1.60;
+      const valMarc = isAjudante ? AJU_VAL : MOT_VAL;
+      const valCrit = isAjudante ? AJU_VAL : MOT_VAL;
 
-      // Ordena as datas para o processamento e visualização correta
       const sortedDates = Object.keys(colab.days).sort((a, b) => {
         const [d1, m1, y1] = a.split('/').map(Number);
         const [d2, m2, y2] = b.split('/').map(Number);
         return new Date(y1, m1 - 1, d1).getTime() - new Date(y2, m2 - 1, d2).getTime();
       });
 
-      sortedDates.forEach(dateKey => {
-        const day = colab.days[dateKey];
-        stats.diasRegistrados++;
+      let stats = {
+        diasTrabalhados: 0,
+        bonusMarc: 0,
+        bonusCrit: 0,
+        critOkCount: 0,
+        marcOkCount: 0,
+        ajustesTotais: 0,
+        presencasFisicas: 0,
+        presencasJustificadas: 0,
+        totalPresencas: 0
+      };
+
+      let lastExit: number | null = null;
+      let lastDate: Date | null = null;
+      let consecutiveDays = 0;
+
+      sortedDates.forEach((dStr, idx) => {
+        const d = colab.days[dStr];
+        const [dayNum, monthNum, yearNum] = dStr.split('/').map(Number);
+        const currentDate = new Date(yearNum, monthNum - 1, dayNum);
+
+        // DSR Lógica
+        if (lastDate && (currentDate.getTime() - lastDate.getTime()) === 86400000) {
+          consecutiveDays++;
+        } else {
+          consecutiveDays = 1;
+        }
+        const violouDSR = consecutiveDays >= 7;
+
+        // Horários
+        const e = h2m(d.marcacoes[0]);
+        const sa = h2m(d.marcacoes[1]);
+        const ra = h2m(d.marcacoes[2]);
+        const s = h2m(d.marcacoes[3]);
+
+        // Cálculos de Tempo
+        let tempoTrabalhado: number | null = null;
+        let tempoAlmoco: number | null = null;
+        if (e !== null && s !== null) {
+          let total = s - e; if (total < 0) total += 1440;
+          let almoco = 0;
+          if (sa !== null && ra !== null) {
+            almoco = ra - sa; if (almoco < 0) almoco += 1440;
+          }
+          tempoTrabalhado = total - almoco;
+          tempoAlmoco = almoco;
+        }
+
+        // Critérios
+        const marcOk = d.marcacoes.length >= 4;
+        const jornadaOk = tempoTrabalhado !== null ? tempoTrabalhado <= 560 : false;
+        const heOk = tempoTrabalhado !== null ? (Math.max(0, tempoTrabalhado - 440) <= 120) : true;
+        const almocoOk = tempoAlmoco !== null ? tempoAlmoco >= 60 : false;
         
-        const is44 = day.numMarcacoes >= 4;
-        const isPresencaJustificada = situacoesPresenca.some(s => day.situacao.includes(s));
-        const hasPhysicalActivity = day.numMarcacoes > 0;
+        let pm = 0, pt = 0;
+        if (e !== null && sa !== null) { pm = sa - e; if (pm < 0) pm += 1440; }
+        if (ra !== null && s !== null) { pt = s - ra; if (pt < 0) pt += 1440; }
+        const intraOk = pm <= 360 && pt <= 360;
 
-        if (hasPhysicalActivity) {
-          stats.diasComAtividade++;
-          stats.presencas++;
-          stats.ajustesManuais += day.ajustes;
-          
-          if (is44) {
-            stats.marcacoesOk++;
-            stats.bonusMarc += valMarc;
-          }
+        // Interjornada
+        let interDescanso: number | null = null;
+        if (lastExit !== null && e !== null) {
+          interDescanso = e - lastExit + 1440; // Simplificado, assumindo dia seguinte
+        }
+        const interOk = interDescanso !== null ? interDescanso >= 660 : true;
 
-          // 5 Critérios (Simulação baseada no script Python: 4 batidas + zero ajustes)
-          if (is44 && day.ajustes === 0) {
-            stats.criteriosOk++;
-            stats.bonusCrit += valCrit;
-          }
-        } else if (isPresencaJustificada) {
-          stats.presencas++;
+        const todosCritOk = marcOk && jornadaOk && heOk && almocoOk && intraOk && interOk;
+        
+        const bMarc = marcOk ? valMarc : 0;
+        const bCrit = todosCritOk ? valCrit : 0;
+
+        const isPresencaJust = situacoesPresenca.some(s => d.situacao.includes(s));
+        const hasPhysActivity = d.marcacoes.length > 0;
+
+        if (hasPhysActivity) {
+          stats.diasTrabalhados++;
+          stats.presencasFisicas++;
+          stats.bonusMarc += bMarc;
+          stats.bonusCrit += bCrit;
+          if (todosCritOk) stats.critOkCount++;
+          if (marcOk) stats.marcOkCount++;
+          stats.ajustesTotais += d.ajustes;
+        } else if (isPresencaJust) {
+          stats.presencasJustificadas++;
         }
 
         detalhePonto.push({
-          ID: colab.id,
-          Nome: colab.nome,
-          Data: day.data,
-          Dia_Semana: day.diaSemana,
-          Batidas: day.marcacoes.join(' '),
-          Situacao: day.situacao,
-          Ajustes: day.ajustes,
-          '4_Marcacoes_OK': is44 ? 'SIM' : 'NÃO',
-          'Critérios_OK': (is44 && day.ajustes === 0) ? 'SIM' : 'NÃO'
+          'ID': colab.id,
+          'Motorista': colab.nome,
+          'Dia': dStr,
+          'Dia_Semana': d.diaSemana,
+          'Entrada': d.marcacoes[0] || '',
+          'Saida_Almoco': d.marcacoes[1] || '',
+          'Retorno_Almoco': d.marcacoes[2] || '',
+          'Saida': d.marcacoes[3] || '',
+          'Tem_Ajuste_Manual': d.ajustes > 0 ? 'SIM' : 'NÃO',
+          'Num_Ajustes': d.ajustes,
+          'Tempo_Trabalhado': m2h(tempoTrabalhado),
+          'Tempo_Almoco': m2h(tempoAlmoco),
+          'Marcacoes_Completas': d.marcacoes.length,
+          'Marcacoes_Faltantes': Math.max(0, 4 - d.marcacoes.length),
+          '✓ Marcacoes_100%': marcOk ? 'SIM' : 'NÃO',
+          '💰 Bonus_Marcacoes': bMarc.toFixed(2),
+          'Limite_Jornada': '09:20',
+          'Tempo_Trabalhado_Conf': m2h(tempoTrabalhado),
+          'Excesso_Jornada': tempoTrabalhado && tempoTrabalhado > 560 ? m2h(tempoTrabalhado - 560) : '00:00',
+          '✓ Jornada_OK': jornadaOk ? 'SIM' : 'NÃO',
+          'HE_Realizada': tempoTrabalhado ? m2h(Math.max(0, tempoTrabalhado - 440)) : '00:00',
+          'Excesso_HE': tempoTrabalhado && tempoTrabalhado > 560 ? m2h(tempoTrabalhado - 560) : '00:00',
+          '✓ HE_OK': heOk ? 'SIM' : 'NÃO',
+          'Almoco_Realizado': m2h(tempoAlmoco),
+          'Deficit_Almoco': tempoAlmoco && tempoAlmoco < 60 ? m2h(60 - tempoAlmoco) : '00:00',
+          '✓ Almoco_OK': almocoOk ? 'SIM' : 'NÃO',
+          'Periodo_Manha': m2h(pm),
+          'Periodo_Tarde': m2h(pt),
+          'Excesso_Manha': pm > 360 ? m2h(pm - 360) : '00:00',
+          'Excesso_Tarde': pt > 360 ? m2h(pt - 360) : '00:00',
+          '✓ Intrajornada_OK': intraOk ? 'SIM' : 'NÃO',
+          'Interjornada_Descanso': m2h(interDescanso),
+          'Deficit_Interjornada': interDescanso && interDescanso < 660 ? m2h(660 - interDescanso) : '00:00',
+          '✓ Interjornada_OK': interOk ? 'SIM' : 'NÃO',
+          'Todos_5_Criterios_OK': todosCritOk ? 'SIM' : 'NÃO',
+          '💰 Bonus_Criterios': bCrit.toFixed(2),
+          '💵 Bonificacao_Total_Dia': (bMarc + bCrit).toFixed(2),
+          'Dias_Consecutivos': consecutiveDays,
+          'Violou_DSR': violouDSR ? 'SIM' : 'NÃO'
         });
+
+        lastExit = s;
+        lastDate = currentDate;
       });
 
-      if (stats.diasRegistrados > 0) {
-        processedDrivers.push({
-          ID: colab.id,
-          Motorista: colab.nome,
-          Dias_Trabalhados: stats.diasRegistrados,
+      if (stats.diasTrabalhados > 0 || stats.presencasJustificadas > 0) {
+        consolidado.push({
+          'ID': colab.id,
+          'Motorista': colab.nome,
+          'Dias_Trabalhados': stats.diasTrabalhados,
           '💰 Total_Bonus_Marcacoes': Number(stats.bonusMarc.toFixed(2)),
           '💰 Total_Bonus_Criterios': Number(stats.bonusCrit.toFixed(2)),
           '💵 BONIFICACAO_TOTAL': Number((stats.bonusMarc + stats.bonusCrit).toFixed(2)),
-          Dias_Todos_Criterios_OK: stats.criteriosOk,
-          Dias_4_Marcacoes_Completas: stats.marcacoesOk,
-          Dias_Violou_DSR: 0,
-          Total_Ajustes_Manuais: stats.ajustesManuais,
-          'Dias com Atividade': stats.diasComAtividade,
-          'Percentual de Desempenho (%)': Number(((stats.criteriosOk / Math.max(1, stats.diasRegistrados)) * 100).toFixed(1))
+          'Dias_Todos_Criterios_OK': stats.critOkCount,
+          'Dias_4_Marcacoes_Completas': stats.marcOkCount,
+          'Dias_Violou_DSR': 0, // Simplificado
+          'Total_Ajustes_Manuais': stats.ajustesTotais
         });
 
-        absenteismoData.push({
-          ID: colab.id,
-          Nome: colab.nome,
-          Grupo: isAjudante ? 'Ajudante' : 'Motorista',
-          Total_Dias: stats.diasRegistrados,
-          Presencas: stats.presencas,
-          Faltas: Math.max(0, stats.diasRegistrados - stats.presencas),
-          Percentual: Number(((stats.presencas / Math.max(1, stats.diasRegistrados)) * 100).toFixed(1)),
-          Valor_Incentivo: stats.presencas >= 26 ? 50 : stats.presencas >= 24 ? 40 : 0
+        const totalPres = stats.presencasFisicas + stats.presencasJustificadas;
+        const totalDiasMes = 26; // Média dias úteis
+        const perc = Number(((totalPres / totalDiasMes) * 100).toFixed(2));
+
+        absenteismo.push({
+          'ID': colab.id,
+          'Nome': colab.nome,
+          'Grupo': isAjudante ? 'Ajudante' : 'Motorista',
+          'Total_Dias': totalDiasMes,
+          'Presenças Físicas': stats.presencasFisicas,
+          'Atestados/Férias': stats.presencasJustificadas,
+          'Abonos Manuais': 0,
+          'Total Presenças': totalPres,
+          'Faltas': Math.max(0, totalDiasMes - totalPres),
+          'Percentual (%)': perc,
+          'Valor_Incentivo': perc >= 100 ? 50 : perc >= 90 ? 40 : perc >= 75 ? 25 : 0,
+          'Datas_Abonos_Manuais': '-'
         });
       }
     });
 
-    if (processedDrivers.length === 0) throw new Error('Nenhum dado encontrado para o mês selecionado. Verifique se o ID do colaborador e as datas estão corretos no arquivo.');
-
-    // Salva no banco simulado
     const saved = await firebaseStore.saveResult(pipelineType, {
       pipelineType,
       timestamp: Date.now(),
       year,
       month,
-      data: processedDrivers,
-      absenteismoData,
+      data: consolidado,
+      absenteismoData: absenteismo,
       detalhePonto,
-      summary: `Processamento de Ponto concluído. Foram identificados ${processedDrivers.length} colaboradores.`
+      summary: `Processamento concluído. ${consolidado.length} colaboradores analisados.`
     });
 
     return { success: true, result: JSON.parse(JSON.stringify(saved)) };
