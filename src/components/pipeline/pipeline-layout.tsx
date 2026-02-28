@@ -54,7 +54,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate font-semibold">File Studio</span>
-                    <span className="truncate text-xs">Logistics Engine</span>
+                    <span className="truncate text-[10px] opacity-70">Logistics Engine</span>
                   </div>
                 </Link>
               </SidebarMenuButton>
@@ -63,20 +63,20 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
-            <SidebarGroupLabel>Principal</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-wider">Principal</SidebarGroupLabel>
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton tooltip="Dashboard" isActive={pathname === '/'} asChild>
                   <Link href="/">
-                    <LayoutDashboard />
-                    <span>Dashboard</span>
+                    <LayoutDashboard className="size-4" />
+                    <span className="text-xs sm:text-sm">Dashboard</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroup>
           <SidebarGroup>
-            <SidebarGroupLabel>Pipelines Ativos</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-wider">Pipelines Ativos</SidebarGroupLabel>
             <SidebarMenu>
               {pipelines.map((p) => (
                 <SidebarMenuItem key={p.id}>
@@ -86,9 +86,9 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
                     asChild
                   >
                     <Link href={`/pipeline/${p.id}`}>
-                      <p.icon />
-                      <span>{p.name}</span>
-                      <ChevronRight className="ml-auto size-4 opacity-50" />
+                      <p.icon className="size-4" />
+                      <span className="text-xs sm:text-sm">{p.name}</span>
+                      <ChevronRight className="ml-auto size-3 opacity-50" />
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -96,48 +96,48 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
             </SidebarMenu>
           </SidebarGroup>
           <SidebarGroup>
-            <SidebarGroupLabel>Configurações</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-wider">Gestão</SidebarGroupLabel>
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton tooltip="Parâmetros">
-                  <Settings2 />
-                  <span>Parâmetros Globais</span>
+                  <Settings2 className="size-4" />
+                  <span className="text-xs sm:text-sm">Parâmetros</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton tooltip="Histórico">
-                  <History />
-                  <span>Histórico de Execuções</span>
+                  <History className="size-4" />
+                  <span className="text-xs sm:text-sm">Histórico</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="border-t pt-4">
+        <SidebarFooter className="border-t pt-2">
            <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg">
                 <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-accent text-accent-foreground">
                   <User className="size-4" />
                 </div>
-                <div className="grid flex-1 text-left text-sm leading-tight">
+                <div className="grid flex-1 text-left text-[11px] leading-tight">
                   <span className="truncate font-semibold">Eduardo Sousa</span>
-                  <span className="truncate text-xs">eduardo.sousa@rfk.com</span>
+                  <span className="truncate opacity-70">eduardo@rfk.com</span>
                 </div>
-                <LogOut className="ml-auto size-4" />
+                <LogOut className="ml-auto size-3 opacity-50" />
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <header className="flex h-14 sm:h-16 shrink-0 items-center gap-2 px-3 sm:px-4 border-b">
-          <SidebarTrigger className="-ml-1" />
+        <header className="flex h-12 sm:h-16 shrink-0 items-center gap-2 px-3 sm:px-4 border-b">
+          <SidebarTrigger className="-ml-1 size-8" />
           <div className="flex-1 min-w-0">
-             <h1 className="text-sm sm:text-lg font-semibold text-primary truncate">vFleet Studio</h1>
+             <h1 className="text-sm sm:text-lg font-bold text-primary truncate">vFleet Studio</h1>
           </div>
         </header>
-        <main className="flex-1 overflow-x-hidden p-3 sm:p-6 bg-background">
+        <main className="flex-1 overflow-x-hidden p-2 sm:p-6 bg-background">
           {children}
         </main>
       </SidebarInset>
