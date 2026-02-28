@@ -59,7 +59,7 @@ export function VFleetPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline vFLEET PILOT (Boletim + Alertas)...`)
+    addLog(`Iniciando Pipeline vFleet...`)
 
     try {
       addLog("Identificando arquivos anexados...", "info")
@@ -79,18 +79,18 @@ export function VFleetPipelineView() {
         setProgress(100)
         
         if (downloadOnly) {
-          addLog("Gerando Excel Analítico vFleet...", "success")
+          addLog("Gerando Excel Consolidado...", "success")
           downloadMultipleSheets([
             { data: result.detalhePonto || [], name: '04_Detalhe_Diario' },
             { data: result.data, name: '05_Consolidado_Motorista' }
           ], `vFleet_Analitico_${month}_${year}`)
         } else {
-          addLog("Processamento vFleet concluído com sucesso.", "success")
+          addLog("Sincronização com o Firebase concluída.", "success")
         }
         
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel analítico foi baixado." : "Dados vFleet processados." 
+          description: downloadOnly ? "Excel analítico baixado." : "Dados vFleet." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido');
@@ -135,7 +135,7 @@ export function VFleetPipelineView() {
                 Configuração vFleet
               </CardTitle>
               <CardDescription>
-                Análise de Telemetria e Comportamento do Motorista
+                Análise de Telemetria
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -154,7 +154,7 @@ export function VFleetPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold text-primary">Arquivos de Entrada ({files.length})</Label>
+                  <Label className="text-base font-semibold text-primary">Relatório Analítico de Condução({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
                     <Upload className="mr-2 size-4" /> Selecionar Lote
                   </Button>
@@ -165,7 +165,7 @@ export function VFleetPipelineView() {
                   {files.length === 0 ? (
                     <div className="text-center space-y-2">
                       <Files className="size-10 mx-auto opacity-20" />
-                      <p className="text-sm text-muted-foreground italic">Arraste ou selecione o Boletim e os Alertas</p>
+                      <p className="text-sm text-muted-foreground italic">Arraste ou selecione o arquivo</p>
                     </div>
                   ) : (
                     <ScrollArea className="w-full h-[150px]">
@@ -190,7 +190,7 @@ export function VFleetPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-primary">
-                    <span>Processando com Firebase</span>
+                  <span>Sincronizando com Firebase</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -227,7 +227,7 @@ export function VFleetPipelineView() {
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <div className="text-muted-foreground italic space-y-2">
-                  <p>Aguardando arquivos do vFleet.</p>
+                  <p>Aguardando relatórios do vFleet.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
                     <strong>Sugestão:</strong><br/>
                     • Boletim_do_Veiculo

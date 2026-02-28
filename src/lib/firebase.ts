@@ -12,7 +12,6 @@ import {
   Timestamp 
 } from "firebase/firestore";
 
-// Configuração será injetada pelo Firebase Studio automaticamente
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -40,7 +39,6 @@ export interface DriverConsolidated {
   'Falhas SLA'?: number;
   'Falhas Tempo'?: number;
   'Falhas Sequência'?: number;
-  // Ponto
   'Dias_Trabalhados'?: number;
   '💰 Total_Bonus_Marcacoes'?: number;
   '💰 Total_Bonus_Criterios'?: number;
@@ -82,6 +80,7 @@ export const firebaseStore = {
         ...result,
         createdAt: Timestamp.now()
       });
+      console.log(`Documento salvo com ID: ${docRef.id}`);
       return { ...result, id: docRef.id };
     } catch (error) {
       console.error("Erro ao salvar no Firestore:", error);
@@ -89,21 +88,18 @@ export const firebaseStore = {
     }
   },
 
-  getLatestByType: async (type: string): Promise<PipelineResult | null> => {
+  getRecentActivity: async (maxItems: number = 5): Promise<PipelineResult[]> => {
     try {
       const q = query(
         collection(db, "pipeline_results"),
-        where("pipelineType", "==", type),
-        orderBy("timestamp", "desc"),
-        limit(1)
+        orderBy("createdAt", "desc"),
+        limit(maxItems)
       );
       const querySnapshot = await getDocs(q);
-      if (querySnapshot.empty) return null;
-      const doc = querySnapshot.docs[0];
-      return { id: doc.id, ...doc.data() } as PipelineResult;
+      return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PipelineResult));
     } catch (error) {
-      console.error("Erro ao buscar do Firestore:", error);
-      return null;
+      console.error("Erro ao buscar atividade recente:", error);
+      return [];
     }
   }
 };

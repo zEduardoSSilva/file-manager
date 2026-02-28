@@ -35,10 +35,10 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   const pipelines = [
-    { id: 'vfleet', name: 'vFleet Pilot', icon: Truck },
+    { id: 'vfleet', name: 'vFleet', icon: Truck },
     { id: 'performaxxi', name: 'Performaxxi', icon: Zap },
-    { id: 'ponto', name: 'Ponto e Absenteísmo', icon: Clock },
-    { id: 'consolidador', name: 'Consolidador Final', icon: FileStack },
+    { id: 'ponto', name: 'Absenteísmo', icon: Clock },
+    { id: 'consolidador', name: 'Consolidador', icon: FileStack },
   ]
 
   return (
@@ -134,7 +134,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
         <header className="flex h-12 sm:h-16 shrink-0 items-center gap-2 px-3 sm:px-4 border-b">
           <SidebarTrigger className="-ml-1 size-8" />
           <div className="flex-1 min-w-0">
-             <h1 className="text-sm sm:text-lg font-bold text-primary truncate">vFleet Studio</h1>
+             <h1 className="text-sm sm:text-lg font-bold text-primary truncate">File Studio</h1>
           </div>
         </header>
         <main className="flex-1 min-w-0 overflow-auto p-3 sm:p-6 bg-background">

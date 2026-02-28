@@ -60,15 +60,16 @@ export function PerformaxxiPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline PERFORMAXXI ÚNICO...`)
+    addLog(`Iniciando Pipeline Performaxxi...`)
 
     try {
-      addLog("Conectando ao Firebase Studio...", "info")
+      addLog("Identificando arquivos anexados...", "info")
       await new Promise(r => setTimeout(r, 400))
       setProgress(15)
       
-      addLog("Analisando 4 critérios de performance (Unificado).", "info")
-      addLog("Bônus Proporcional: R$ 2,00/critério (Motorista) | R$ 1,80/critério (Ajudante).", "info")
+      addLog("Analisando 4 critérios de performance.", "info")
+      addLog("Bônus Proporcional: R$ 2,00/critério (Motorista)", "info")
+      addLog("Bônus Proporcional: R$ 1,80/critério (Ajudante).", "info")
       
       setProgress(40)
       const formData = new FormData()
@@ -84,18 +85,18 @@ export function PerformaxxiPipelineView() {
         setProgress(100)
         
         if (downloadOnly) {
-          addLog("Gerando Excel Consolidado (Motoristas + Ajudantes)...", "success")
+          addLog("Gerando Excel Consolidado...", "success")
           downloadMultipleSheets([
             { data: result.detalheGeral || [], name: '01_Detalhe_Geral' },
             { data: result.data, name: '02_Consolidado_Geral' }
           ], `Performaxxi_Final_${month}_${year}`)
         } else {
-          addLog("Sincronização com o Firebase concluída com sucesso.", "success")
+          addLog("Sincronização com o Firebase concluída.", "success")
         }
 
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel unificado foi baixado." : "Dados salvos no Firebase." 
+          description: downloadOnly ? "Excel analítico baixado." : "Dados Performaxxi." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido')
@@ -139,7 +140,7 @@ export function PerformaxxiPipelineView() {
                 Configuração Performaxxi
               </CardTitle>
               <CardDescription>
-                Unificação de Cargos e Sincronização Firebase
+              Análise de Performance
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -158,9 +159,9 @@ export function PerformaxxiPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold">Relatório Analítico de Rotas ({files.length})</Label>
+                  <Label className="text-base font-semibold">Relatório Analítico de Performance ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
-                    <Upload className="mr-2 size-4" /> Selecionar
+                    <Upload className="mr-2 size-4" /> Selecionar Lote
                   </Button>
                   <input id="file-upload" type="file" multiple className="hidden" onChange={handleFileChange} />
                 </div>
@@ -169,7 +170,7 @@ export function PerformaxxiPipelineView() {
                   {files.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                       <Files className="size-10 mb-2 opacity-20" />
-                      <p className="text-sm">Anexe o arquivo Excel do Performaxxi.</p>
+                      <p className="text-sm text-muted-foreground italic">Arraste ou selecione o arquivo</p>
                     </div>
                   ) : (
                     <ScrollArea className="h-[150px] p-4">
@@ -222,7 +223,7 @@ export function PerformaxxiPipelineView() {
           <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm">
             <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                 <FileCode className="size-3" /> Console Performaxxi
+                 <FileCode className="size-3" /> Console de Execução
                </span>
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">

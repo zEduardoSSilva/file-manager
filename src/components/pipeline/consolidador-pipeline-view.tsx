@@ -53,7 +53,7 @@ export function ConsolidadorPipelineView() {
       await new Promise(r => setTimeout(r, 600))
       setProgress(20)
       
-      addLog("Buscando resultados de Ponto e Absenteísmo no banco...", "info")
+      addLog("Buscando resultados de Ponto (Absenteísmo) no banco...", "info")
       await new Promise(r => setTimeout(r, 600))
       setProgress(40)
       
@@ -157,7 +157,7 @@ export function ConsolidadorPipelineView() {
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <Badge variant="outline" className="bg-white"><CheckCircle2 className="size-3 mr-1 text-green-500" /> Performaxxi</Badge>
-                  <Badge variant="outline" className="bg-white"><CheckCircle2 className="size-3 mr-1 text-green-500" /> Ponto/Abs.</Badge>
+                  <Badge variant="outline" className="bg-white"><CheckCircle2 className="size-3 mr-1 text-green-500" /> Absenteísmo</Badge>
                   <Badge variant="outline" className="bg-white"><CheckCircle2 className="size-3 mr-1 text-green-500" /> vFleet</Badge>
                 </div>
               </div>

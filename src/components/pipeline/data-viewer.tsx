@@ -1,7 +1,8 @@
+
 "use client"
 
 import * as React from "react"
-import { PipelineResult, DriverConsolidated, AbsenteismoData } from "@/lib/firebase"
+import { PipelineResult, AbsenteismoData } from "@/lib/firebase"
 import { 
   Table, 
   TableBody, 
@@ -13,7 +14,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Info, Truck, CalendarCheck } from "lucide-react"
+import { Info, Truck, CalendarCheck, CheckCircle2 } from "lucide-react"
 
 export function DataViewer({ result }: { result: PipelineResult }) {
   const isPonto = result.pipelineType === 'ponto';
@@ -103,30 +104,39 @@ export function DataViewer({ result }: { result: PipelineResult }) {
   )
 
   return (
-    <Card className="border-t-4 border-t-primary shadow-sm">
+    <Card className="border-t-4 border-t-green-500 shadow-sm">
       <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <CardTitle className="text-base sm:text-lg">Dados Transformados: {result.pipelineType.toUpperCase()}</CardTitle>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-base sm:text-lg">Dados Transformados: {result.pipelineType.toUpperCase()}</CardTitle>
+              {result.id && (
+                <Badge className="bg-green-500/10 text-green-600 hover:bg-green-500/20 border-green-500/20 flex items-center gap-1 text-[9px] py-0 h-5">
+                  <CheckCircle2 className="size-2.5" /> SINCRONIZADO
+                </Badge>
+              )}
+            </div>
             <CardDescription className="text-xs">
-              Referência: {result.month.toString().padStart(2, '0')}/{result.year}
+              Período: {result.month.toString().padStart(2, '0')}/{result.year}
             </CardDescription>
           </div>
-          <Badge variant="outline" className="text-primary border-primary/30 uppercase tracking-tighter text-[9px] sm:text-xs w-fit">
-            ID: {result.id?.substring(0, 8)}
-          </Badge>
+          <div className="flex flex-col items-end gap-1">
+            <Badge variant="outline" className="text-[9px] sm:text-[10px] font-mono opacity-60">
+              FB-ID: {result.id?.substring(0, 12)}...
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-3 sm:p-6 pt-0">
         <Tabs defaultValue="drivers">
           <TabsList className="mb-4 h-8 sm:h-10 w-full sm:w-auto overflow-x-auto justify-start sm:justify-center">
-            <TabsTrigger value="overview" className="text-xs h-7 sm:h-8">Sumário</TabsTrigger>
+            <TabsTrigger value="overview" className="text-xs h-7 sm:h-8">Sumário IA</TabsTrigger>
             <TabsTrigger value="drivers" className="flex items-center gap-1 sm:gap-2 text-xs h-7 sm:h-8">
               <Truck className="size-3" /> Consolidado
             </TabsTrigger>
             {isPonto && result.absenteismoData && (
               <TabsTrigger value="abs" className="flex items-center gap-1 sm:gap-2 text-xs h-7 sm:h-8">
-                <CalendarCheck className="size-3" /> Abs.
+                <CalendarCheck className="size-3" /> Absenteísmo
               </TabsTrigger>
             )}
           </TabsList>
@@ -134,10 +144,10 @@ export function DataViewer({ result }: { result: PipelineResult }) {
           <TabsContent value="overview">
              <div className="bg-primary/5 p-3 sm:p-4 rounded-lg border border-primary/10">
                 <h4 className="text-xs sm:text-sm font-semibold mb-2 flex items-center gap-2">
-                  <Info className="size-3 sm:size-4 text-primary" /> Sumário IA
+                  <Info className="size-3 sm:size-4 text-primary" /> Análise Inteligente
                 </h4>
                 <p className="text-[11px] sm:text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap italic">
-                  {result.summary || "Nenhum resumo disponível."}
+                  {result.summary || "Processando resumo da IA..."}
                 </p>
               </div>
           </TabsContent>

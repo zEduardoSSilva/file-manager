@@ -71,10 +71,10 @@ export function PontoPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline PONTO E ABSENTEÍSMO...`)
+    addLog(`Iniciando Pipeline Absenteísmo...`)
 
     try {
-      addLog("Lendo arquivos de Ponto...", "info")
+      addLog("Identificando arquivos anexados...", "info")
       if (excludedDates.length > 0) {
         addLog(`Aplicando ${excludedDates.length} feriados/exclusões globais...`, "warn")
       }
@@ -84,7 +84,7 @@ export function PontoPipelineView() {
       setProgress(20)
       
       addLog("Analisando Jornada, HE, Almoço e Descanso Interjornada...", "info")
-      addLog("Calculando bônus e absenteísmo proporcional...", "info")
+      addLog("Calculando bônus e absenteísmo...", "info")
       
       setProgress(50)
       const formData = new FormData()
@@ -105,25 +105,25 @@ export function PontoPipelineView() {
         setProgress(100)
 
         if (downloadOnly) {
-          addLog("Gerando Excel com abas Detalhe, Consolidado e Absenteísmo...", "success")
+          addLog("Gerando Excel Consolidado...", "success")
           downloadMultipleSheets([
             { data: result.detalhePonto || [], name: '03_Detalhe_Ponto' },
             { data: result.data, name: '04_Consolidado' },
             { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
           ], `Ponto_Consolidado_${month}_${year}`)
         } else {
-          addLog("Processamento concluído with sucesso.", "success")
+          addLog("Sincronização com o Firebase concluída.", "success")
         }
 
         toast({ 
           title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "O Excel analítico foi baixado." : "Processamento finalizado." 
+          description: downloadOnly ? "Excel analítico baixado." : "Dados Absenteísmo." 
         });
       } else {
         throw new Error(response.success === false ? response.error : 'Erro desconhecido')
       }
     } catch (error: any) {
-      addLog(`FALHA NO PONTO: ${error.message}`, "error")
+      addLog(`FALHA: ${error.message}`, "error")
       setProgress(0)
     } finally {
       setIsExecuting(false)
@@ -139,7 +139,7 @@ export function PontoPipelineView() {
       <Alert className="bg-indigo-50 border-indigo-200">
         <div className="flex items-center gap-2">
           <Info className="size-4 text-indigo-600" />
-          <AlertTitle className="mb-0 text-indigo-900">Gestão de Jornada e Absenteísmo</AlertTitle>
+          <AlertTitle className="mb-0 text-indigo-900">Gestão de Absenteísmo</AlertTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -165,7 +165,7 @@ export function PontoPipelineView() {
                 Configuração de Ponto
               </CardTitle>
               <CardDescription>
-                Consolidação de Jornada e Absenteísmo (Lógica Automatizada)
+                Consolidação de Jornada e Absenteísmo
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -204,7 +204,7 @@ export function PontoPipelineView() {
               <div className="space-y-3">
                 <Label className="text-sm font-semibold flex items-center gap-2">
                   <CalendarIcon className="size-4 text-primary" />
-                  Gestão de Feriados e Abonos (Excluir do Período)
+                  Gestão de Feriados e Abonos
                 </Label>
                 <div className="flex flex-wrap gap-2 mb-2">
                   {excludedDates.length === 0 ? (
@@ -228,7 +228,7 @@ export function PontoPipelineView() {
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm" className="w-full sm:w-auto">
-                      <CalendarIcon className="mr-2 size-4" /> Selecionar Datas para Abono/Feriado
+                      <CalendarIcon className="mr-2 size-4" /> Selecionar Datas
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
@@ -245,7 +245,7 @@ export function PontoPipelineView() {
 
               <div className="space-y-4 pt-2">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold">Arquivos de Ponto ({files.length})</Label>
+                  <Label className="text-base font-semibold">Relatório Analítico de Ponto ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
                     <Upload className="mr-2 size-4" /> Selecionar Lote
                   </Button>
@@ -256,7 +256,7 @@ export function PontoPipelineView() {
                   {files.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                       <Files className="size-10 mb-2 opacity-20" />
-                      <p className="text-sm">Anexe os arquivos Excel de Ponto.</p>
+                      <p className="text-sm text-muted-foreground italic">Arraste ou selecione o arquivo</p>
                     </div>
                   ) : (
                     <ScrollArea className="h-[150px] p-4">
@@ -278,7 +278,7 @@ export function PontoPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-indigo-600">
-                    <span>Processando com Firebase</span>
+                  <span>Sincronizando com Firebase</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -309,13 +309,13 @@ export function PontoPipelineView() {
           <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm">
             <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                 <FileCode className="size-3" /> Monitor de Ponto
+                 <FileCode className="size-3" /> Console de Execução
                </span>
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <div className="text-muted-foreground italic space-y-2">
-                  <p>Aguardando arquivos de Ponto.</p>
+                  <p>Aguardando relatórios de Ponto.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
                     <strong>Sugestão:</strong><br/>
                     • Ponto_Original
