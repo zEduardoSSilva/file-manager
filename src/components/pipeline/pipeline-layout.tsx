@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -132,13 +131,13 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 px-4 border-b">
+        <header className="flex h-14 sm:h-16 shrink-0 items-center gap-2 px-3 sm:px-4 border-b">
           <SidebarTrigger className="-ml-1" />
-          <div className="flex-1">
-             <h1 className="text-lg font-semibold text-primary">vFleet Studio</h1>
+          <div className="flex-1 min-w-0">
+             <h1 className="text-sm sm:text-lg font-semibold text-primary truncate">vFleet Studio</h1>
           </div>
         </header>
-        <main className="flex-1 overflow-auto p-6 bg-background">
+        <main className="flex-1 overflow-x-hidden p-3 sm:p-6 bg-background">
           {children}
         </main>
       </SidebarInset>

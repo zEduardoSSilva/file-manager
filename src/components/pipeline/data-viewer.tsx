@@ -18,41 +18,43 @@ import { Info, Truck, CalendarCheck } from "lucide-react"
 export function DataViewer({ result }: { result: PipelineResult }) {
   const isPonto = result.pipelineType === 'ponto';
 
-  const renderTable = (data: any[], type: 'Motorista' | 'Ajudante') => (
+  const renderTable = (data: any[], type: 'Motorista' | 'Ajudante' | 'Colaborador') => (
     <div className="rounded-md border overflow-x-auto">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead className="min-w-[150px]">{type}</TableHead>
-            <TableHead className="text-center">Dias Trab.</TableHead>
-            <TableHead className="text-center">Bonus Marc.</TableHead>
-            <TableHead className="text-center">Bonus Crit.</TableHead>
-            <TableHead className="text-center">Total (R$)</TableHead>
-            <TableHead className="text-center">4/4 OK</TableHead>
-            <TableHead className="text-center">Crit. OK</TableHead>
-            <TableHead className="text-center">Ajustes</TableHead>
+          <TableRow className="bg-muted/50">
+            <TableHead className="min-w-[140px] text-xs py-2 px-3">{type}</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Dias</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Bonus M.</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Bonus C.</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Total (R$)</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">4/4 OK</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {data.map((row, i) => (
-            <TableRow key={i}>
-              <TableCell className="font-medium">
-                <div>
-                  <p className="text-xs uppercase">{row.Motorista || row.Ajudante || row.Nome}</p>
-                  <p className="text-[10px] text-muted-foreground">ID: {row.ID}</p>
+            <TableRow key={i} className="hover:bg-muted/30">
+              <TableCell className="font-medium py-2 px-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] sm:text-xs uppercase font-bold truncate max-w-[120px]">{row.Funcionario || row.Motorista || row.Ajudante || row.Nome}</p>
+                  <p className="text-[9px] text-muted-foreground">Cargo: {row.Cargo || 'N/A'}</p>
                 </div>
               </TableCell>
-              <TableCell className="text-center">{row.Dias_Trabalhados}</TableCell>
-              <TableCell className="text-center text-xs">R$ {Number(row['💰 Total_Bonus_Marcacoes'] || 0).toFixed(2)}</TableCell>
-              <TableCell className="text-center text-xs">R$ {Number(row['💰 Total_Bonus_Criterios'] || 0).toFixed(2)}</TableCell>
-              <TableCell className="text-center font-bold text-primary">R$ {Number(row['💵 BONIFICACAO_TOTAL'] || 0).toFixed(2)}</TableCell>
-              <TableCell className="text-center">
-                <Badge variant="outline" className="text-[10px]">{row.Dias_4_Marcacoes_Completas}</Badge>
+              <TableCell className="text-center text-[10px] sm:text-xs py-2 px-1">{row['Dias com Atividade'] || row.Dias_Trabalhados || 0}</TableCell>
+              <TableCell className="text-center text-[10px] sm:text-xs py-2 px-1 font-mono">
+                {Number(row['💰 Total_Bonus_Marcacoes'] || 0).toFixed(2)}
               </TableCell>
-              <TableCell className="text-center">
-                <Badge variant="outline" className="text-[10px]">{row.Dias_Todos_Criterios_OK}</Badge>
+              <TableCell className="text-center text-[10px] sm:text-xs py-2 px-1 font-mono">
+                {Number(row['💰 Total_Bonus_Criterios'] || 0).toFixed(2)}
               </TableCell>
-              <TableCell className="text-center text-destructive font-mono text-xs">{row.Total_Ajustes_Manuais}</TableCell>
+              <TableCell className="text-center font-bold text-primary text-[10px] sm:text-xs py-2 px-1">
+                {Number(row['Total Bonificação (R$)'] || row['💵 BONIFICACAO_TOTAL'] || 0).toFixed(2)}
+              </TableCell>
+              <TableCell className="text-center py-2 px-1">
+                <Badge variant="outline" className="text-[8px] sm:text-[10px] px-1 h-4">
+                  {row['Dias Bonif. Máxima (4/4)'] || row.Dias_4_Marcacoes_Completas || 0}
+                </Badge>
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -64,39 +66,35 @@ export function DataViewer({ result }: { result: PipelineResult }) {
     <div className="rounded-md border overflow-x-auto">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>Nome</TableHead>
-            <TableHead className="text-center">Grupo</TableHead>
-            <TableHead className="text-center">Denom. (Dias)</TableHead>
-            <TableHead className="text-center">Pres. Físicas</TableHead>
-            <TableHead className="text-center">Atestados/Férias</TableHead>
-            <TableHead className="text-center">Abonos Man.</TableHead>
-            <TableHead className="text-center">Total Pres.</TableHead>
-            <TableHead className="text-center">Faltas</TableHead>
-            <TableHead className="text-center">Freq %</TableHead>
-            <TableHead className="text-center">Incentivo (R$)</TableHead>
+          <TableRow className="bg-muted/50">
+            <TableHead className="text-xs py-2 px-3">Nome</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Denom.</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Total P.</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Faltas</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Freq %</TableHead>
+            <TableHead className="text-center text-xs py-2 px-1">Incentivo</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {data.map((row, i) => (
-            <TableRow key={i}>
-              <TableCell className="font-medium text-[10px] uppercase">
-                {row.Nome}
-                <p className="text-[9px] text-muted-foreground">ID: {row.ID}</p>
+            <TableRow key={i} className="hover:bg-muted/30">
+              <TableCell className="font-medium py-2 px-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] sm:text-xs uppercase font-bold truncate max-w-[120px]">{row.Nome}</p>
+                  <p className="text-[9px] text-muted-foreground">ID: {row.ID}</p>
+                </div>
               </TableCell>
-              <TableCell className="text-center text-[10px]">{row.Grupo}</TableCell>
-              <TableCell className="text-center font-bold">{row.Total_Dias}</TableCell>
-              <TableCell className="text-center">{row['Presenças Físicas']}</TableCell>
-              <TableCell className="text-center">{row['Atestados/Férias']}</TableCell>
-              <TableCell className="text-center text-amber-600">{row['Abonos Manuais']}</TableCell>
-              <TableCell className="text-center font-semibold text-primary">{row['Total Presenças']}</TableCell>
-              <TableCell className="text-center text-destructive font-bold">{row.Faltas}</TableCell>
-              <TableCell className="text-center">
-                <Badge variant={row['Percentual (%)'] >= 90 ? 'default' : 'secondary'} className="text-[10px]">
+              <TableCell className="text-center font-bold text-[10px] sm:text-xs py-2 px-1">{row.Total_Dias}</TableCell>
+              <TableCell className="text-center font-semibold text-primary text-[10px] sm:text-xs py-2 px-1">{row['Total Presenças']}</TableCell>
+              <TableCell className="text-center text-destructive font-bold text-[10px] sm:text-xs py-2 px-1">{row.Faltas}</TableCell>
+              <TableCell className="text-center py-2 px-1">
+                <Badge variant={row['Percentual (%)'] >= 90 ? 'default' : 'secondary'} className="text-[8px] sm:text-[10px] h-4 px-1">
                   {row['Percentual (%)']}%
                 </Badge>
               </TableCell>
-              <TableCell className="text-center font-bold text-green-700">R$ {row.Valor_Incentivo.toFixed(2)}</TableCell>
+              <TableCell className="text-center font-bold text-green-700 text-[10px] sm:text-xs py-2 px-1">
+                {row.Valor_Incentivo.toFixed(2)}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -105,40 +103,40 @@ export function DataViewer({ result }: { result: PipelineResult }) {
   )
 
   return (
-    <Card className="border-t-4 border-t-primary">
-      <CardHeader>
-        <div className="flex items-center justify-between">
+    <Card className="border-t-4 border-t-primary shadow-sm">
+      <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <CardTitle>Dados Transformados: {result.pipelineType.toUpperCase()}</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-base sm:text-lg">Dados Transformados: {result.pipelineType.toUpperCase()}</CardTitle>
+            <CardDescription className="text-xs">
               Referência: {result.month.toString().padStart(2, '0')}/{result.year}
             </CardDescription>
           </div>
-          <Badge variant="outline" className="text-primary border-primary/30 uppercase tracking-tighter">
-            ID: {result.id}
+          <Badge variant="outline" className="text-primary border-primary/30 uppercase tracking-tighter text-[9px] sm:text-xs w-fit">
+            ID: {result.id?.substring(0, 8)}
           </Badge>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="p-3 sm:p-6 pt-0">
         <Tabs defaultValue="drivers">
-          <TabsList className="mb-4">
-            <TabsTrigger value="overview">Sumário IA</TabsTrigger>
-            <TabsTrigger value="drivers" className="flex items-center gap-2">
+          <TabsList className="mb-4 h-8 sm:h-10 w-full sm:w-auto overflow-x-auto justify-start sm:justify-center">
+            <TabsTrigger value="overview" className="text-xs h-7 sm:h-8">Sumário</TabsTrigger>
+            <TabsTrigger value="drivers" className="flex items-center gap-1 sm:gap-2 text-xs h-7 sm:h-8">
               <Truck className="size-3" /> Consolidado
             </TabsTrigger>
             {isPonto && result.absenteismoData && (
-              <TabsTrigger value="abs" className="flex items-center gap-2">
-                <CalendarCheck className="size-3" /> Absenteísmo
+              <TabsTrigger value="abs" className="flex items-center gap-1 sm:gap-2 text-xs h-7 sm:h-8">
+                <CalendarCheck className="size-3" /> Abs.
               </TabsTrigger>
             )}
           </TabsList>
           
           <TabsContent value="overview">
-             <div className="bg-primary/5 p-4 rounded-lg border border-primary/10">
-                <h4 className="font-semibold mb-2 flex items-center gap-2">
-                  <Info className="size-4 text-primary" /> Sumário IA
+             <div className="bg-primary/5 p-3 sm:p-4 rounded-lg border border-primary/10">
+                <h4 className="text-xs sm:text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Info className="size-3 sm:size-4 text-primary" /> Sumário IA
                 </h4>
-                <p className="text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap italic">
+                <p className="text-[11px] sm:text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap italic">
                   {result.summary || "Nenhum resumo disponível."}
                 </p>
               </div>
