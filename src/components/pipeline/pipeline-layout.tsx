@@ -130,14 +130,14 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset>
+      <SidebarInset className="min-w-0 overflow-hidden">
         <header className="flex h-12 sm:h-16 shrink-0 items-center gap-2 px-3 sm:px-4 border-b">
           <SidebarTrigger className="-ml-1 size-8" />
           <div className="flex-1 min-w-0">
              <h1 className="text-sm sm:text-lg font-bold text-primary truncate">vFleet Studio</h1>
           </div>
         </header>
-        <main className="flex-1 overflow-x-hidden p-2 sm:p-6 bg-background">
+        <main className="flex-1 min-w-0 overflow-x-hidden p-3 sm:p-6 bg-background">
           {children}
         </main>
       </SidebarInset>
