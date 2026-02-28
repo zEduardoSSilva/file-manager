@@ -63,29 +63,53 @@ export function PerformaxxiPipelineView() {
 
     try {
       addLog("Identificando arquivos anexados...", "info")
+      addLog(`Arquivos: ${files.map(f => f.name).join(', ')}`, "info")
       addLog(`Período: ${String(month).padStart(2,'0')}/${year}`, "info")
-      
+
       addLog("Análise em lote de 4 critérios simultâneos.", "info")
       addLog("Processando Motoristas (R$ 8,00) e Ajudantes (R$ 7,20)...", "info")
-      
+
       setProgress(30)
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
       files.forEach(f => formData.append('files', f))
 
-      addLog("Enviando dados para processamento no servidor...", "info")
-      
-      const response = await executePipeline(formData, 'performaxxi')
+      addLog("Enviando dados ao servidor...", "info")
 
-      if (!response.success) {
-        addLog(`Erro retornado: ${response.error}`, "error")
-        throw new Error(response.error)
+      let response: any
+      try {
+        response = await executePipeline(formData, 'performaxxi')
+      } catch (networkErr: any) {
+        const detail = networkErr?.message || String(networkErr)
+        addLog(`Erro de comunicação com servidor: ${detail}`, "error")
+        if (networkErr?.cause) addLog(`Causa: ${String(networkErr.cause)}`, "error")
+        throw networkErr
+      }
+
+      addLog(`Resposta recebida. Status: ${response?.success ? 'SUCESSO' : 'FALHA'}`, response?.success ? 'info' : 'warn')
+
+      if (!response?.success) {
+        const errMsg    = response?.error  || '(sem mensagem)'
+        const errStack  = response?.stack  || ''
+        const errCode   = response?.code   || ''
+        const errDetail = response?.detail || ''
+
+        addLog(`Erro retornado pelo servidor:`, "error")
+        addLog(`→ Mensagem : ${errMsg}`, "error")
+        if (errCode)   addLog(`→ Código   : ${errCode}`, "error")
+        if (errDetail) addLog(`→ Detalhe  : ${errDetail}`, "error")
+        if (errStack)  addLog(`→ Stack    : ${errStack.split('\n')[0]}`, "error")
+
+        throw new Error(errMsg)
       }
 
       const result = response.result;
       setLastResult(result)
       setProgress(100)
+
+      const resultKeys = Object.keys(result || {})
+      addLog(`Campos retornados: ${resultKeys.join(', ')}`, "info")
 
       if (downloadOnly) {
         addLog("Gerando Excel Unificado com colunas ordenadas...", "success")
@@ -93,17 +117,27 @@ export function PerformaxxiPipelineView() {
           { data: result.detalheGeral || [], name: '01_Detalhe_Unificado' },
           { data: result.data || [], name: '02_Consolidado_Unificado' }
         ], `Performaxxi_Final_${month}_${year}`)
+
+        if (!result.detalheGeral || result.detalheGeral.length === 0)
+          addLog("⚠️ Aba '01_Detalhe_Unificado' veio vazia — verifique se o campo 'detalheGeral' é retornado pelo backend.", "warn")
       } else {
         addLog("Sincronização com o Firebase concluída com sucesso.", "success")
       }
 
-      toast({ 
-        title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-        description: downloadOnly ? "Excel baixado com sucesso." : "Resultados salvos no banco." 
+      toast({
+        title: downloadOnly ? "Arquivo Pronto" : "Concluído",
+        description: downloadOnly ? "Excel baixado com sucesso." : "Resultados salvos no banco."
       });
 
     } catch (error: any) {
-      addLog(`FALHA NO PIPELINE: ${error.message}`, "error")
+      const msg = error?.message || String(error)
+      addLog(`FALHA GERAL: ${msg}`, "error")
+
+      if (msg.toLowerCase().includes('unexpected response') || msg.toLowerCase().includes('fetch')) {
+        addLog("Dica: O servidor pode ter retornado HTML de erro (500/404) em vez de JSON.", "warn")
+        addLog("Verifique os logs do servidor (terminal / Vercel / Firebase Functions).", "warn")
+      }
+
       setProgress(0)
     } finally {
       setIsExecuting(false)
@@ -196,17 +230,17 @@ export function PerformaxxiPipelineView() {
               )}
             </CardContent>
             <CardFooter className="bg-muted/5 border-t pt-6 flex flex-col sm:flex-row gap-3">
-              <Button 
-                variant="outline" 
-                className="flex-1 border-accent/30 text-accent hover:bg-accent/5" 
-                onClick={() => runPipeline(true)} 
+              <Button
+                variant="outline"
+                className="flex-1 border-accent/30 text-accent hover:bg-accent/5"
+                onClick={() => runPipeline(true)}
                 disabled={isExecuting || files.length === 0}
               >
                 <Download className="mr-2 size-4" /> Exportar Excel
               </Button>
-              <Button 
-                className="flex-[2] h-12 bg-accent hover:bg-accent/90 text-white font-semibold" 
-                onClick={() => runPipeline(false)} 
+              <Button
+                className="flex-[2] h-12 bg-accent hover:bg-accent/90 text-white font-semibold"
+                onClick={() => runPipeline(false)}
                 disabled={isExecuting || files.length === 0}
               >
                 {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Consolidando...</> : <><Play className="mr-2 fill-current" /> Salvar no Firebase</>}
@@ -234,9 +268,9 @@ export function PerformaxxiPipelineView() {
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (
                     <div key={i} className={`
-                      break-words ${log.includes('[ERRO]') ? 'text-destructive font-bold' : 
-                        log.includes('[OK]') ? 'text-green-600' : 
-                        log.includes('[AVISO]') ? 'text-amber-600' : 
+                      break-words ${log.includes('[ERRO]') ? 'text-destructive font-bold' :
+                        log.includes('[OK]') ? 'text-green-600' :
+                        log.includes('[AVISO]') ? 'text-amber-600' :
                         'text-slate-500'}
                     `}>
                       {log}
