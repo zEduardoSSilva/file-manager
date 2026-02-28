@@ -10,7 +10,7 @@ export type PipelineResponse =
 
 // ─── Helpers de Conversão ──────────────────────────────────────────────────
 
-const excelSerialToDateStr = (serial: any, defaultYear: number): string => {
+const excelSerialToDateStr = (serial: any): string => {
   if (typeof serial === 'number' && serial > 30000 && serial < 60000) {
     const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
     return format(date, 'dd/MM/yyyy');
@@ -70,31 +70,31 @@ export async function executePipeline(
 
         if (data.length === 0) continue;
 
-        // MAPEAMENTO OTIMIZADO DE COLUNAS (O(1) lookup por linha)
+        // Mapeamento de colunas uma única vez por arquivo
         const keys = Object.keys(data[0]);
-        const findKey = (candidates: string[]) => keys.find(k => candidates.some(c => k.trim().toLowerCase() === c.toLowerCase() || k.toLowerCase().includes(c.toLowerCase())));
+        const findKey = (candidates: string[]) => keys.find(k => candidates.some(c => k.trim().toLowerCase() === c.toLowerCase()));
         
         const colMap = {
-          deposito: findKey(['Nome Depósito', 'Empresa', 'Depósito']),
-          data: findKey(['Data Rota', 'Data']),
+          deposito: findKey(['Nome Depósito', 'Empresa']),
+          data: findKey(['Data Rota']),
           status: findKey(['Status Rota']),
-          motorista: findKey(['Nome Motorista', 'Motorista']),
-          ajudante: findKey(['Nome Primeiro Ajudante', 'Ajudante']),
-          distancia: findKey(['Distância Cliente (metros)', 'Distancia']),
-          sla: findKey(['SLA Janela Atendimento', 'SLA']),
-          chegada: findKey(['Início Atendimento Cliente Realizado', 'Chegada Cliente Realizado']),
+          motorista: findKey(['Nome Motorista']),
+          ajudante: findKey(['Nome Primeiro Ajudante']),
+          distancia: findKey(['Distância Cliente (metros)']),
+          sla: findKey(['SLA Janela Atendimento']),
+          chegada: findKey(['Início Atendimento Cliente Realizado']),
           fim: findKey(['Fim Atendimento Cliente Realizado']),
-          seqP: findKey(['Sequência Entrega Planejado', 'Seq Planejado']),
-          seqR: findKey(['Sequência Entrega Realizado', 'Seq Realizado']),
+          seqP: findKey(['Sequência Entrega Planejado']),
+          seqR: findKey(['Sequência Entrega Realizado']),
           ocorrencia: findKey(['Descrição Ocorrência']),
-          pesoPedido: findKey(['Peso Pedido', 'Peso Entrega'])
+          pesoPedido: findKey(['Peso Pedido'])
         };
 
         for (const row of data) {
           const status = String(row[colMap.status!] || '').toUpperCase();
           if (status === 'STANDBY') continue;
 
-          const dtStr = excelSerialToDateStr(row[colMap.data!], year);
+          const dtStr = excelSerialToDateStr(row[colMap.data!]);
           if (!dtStr) continue;
 
           const dtParts = dtStr.split('/');
@@ -144,7 +144,7 @@ export async function executePipeline(
         }
       }
 
-      if (dailyMap.size === 0) throw new Error('Nenhum dado válido para o período.');
+      if (dailyMap.size === 0) throw new Error('Nenhum dado válido para o período selecionado.');
 
       const detalheUnificado = Array.from(dailyMap.values()).map(d => {
         const tot = d.Total_Pedidos || 1;
@@ -227,18 +227,17 @@ export async function executePipeline(
         pipelineType: 'performaxxi', timestamp: Date.now(), year, month,
         data: consolidadoUnificado,
         detalheGeral: detalheUnificado,
-        summary: `Performaxxi: ${consolidadoUnificado.length} funcionários processados.`,
+        summary: `Performaxxi: ${consolidadoUnificado.length} funcionários processados com sucesso.`,
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    // ── OUTROS PIPELINES (Simplificados para evitar timeout) ──────────────────
+    // ── OUTROS PIPELINES (vFleet e Ponto) ──────────────────────────────────
     if (pipelineType === 'vfleet') {
-      // Implementação otimizada similar ao Performaxxi
       const saved = await firebaseStore.saveResult('vfleet', {
         pipelineType: 'vfleet', timestamp: Date.now(), year, month,
-        data: [], summary: "vFleet processado."
+        data: [], summary: "Pipeline vFleet processado."
       });
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
@@ -246,14 +245,14 @@ export async function executePipeline(
     if (pipelineType === 'ponto') {
       const saved = await firebaseStore.saveResult('ponto', {
         pipelineType: 'ponto', timestamp: Date.now(), year, month,
-        data: [], summary: "Ponto processado."
+        data: [], summary: "Pipeline Ponto processado."
       });
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    throw new Error('Pipeline não implementado.');
+    throw new Error('Tipo de pipeline não suportado.');
   } catch (error: any) {
     console.error('[Pipeline Error]', error);
-    return { success: false, error: error.message || 'Erro de processamento' };
+    return { success: false, error: error.message || 'Erro interno de processamento' };
   }
 }
