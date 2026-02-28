@@ -67,7 +67,7 @@ export async function executePipeline(formData: FormData, type?: string) {
 
         const headers = rows[0].map(h => String(h || '').toLowerCase().trim());
         
-        // Mapeia índices das colunas uma única vez
+        // Mapeia índices das colunas uma única vez para evitar buscas repetitivas
         const getIdx = (cands: string[]) => headers.findIndex(h => cands.some(c => h.includes(c.toLowerCase())));
         
         const col = {
@@ -76,7 +76,7 @@ export async function executePipeline(formData: FormData, type?: string) {
           status: getIdx(['status rota', 'status_rota']),
           motorista: getIdx(['nome motorista', 'motorista']),
           ajudante: getIdx(['nome primeiro ajudante', 'ajudante']),
-          dist: getIdx(['distância cliente', 'distancia cliente', 'distancia_cliente']),
+          dist: getIdx(['distância cliente', 'distancia cliente', 'distancia_cliente', 'distancia']),
           sla: getIdx(['sla janela']),
           chegada: getIdx(['chegada cliente realizado']),
           fimAtend: getIdx(['fim atendimento cliente realizado']),
@@ -91,18 +91,23 @@ export async function executePipeline(formData: FormData, type?: string) {
           const row = rows[i];
           if (!row[col.data]) continue;
           
-          const status = String(row[col.status] || '').toUpperCase();
+          // FILTRAGEM AGRESSIVA: Ignora instantaneamente rotas StandBy
+          const status = String(row[col.status] || '').toUpperCase().trim();
           if (status === 'STANDBY') continue;
 
           const dtStr = excelSerialToDateStr(row[col.data]);
-          const rowMonth = parseInt(dtStr.split('/')[1]);
-          if (rowMonth !== month) continue;
+          const rowParts = dtStr.split('/');
+          const rowMonth = parseInt(rowParts[1]);
+          const rowYear = parseInt(rowParts[2]);
+          
+          // Filtra pelo mês e ano de referência
+          if (rowMonth !== month || (rowYear !== year && rowYear !== year - 2000)) continue;
 
           const empresa = String(row[col.empresa] || 'N/A');
           const peso = toFloat(row[col.pesoP]);
           const isDevolvido = String(row[col.ocorrencia] || '').trim() !== '';
 
-          // Função interna para processar cada cargo
+          // Função interna para processar cada cargo (Motorista e Ajudante)
           const processCargo = (nome: string, cargo: 'MOTORISTA' | 'AJUDANTE') => {
             if (!nome || /^(0|null|nan|sem ajudante)$/i.test(nome)) return;
             const key = `${nome}|${cargo}|${dtStr}`;
@@ -123,7 +128,7 @@ export async function executePipeline(formData: FormData, type?: string) {
             // Critério 1: Raio <= 100m
             if (toFloat(row[col.dist]) <= 100) d.rOk++;
             
-            // Critério 2: SLA Janela
+            // Critério 2: SLA Janela Atendimento
             if (String(row[col.sla] || '').toUpperCase().includes('SIM')) d.sOk++;
             
             // Critério 3: Tempo Atendimento >= 1 min (60s)
@@ -141,13 +146,13 @@ export async function executePipeline(formData: FormData, type?: string) {
         }
       }
 
-      // Converte o Map para o formato analítico (04_Detalhe_Geral)
+      // Converte o Map para o formato analítico detalhado (04_Detalhe_Geral)
       const detalheUnificado = Array.from(dailyMap.values()).map(d => {
         const tot = d.pedidos || 1;
-        const cR = (d.rOk / tot) >= 0.7;
-        const cS = (d.sOk / tot) >= 0.8;
-        const cT = (d.tOk / tot) >= 1.0;
-        const cSeq = true; // Sequência sempre SIM conforme regra Python (>=0%)
+        const cR = (d.rOk / tot) >= 0.7; // Critério Raio: >= 70%
+        const cS = (d.sOk / tot) >= 0.8; // Critério SLA: >= 80%
+        const cT = (d.tOk / tot) >= 1.0; // Critério Tempo: >= 100%
+        const cSeq = (d.seqOk / tot) >= 0.0; // Critério Sequência (Python define >=0%)
         
         const cumpridos = (cR ? 1 : 0) + (cS ? 1 : 0) + (cT ? 1 : 0) + (cSeq ? 1 : 0);
         const unit = d.Cargo === 'MOTORISTA' ? (MOT_BASE / CRIT_COUNT) : (AJU_BASE / CRIT_COUNT);
@@ -181,7 +186,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         };
       });
 
-      // Consolida por Funcionário/Cargo (05_Consolidado_Geral)
+      // Consolida por Funcionário e Cargo (05_Consolidado_Geral)
       const consolidadoMap = new Map<string, any>();
       for (const d of detalheUnificado) {
         const key = `${d.Funcionario}|${d.Cargo}`;
@@ -189,7 +194,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         if (!m) {
           m = { 
             'Empresa': d.Empresa, 'Funcionario': d.Funcionario, 'Cargo': d.Cargo, 
-            dias: 0, bMax: 0, totalR: 0, totalC: 0, fR: 0, fS: 0, fT: 0 
+            dias: 0, bMax: 0, totalR: 0, totalC: 0, fR: 0, fS: 0, fT: 0, fSeq: 0
           };
           consolidadoMap.set(key, m);
         }
@@ -223,7 +228,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         year, month,
         data: consolidadoUnificado, 
         detalheGeral: detalheUnificado,
-        summary: `Processamento concluído: ${consolidadoUnificado.length} funcionários analisados em 01 única passagem.`
+        summary: `Processamento concluído: ${consolidadoUnificado.length} funcionários analisados em uma única passagem de alta performance.`
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
