@@ -1,3 +1,4 @@
+
 import { PipelineLayout } from "@/components/pipeline/pipeline-layout"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { 
@@ -15,7 +16,7 @@ import { Badge } from "@/components/ui/badge"
 export default function Home() {
   return (
     <PipelineLayout>
-      <div className="space-y-4 sm:space-y-6 max-w-full overflow-hidden">
+      <div className="space-y-4 sm:space-y-6 max-w-full min-w-0 overflow-hidden">
         <div className="px-1">
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Dashboard Executivo</h2>
           <p className="text-[10px] sm:text-sm text-muted-foreground">Visão geral do sistema vFleet Studio.</p>
@@ -71,36 +72,36 @@ export default function Home() {
               <CardTitle className="text-base sm:text-lg">Acesso Rápido</CardTitle>
               <CardDescription className="text-[10px] sm:text-sm">Inicie os fluxos vFleet Studio.</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-2 p-4 pt-0 sm:p-6 sm:pt-0 overflow-hidden">
-              <Button variant="outline" className="w-full justify-start h-auto p-2 sm:p-4 text-left whitespace-normal break-words" asChild>
+            <CardContent className="grid gap-2 p-4 pt-0 sm:p-6 sm:pt-0 min-w-0 overflow-hidden">
+              <Button variant="outline" className="w-full justify-start h-auto p-2 sm:p-4 text-left !whitespace-normal break-words" asChild>
                 <Link href="/pipeline/vfleet">
                   <div className="flex items-center gap-2 sm:gap-3 w-full min-w-0">
                     <div className="size-7 sm:size-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
                       <Truck className="size-3 sm:size-4 text-primary" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-[11px] sm:text-sm leading-tight break-words">Pipeline vFleet Pilot</p>
+                      <p className="font-semibold text-[11px] sm:text-sm leading-tight break-words">Pipeline vFleet</p>
                       <p className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate">Processar boletins e alertas.</p>
                     </div>
                     <ArrowUpRight className="size-3 shrink-0 text-muted-foreground ml-auto" />
                   </div>
                 </Link>
               </Button>
-              <Button variant="outline" className="w-full justify-start h-auto p-2 sm:p-4 text-left whitespace-normal break-words" asChild>
+              <Button variant="outline" className="w-full justify-start h-auto p-2 sm:p-4 text-left !whitespace-normal break-words" asChild>
                 <Link href="/pipeline/performaxxi">
                   <div className="flex items-center gap-2 sm:gap-3 w-full min-w-0">
                     <div className="size-7 sm:size-8 shrink-0 rounded-full bg-accent/10 flex items-center justify-center">
                       <BarChart3 className="size-3 sm:size-4 text-accent" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-[11px] sm:text-sm leading-tight break-words">Performaxxi Único</p>
-                      <p className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate">Análise de performance unificada.</p>
+                      <p className="font-semibold text-[11px] sm:text-sm leading-tight break-words">Pipeline Performaxxi</p>
+                      <p className="text-[9px] text-muted-foreground leading-tight mt-0.5 truncate">Análise de performance.</p>
                     </div>
                     <ArrowUpRight className="size-3 shrink-0 text-muted-foreground ml-auto" />
                   </div>
                 </Link>
               </Button>
-              <Button variant="outline" className="w-full justify-start h-auto p-2 sm:p-4 text-left whitespace-normal break-words">
+              <Button variant="outline" className="w-full justify-start h-auto p-2 sm:p-4 text-left !whitespace-normal break-words">
                 <div className="flex items-center gap-2 sm:gap-3 w-full min-w-0">
                   <div className="size-7 sm:size-8 shrink-0 rounded-full bg-muted flex items-center justify-center">
                     <Settings className="size-3 sm:size-4 text-muted-foreground" />
@@ -120,14 +121,14 @@ export default function Home() {
               <CardTitle className="text-base sm:text-lg">Atividade Recente</CardTitle>
               <CardDescription className="text-[10px] sm:text-sm">Últimas execuções salvas.</CardDescription>
             </CardHeader>
-            <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0 overflow-hidden">
+            <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0 min-w-0 overflow-hidden">
               <div className="space-y-3">
                 {[
                   { user: "Eduardo S.", action: "vFleet", time: "2h atrás", period: "01/26", color: "bg-primary" },
                   { user: "Sistema", action: "Backup", time: "5h atrás", period: "-", color: "bg-slate-300" },
                   { user: "Eduardo S.", action: "Performaxxi", time: "Ontem", period: "12/25", color: "bg-accent" }
                 ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3 text-xs border-b border-border/50 pb-2 last:border-0 last:pb-0 min-w-0">
+                  <div key={i} className="flex items-center gap-3 text-xs border-b border-border/50 pb-2 last:border-0 last:pb-0 min-w-0 overflow-hidden">
                     <div className={`size-1.5 shrink-0 rounded-full ${item.color}`} />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-[10px] sm:text-xs truncate">{item.action} <span className="text-muted-foreground font-normal">por {item.user}</span></p>

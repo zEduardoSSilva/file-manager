@@ -4,7 +4,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 
 export const metadata: Metadata = {
-  title: 'vFleet Pilot | Precision Data Analysis',
+  title: 'File Manager Pilot | Precision Data Analysis',
   description: 'Data processing pipeline management for logistics operations',
 };
 

@@ -45,6 +45,7 @@ const toFloat = (val: any): number => {
 };
 
 const findCol = (row: any, candidates: string[]): string | undefined => {
+  if (!row) return undefined;
   const keys = Object.keys(row);
   for (const cand of candidates) {
     const normCand = cand.toLowerCase().trim();
@@ -83,31 +84,41 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         rawData.push(...data);
       }
 
-      // Filtro Standby rápido
       const baseDados = rawData.filter(row => {
         const statusVal = String(row[findCol(row, ['status_rota', 'status']) || ''] || '').toUpperCase();
         return statusVal !== 'STANDBY';
       });
 
       const analisarGrupo = (tipo: 'MOTORISTA' | 'AJUDANTE') => {
+        if (baseDados.length === 0) return [];
+        
+        const firstRow = baseDados[0];
         const colNomeCand = tipo === 'MOTORISTA' ? ['nome_motorista', 'motorista'] : ['nome_primeiro_ajudante', 'ajudante'];
+        const colNome = findCol(firstRow, colNomeCand);
+        const colData = findCol(firstRow, ['data_rota', 'data']);
+        const colEmpresa = findCol(firstRow, ['empresa', 'deposito']);
+        const colDist = findCol(firstRow, ['distancia_cliente_metros', 'distancia']);
+        const colSla = findCol(firstRow, ['sla_janela_atendimento', 'sla']);
+        const colChegada = findCol(firstRow, ['chegada_cliente_realizado', 'chegada']);
+        const colFim = findCol(firstRow, ['fim_atendimento_cliente_realizado', 'fim_atendimento']);
+        const colPeso = findCol(firstRow, ['peso_pedido', 'peso']);
+        const colOc = findCol(firstRow, ['descricao_ocorrencia', 'ocorrencia']);
+
         const baseValor = tipo === 'MOTORISTA' ? MOT_BASE : AJU_BASE;
         const valorPorCriterio = baseValor / 4;
-
         const dailyMap: Record<string, any> = {};
 
         baseDados.forEach(row => {
-          const colNome = findCol(row, colNomeCand);
           const nome = String(row[colNome || ''] || '').trim();
           if (!nome || nome === 'N.R.' || nome === '0') return;
 
-          const dateStr = excelSerialToDateStr(row[findCol(row, ['data_rota', 'data'])] || '', year);
+          const dateStr = excelSerialToDateStr(row[colData || ''], year);
           if (!dateStr) return;
           const key = `${nome}_${dateStr}`;
 
           if (!dailyMap[key]) {
             dailyMap[key] = {
-              Empresa: String(row[findCol(row, ['empresa', 'deposito'])] || 'N/A'),
+              Empresa: String(row[colEmpresa || ''] || 'N/A'),
               Funcionario: nome,
               Cargo: tipo,
               Dia: dateStr,
@@ -122,24 +133,22 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           }
 
           dailyMap[key].Total_Pedidos++;
-          const dist = toFloat(row[findCol(row, ['distancia_cliente_metros', 'distancia']) || '']);
-          if (dist <= 100) dailyMap[key].Raio_OK++;
+          if (toFloat(row[colDist || '']) <= 100) dailyMap[key].Raio_OK++;
+          const slaVal = String(row[colSla || ''] || '').toUpperCase();
+          if (slaVal.includes('SIM') || slaVal.includes('OK')) dailyMap[key].SLA_OK++;
           
-          const sla = String(row[findCol(row, ['sla_janela_atendimento', 'sla']) || ''] || '').toUpperCase();
-          if (sla.includes('SIM') || sla.includes('OK')) dailyMap[key].SLA_OK++;
-          
-          const t1 = hmsToSeconds(row[findCol(row, ['chegada_cliente_realizado', 'chegada']) || '']);
-          const t2 = hmsToSeconds(row[findCol(row, ['fim_atendimento_cliente_realizado', 'fim_atendimento']) || '']);
+          const t1 = hmsToSeconds(row[colChegada || '']);
+          const t2 = hmsToSeconds(row[colFim || '']);
           if (t2 - t1 >= 60) dailyMap[key].Tempo_OK++;
 
           const sPlan = String(row['sequencia_entrega_planejado'] || '');
           const sReal = String(row['sequencia_entrega_realizado'] || '');
           if (sPlan === sReal && sPlan !== '') dailyMap[key].Seq_OK++;
 
-          const peso = toFloat(row[findCol(row, ['peso_pedido', 'peso']) || '']);
+          const peso = toFloat(row[colPeso || '']);
           dailyMap[key].Peso_Total += peso;
-          const oc = String(row[findCol(row, ['descricao_ocorrencia', 'ocorrencia']) || ''] || '').trim();
-          if (oc !== '' && oc.toUpperCase() !== 'NULL') dailyMap[key].Peso_Devolvido += peso;
+          const ocVal = String(row[colOc || ''] || '').trim();
+          if (ocVal !== '' && ocVal.toUpperCase() !== 'NULL') dailyMap[key].Peso_Devolvido += peso;
         });
 
         return Object.values(dailyMap).map(d => {
@@ -155,6 +164,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
 
           const cumpridos = (cRaio ? 1 : 0) + (cSla ? 1 : 0) + (cTempo ? 1 : 0) + (cSeq ? 1 : 0);
           
+          // Ordem solicitada pelo usuário
           return {
             'Empresa': d.Empresa,
             'Funcionario': d.Funcionario,
@@ -188,13 +198,20 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       const detalheUnificado = [...analisarGrupo('MOTORISTA'), ...analisarGrupo('AJUDANTE')];
 
       const consolidadoUnificado = Object.values(detalheUnificado.reduce((acc: any, curr: any) => {
-        const nome = curr.Funcionario;
-        const cargo = curr.Cargo;
-        const key = `${nome}_${cargo}`;
+        const key = `${curr.Funcionario}_${curr.Cargo}`;
         if (!acc[key]) {
           acc[key] = {
-            'Empresa': curr.Empresa, 'Funcionario': nome, 'Cargo': cargo, 'Dias com Atividade': 0, 'Dias Bonif. Máxima (4/4)': 0,
-            'Total Bonificação (R$)': 0, 'Total Critérios Cumpridos': 0, 'Falhas Raio': 0, 'Falhas SLA': 0, 'Falhas Tempo': 0, 'Falhas Sequência': 0
+            'Empresa': curr.Empresa, 
+            'Funcionario': curr.Funcionario, 
+            'Cargo': curr.Cargo, 
+            'Dias com Atividade': 0, 
+            'Dias Bonif. Máxima (4/4)': 0,
+            'Total Bonificação (R$)': 0, 
+            'Total Critérios Cumpridos': 0, 
+            'Falhas Raio': 0, 
+            'Falhas SLA': 0, 
+            'Falhas Tempo': 0, 
+            'Falhas Sequência': 0
           };
         }
         acc[key]['Dias com Atividade']++;
@@ -213,8 +230,11 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       })).sort((a: any, b: any) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
 
       const saved = await firebaseStore.saveResult('performaxxi', {
-        pipelineType: 'performaxxi', timestamp: Date.now(), year, month,
-        data: consolidadoUnificado, detalheGeral: detalheUnificado,
+        pipelineType: 'performaxxi', 
+        timestamp: Date.now(), 
+        year, month,
+        data: consolidadoUnificado, 
+        detalheGeral: detalheUnificado,
         summary: `Performaxxi Unificado: Analisados ${consolidadoUnificado.length} funcionários.`
       });
 
@@ -312,7 +332,19 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       const absData = consolidado.map((c: any) => {
         const meta = agendaOficial.length;
         const perc = Number(((c.Dias_Trabalhados / meta) * 100).toFixed(2));
-        return { ID: c.ID, Nome: c.Motorista, Grupo: 'MOTORISTA', Total_Dias: meta, 'Presenças Físicas': c.Dias_Trabalhados, 'Atestados/Férias': 0, 'Abonos Manuais': excludedDatesSet.size, 'Total Presenças': c.Dias_Trabalhados + excludedDatesSet.size, Faltas: Math.max(0, meta - c.Dias_Trabalhados), 'Percentual (%)': perc, Valor_Incentivo: perc >= 100 ? 50 : 0 };
+        return { 
+          ID: c.ID, 
+          Nome: c.Motorista, 
+          Grupo: 'MOTORISTA', 
+          Total_Dias: meta, 
+          'Presenças Físicas': c.Dias_Trabalhados, 
+          'Atestados/Férias': 0, 
+          'Abonos Manuais': excludedDatesSet.size, 
+          'Total Presenças': c.Dias_Trabalhados + excludedDatesSet.size, 
+          Faltas: Math.max(0, meta - c.Dias_Trabalhados), 
+          'Percentual (%)': perc, 
+          Valor_Incentivo: perc >= 100 ? 50 : 0 
+        };
       });
 
       const saved = await firebaseStore.saveResult('ponto', {
