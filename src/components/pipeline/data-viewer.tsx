@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -14,50 +13,51 @@ import {
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Info, Truck, CalendarCheck, CheckCircle2 } from "lucide-react"
+import { Info, CheckCircle2 } from "lucide-react"
 
 export function DataViewer({ result }: { result: PipelineResult }) {
   const isPonto = result.pipelineType === 'ponto';
 
-  const renderTable = (data: any[]) => (
-    <div className="rounded-md border overflow-x-auto min-w-0 max-w-full">
-      <Table className="min-w-[600px] sm:min-w-full">
-        <TableHeader>
-          <TableRow className="bg-muted/50">
-            <TableHead className="text-[10px] sm:text-xs py-2 px-2">Funcionário</TableHead>
-            <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">Dias</TableHead>
-            <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">Perf %</TableHead>
-            <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">Total (R$)</TableHead>
-            <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">4/4 OK</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.map((row, i) => (
-            <TableRow key={i} className="hover:bg-muted/30">
-              <TableCell className="py-2 px-2">
-                <div className="min-w-0">
-                  <p className="text-[10px] sm:text-xs uppercase font-bold truncate max-w-[150px]">{row.Funcionario || row.Motorista || row.Nome}</p>
-                  {row.Cargo && <p className="text-[9px] text-muted-foreground">{row.Cargo}</p>}
-                </div>
-              </TableCell>
-              <TableCell className="text-center text-[10px] sm:text-xs py-2 px-1">{row['Dias com Atividade'] || 0}</TableCell>
-              <TableCell className="text-center text-[10px] sm:text-xs py-2 px-1">
-                {row['Percentual de Desempenho (%)'] || 0}%
-              </TableCell>
-              <TableCell className="text-center font-bold text-primary text-[10px] sm:text-xs py-2 px-1">
-                {Number(row['Total Bonificação (R$)'] || 0).toFixed(2)}
-              </TableCell>
-              <TableCell className="text-center py-2 px-1">
-                <Badge variant="outline" className="text-[9px] px-1 h-4">
-                  {row['Dias Bonif. Máxima (4/4)'] || 0}
-                </Badge>
-              </TableCell>
+  const renderTable = (data: any[]) => {
+    if (!data || data.length === 0) return <p className="text-xs p-4 italic text-muted-foreground">Nenhum dado consolidado.</p>;
+    
+    // Pega as chaves do primeiro registro para os cabeçalhos dinâmicos
+    const headers = Object.keys(data[0]);
+
+    return (
+      <div className="rounded-md border overflow-x-auto min-w-0 max-w-full">
+        <Table className="min-w-[800px] sm:min-w-full table-fixed">
+          <TableHeader>
+            <TableRow className="bg-muted/50">
+              {headers.map((h, i) => (
+                <TableHead key={i} className="text-[9px] uppercase font-bold py-2 px-2 whitespace-nowrap overflow-hidden text-ellipsis">
+                  {h}
+                </TableHead>
+              ))}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  )
+          </TableHeader>
+          <TableBody>
+            {data.slice(0, 50).map((row, i) => (
+              <TableRow key={i} className="hover:bg-muted/30">
+                {headers.map((h, j) => (
+                  <TableCell key={j} className="py-2 px-2 text-[10px] whitespace-nowrap overflow-hidden text-ellipsis">
+                    {h.includes('R$') || h.includes('Bonificação') 
+                      ? Number(row[h] || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+                      : row[h]}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        {data.length > 50 && (
+          <p className="text-[9px] text-center p-2 text-muted-foreground bg-muted/10 italic">
+            Exibindo apenas os primeiros 50 registros. O arquivo completo contém {data.length} linhas.
+          </p>
+        )}
+      </div>
+    )
+  }
 
   const renderAbsenteismoTable = (data: AbsenteismoData[]) => (
     <div className="rounded-md border overflow-x-auto min-w-0 max-w-full">
@@ -65,7 +65,7 @@ export function DataViewer({ result }: { result: PipelineResult }) {
         <TableHeader>
           <TableRow className="bg-muted/50">
             <TableHead className="text-[10px] sm:text-xs py-2 px-2">Nome</TableHead>
-            <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">Denom.</TableHead>
+            <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">Dias</TableHead>
             <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">Freq %</TableHead>
             <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">Faltas</TableHead>
             <TableHead className="text-center text-[10px] sm:text-xs py-2 px-1">Incentivo</TableHead>
@@ -126,7 +126,7 @@ export function DataViewer({ result }: { result: PipelineResult }) {
             <TabsTrigger value="overview" className="text-[10px] sm:text-xs px-3">Sumário IA</TabsTrigger>
           </TabsList>
           
-          <TabsContent value="drivers" className="min-w-0">
+          <TabsContent value="drivers" className="min-w-0 overflow-hidden">
             {renderTable(result.data)}
           </TabsContent>
 

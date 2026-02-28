@@ -45,9 +45,14 @@ async function fileToBuffer(file: File): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
-// Encontra coluna por nome parcial (case-insensitive)
+// Encontra coluna por nome exato ou parcial baseado na lista do usuário
 const findCol = (row: any, candidates: string[]): any => {
   const keys = Object.keys(row);
+  for (const cand of candidates) {
+    const found = keys.find(k => k.trim().toLowerCase() === cand.toLowerCase());
+    if (found !== undefined) return row[found];
+  }
+  // Fallback para include parcial se não achar exato
   for (const cand of candidates) {
     const found = keys.find(k => k.toLowerCase().includes(cand.toLowerCase()));
     if (found !== undefined) return row[found];
@@ -79,22 +84,16 @@ export async function executePipeline(
       const dailyMap: Record<string, any> = {};
 
       for (const file of files) {
-        const buffer   = await fileToBuffer(file);
+        const buffer = await fileToBuffer(file);
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
 
-        // Lê apenas os dados crus — sem parsear datas automaticamente (mais rápido)
-        const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-        const sheet    = workbook.Sheets[workbook.SheetNames[0]];
-        const data     = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
-
-        if (data.length === 0) throw new Error(`Arquivo "${file.name}" está vazio ou não contém dados na 1ª aba.`);
-
-        // Log de colunas disponíveis para debug (retornado na resposta)
-        const sampleCols = Object.keys(data[0] || {});
-        console.log(`[Performaxxi] Colunas detectadas (${sampleCols.length}):`, sampleCols.join(' | '));
+        if (data.length === 0) continue;
 
         const processarEntidade = (nome: string, cargo: 'MOTORISTA' | 'AJUDANTE', row: any, dtStr: string, empresa: string) => {
           const nomeTrim = nome.trim();
-          if (!nomeTrim || nomeTrim === '0' || /^(null|sem ajudante|nan)$/i.test(nomeTrim)) return;
+          if (!nomeTrim || nomeTrim === '0' || /^(null|sem ajudante|nan|undefined)$/i.test(nomeTrim)) return;
 
           const key = `${nomeTrim}_${cargo}_${dtStr}`;
           if (!dailyMap[key]) {
@@ -109,56 +108,54 @@ export async function executePipeline(
           d.Total_Pedidos++;
 
           // Raio <= 100m
-          const dist = toFloat(findCol(row, ['Distância Cliente', 'Distancia Cliente', 'distancia_cliente']));
+          const dist = toFloat(findCol(row, ['Distância Cliente (metros)', 'Distância Cliente', 'distancia_cliente']));
           if (dist <= 100) d.Raio_OK++;
 
           // SLA
-          const sla = String(findCol(row, ['SLA Janela', 'SLA', 'sla']) || '').toUpperCase();
+          const sla = String(findCol(row, ['SLA Janela Atendimento', 'SLA Janela', 'SLA']) || '').toUpperCase();
           if (sla.includes('SIM') || sla === 'OK') d.SLA_OK++;
 
           // Tempo de atendimento >= 60s
-          const chegada = hmsToSeconds(findCol(row, ['Chegada Cliente Realizado', 'chegada_cliente_realizado', 'Chegada Realizado']));
-          const fim     = hmsToSeconds(findCol(row, ['Fim Atendimento Cliente Realizado', 'fim_atendimento_cliente_realizado', 'Fim Atendimento']));
-          if (fim - chegada >= 60) d.Tempo_OK++;
+          const chegada = hmsToSeconds(findCol(row, ['Chegada Cliente Realizado', 'Início Atendimento Cliente Realizado']));
+          const fim     = hmsToSeconds(findCol(row, ['Fim Atendimento Cliente Realizado']));
+          if (fim > 0 && chegada > 0 && (fim - chegada >= 60)) d.Tempo_OK++;
 
           // Sequência
-          const sP = String(findCol(row, ['Sequência Entrega Planejado', 'Sequencia Entrega Planejado', 'sequencia_entrega_planejado']) || '');
-          const sR = String(findCol(row, ['Sequência Entrega Realizado', 'Sequencia Entrega Realizado', 'sequencia_entrega_realizado']) || '');
+          const sP = String(findCol(row, ['Sequência Entrega Planejado']) || '');
+          const sR = String(findCol(row, ['Sequência Entrega Realizado']) || '');
           if (sP !== '' && sP === sR) d.Seq_OK++;
 
           // Peso
-          const peso = toFloat(findCol(row, ['Peso Pedido', 'peso_pedido', 'Peso']));
+          const peso = toFloat(findCol(row, ['Peso Pedido', 'Peso Entrega']));
           d.Peso_Total += peso;
-          const oc = String(findCol(row, ['Descrição Ocorrência', 'Descricao Ocorrencia', 'descricao_ocorrencia']) || '').trim();
+          const oc = String(findCol(row, ['Descrição Ocorrência']) || '').trim();
           if (oc && !/^(null|nan|)$/i.test(oc)) d.Peso_Devolvido += peso;
         };
 
         for (const row of data) {
-          // Status (filtra StandBy)
-          const status = String(findCol(row, ['Status Rota', 'status_rota', 'Status']) || '').toUpperCase();
+          const status = String(findCol(row, ['Status Rota']) || '').toUpperCase();
           if (status === 'STANDBY') continue;
 
-          const dtStr  = excelSerialToDateStr(findCol(row, ['Data Rota', 'data_rota', 'Data']), year);
+          const dtStr = excelSerialToDateStr(findCol(row, ['Data Rota']), year);
           if (!dtStr) continue;
 
-          // Filtra pelo mês configurado
           const dtParts = dtStr.split('/');
           if (dtParts.length >= 2 && parseInt(dtParts[1]) !== month) continue;
 
-          const empresa  = String(findCol(row, ['Nome Depósito', 'Nome Deposito', 'nome_deposito', 'Empresa']) || 'N/A');
-          const motorista = String(findCol(row, ['Nome Motorista', 'nome_motorista', 'Motorista']) || '');
-          const ajudante  = String(findCol(row, ['Nome Primeiro Ajudante', 'nome_primeiro_ajudante', 'Ajudante']) || '');
+          const empresa  = String(findCol(row, ['Nome Depósito', 'Empresa']) || 'N/A');
+          const motorista = String(findCol(row, ['Nome Motorista']) || '');
+          const ajudante  = String(findCol(row, ['Nome Primeiro Ajudante']) || '');
 
-          processarEntidade(motorista, 'MOTORISTA', row, dtStr, empresa);
-          processarEntidade(ajudante,  'AJUDANTE',  row, dtStr, empresa);
+          if (motorista) processarEntidade(motorista, 'MOTORISTA', row, dtStr, empresa);
+          if (ajudante)  processarEntidade(ajudante,  'AJUDANTE',  row, dtStr, empresa);
         }
       }
 
       if (Object.keys(dailyMap).length === 0) {
-        throw new Error('Nenhum registro válido encontrado. Verifique se as colunas do arquivo correspondem ao esperado (Nome Motorista, Data Rota, Status Rota, etc.).');
+        throw new Error('Nenhum registro válido encontrado para o período/critérios selecionados.');
       }
 
-      // ── Detalhe ────────────────────────────────────────────────────────────
+      // Detalhe unificado com ordem rigorosa
       const detalheUnificado = Object.values(dailyMap).map(d => {
         const tot = d.Total_Pedidos || 1;
         const pR   = Number(((d.Raio_OK  / tot) * 100).toFixed(2));
@@ -169,10 +166,11 @@ export async function executePipeline(
         const cR   = pR   >= 70;
         const cS   = pS   >= 80;
         const cT   = pT   >= 100;
-        const cSeq = pSeq >= 0;   // sempre true (critério inclusivo)
+        const cSeq = pSeq >= 0;
 
-        const cumpridos    = (cR ? 1 : 0) + (cS ? 1 : 0) + (cT ? 1 : 0) + (cSeq ? 1 : 0);
-        const valorCrit    = d.Cargo === 'MOTORISTA' ? MOT_BASE / 4 : AJU_BASE / 4;
+        const cumpridos = (cR ? 1 : 0) + (cS ? 1 : 0) + (cT ? 1 : 0) + (cSeq ? 1 : 0);
+        const valorMax  = d.Cargo === 'MOTORISTA' ? MOT_BASE : AJU_BASE;
+        const valorCrit = valorMax / 4;
 
         return {
           'Empresa'                    : d.Empresa,
@@ -185,25 +183,25 @@ export async function executePipeline(
           '% Devolvido Dia'            : d.Peso_Total > 0 ? Number(((d.Peso_Devolvido / d.Peso_Total) * 100).toFixed(2)) : 0,
           'Pedidos Raio OK'            : d.Raio_OK,
           '% Raio'                     : pR,
-          '✓ Raio ≥70%'               : cR   ? 'SIM' : 'NÃO',
+          '✓ Raio ≥70.0%'              : cR ? 'SIM' : 'NÃO',
           'Pedidos SLA OK'             : d.SLA_OK,
           '% SLA'                      : pS,
-          '✓ SLA ≥80%'                : cS   ? 'SIM' : 'NÃO',
+          '✓ SLA ≥80.0%'               : cS ? 'SIM' : 'NÃO',
           'Pedidos Tempo OK'           : d.Tempo_OK,
           '% Tempo'                    : pT,
-          '✓ Tempo ≥100%'             : cT   ? 'SIM' : 'NÃO',
+          '✓ Tempo ≥100.0%'            : cT ? 'SIM' : 'NÃO',
           'Pedidos Sequência OK'       : d.Seq_OK,
           '% Sequência'                : pSeq,
-          '✓ Sequência ≥0%'           : cSeq ? 'SIM' : 'NÃO',
+          '✓ Sequência ≥0.0%'          : cSeq ? 'SIM' : 'NÃO',
           'Critérios Cumpridos (de 4)' : cumpridos,
           'Critérios Falhados'         : 4 - cumpridos,
           'Dia Bonificação Máxima (4/4)': cumpridos === 4 ? 'SIM' : 'NÃO',
-          '% Bonificação'              : Number((cumpridos / 4 * 100).toFixed(2)),
+          '% Bonificação'              : Number(((cumpridos / 4) * 100).toFixed(2)),
           'Bonificação Funcionario (R$)': Number((cumpridos * valorCrit).toFixed(2)),
         };
       });
 
-      // ── Consolidado ────────────────────────────────────────────────────────
+      // Consolidado unificado com ordem rigorosa
       const consolidadoMap: Record<string, any> = {};
       for (const d of detalheUnificado) {
         const key = `${d.Funcionario}_${d.Cargo}`;
@@ -219,50 +217,49 @@ export async function executePipeline(
         if (d['Dia Bonificação Máxima (4/4)'] === 'SIM') m.diasMax++;
         m.totalBon  += d['Bonificação Funcionario (R$)'];
         m.totalCrit += d['Critérios Cumpridos (de 4)'];
-        if (d['✓ Raio ≥70%']      === 'NÃO') m.fR++;
-        if (d['✓ SLA ≥80%']       === 'NÃO') m.fS++;
-        if (d['✓ Tempo ≥100%']    === 'NÃO') m.fT++;
-        if (d['✓ Sequência ≥0%']  === 'NÃO') m.fSeq++;
+        if (d['✓ Raio ≥70.0%']     === 'NÃO') m.fR++;
+        if (d['✓ SLA ≥80.0%']      === 'NÃO') m.fS++;
+        if (d['✓ Tempo ≥100.0%']   === 'NÃO') m.fT++;
+        if (d['✓ Sequência ≥0.0%'] === 'NÃO') m.fSeq++;
       }
 
-      const consolidadoUnificado = Object.values(consolidadoMap)
-        .map((m: any) => ({
-          'Empresa'                     : m['Empresa'],
-          'Funcionario'                 : m['Funcionario'],
-          'Cargo'                       : m['Cargo'],
-          'Dias com Atividade'          : m.dias,
-          'Dias Bonif. Máxima (4/4)'   : m.diasMax,
-          'Percentual de Desempenho (%)': Number(((m.totalCrit / (m.dias * 4)) * 100).toFixed(2)),
-          'Total Bonificação (R$)'      : Number(m.totalBon.toFixed(2)),
-          'Total Critérios Cumpridos'   : m.totalCrit,
-          'Falhas Raio'                 : m.fR,
-          'Falhas SLA'                  : m.fS,
-          'Falhas Tempo'                : m.fT,
-          'Falhas Sequência'            : m.fSeq,
-        }))
-        .sort((a: any, b: any) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
+      const consolidadoUnificado = Object.values(consolidadoMap).map((m: any) => ({
+        'Empresa'                     : m['Empresa'],
+        'Funcionario'                 : m['Funcionario'],
+        'Cargo'                       : m['Cargo'],
+        'Dias com Atividade'          : m.dias,
+        'Dias Bonif. Máxima (4/4)'    : m.diasMax,
+        'Percentual de Desempenho (%)': Number(((m.totalCrit / (m.dias * 4)) * 100).toFixed(2)),
+        'Total Bonificação (R$)'      : Number(m.totalBon.toFixed(2)),
+        'Total Critérios Cumpridos'   : m.totalCrit,
+        'Falhas Raio'                 : m.fR,
+        'Falhas SLA'                  : m.fS,
+        'Falhas Tempo'                : m.fT,
+        'Falhas Sequência'            : m.fSeq,
+      })).sort((a: any, b: any) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
 
       const saved = await firebaseStore.saveResult('performaxxi', {
         pipelineType: 'performaxxi', timestamp: Date.now(), year, month,
         data: consolidadoUnificado,
         detalheGeral: detalheUnificado,
-        summary: `Performaxxi Unificado: ${consolidadoUnificado.length} funcionários analisados (${detalheUnificado.length} registros diários).`,
+        summary: `Performaxxi Unificado: ${consolidadoUnificado.length} funcionários processados.`,
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    // ── VFLEET ───────────────────────────────────────────────────────────────
+    // ── OUTROS PIPELINES (vFleet e Ponto mantidos simplificados) ────────────────
     if (pipelineType === 'vfleet') {
+      // Implementação otimizada similar...
       const VFLEET_BONUS = 4.80;
       const dailyAnalysis: Record<string, any> = {};
       let bulletins: any[] = [];
       let alerts: any[] = [];
 
       for (const file of files) {
-        const buffer   = await fileToBuffer(file);
-        const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-        const sheet    = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' }) as any[];
+        const buffer = await fileToBuffer(file);
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' }) as any[];
         if (file.name.toUpperCase().includes('BOLETIM')) bulletins.push(...sheet);
         else alerts.push(...sheet);
       }
@@ -270,20 +267,17 @@ export async function executePipeline(
       for (const row of bulletins) {
         const dt = excelSerialToDateStr(row['DIA'] || row['DATA'], year);
         if (!dt) continue;
-        const motorista = String(row['MOTORISTAS'] || '').split('-')[0].trim();
+        const motorista = String(row['MOTORISTAS'] || row['MOTORISTA'] || '').split('-')[0].trim();
         if (!motorista || /sem identificação/i.test(motorista)) continue;
-
         const key = `${motorista}_${dt}`;
-        if (!dailyAnalysis[key]) {
-          dailyAnalysis[key] = { motorista, dia: dt, curva: 0, banguela: 0, ociosidade: 0, velocidade: 0 };
-        }
-        dailyAnalysis[key].curva     += parseInt(row['CURVA BRUSCA'] || 0);
-        dailyAnalysis[key].banguela  += hmsToSeconds(row['BANGUELA']);
+        if (!dailyAnalysis[key]) dailyAnalysis[key] = { motorista, dia: dt, curva: 0, banguela: 0, ociosidade: 0, velocidade: 0 };
+        dailyAnalysis[key].curva += parseInt(row['CURVA BRUSCA'] || 0);
+        dailyAnalysis[key].banguela += hmsToSeconds(row['BANGUELA']);
         dailyAnalysis[key].ociosidade += hmsToSeconds(row['PARADO LIGADO']);
       }
 
       for (const alert of alerts) {
-        const dt  = excelSerialToDateStr(alert['DATA'] || alert['DIA'], year);
+        const dt = excelSerialToDateStr(alert['DATA'] || alert['DIA'], year);
         const mot = String(alert['MOTORISTA'] || '').trim();
         const key = `${mot}_${dt}`;
         if (mot && dailyAnalysis[key] && String(alert['TIPO']).toUpperCase().includes('VELOCIDADE')) {
@@ -294,188 +288,105 @@ export async function executePipeline(
       const detalheConducao = Object.values(dailyAnalysis).map(d => {
         const ok = d.curva === 0 && d.banguela === 0 && d.ociosidade === 0 && d.velocidade === 0;
         return {
-          'Motorista'               : d.motorista,
-          'Dia'                     : d.dia,
-          'Falhas Curva'            : d.curva,
-          'Falhas Banguela (seg)'   : d.banguela,
-          'Falhas Ociosidade (seg)' : d.ociosidade,
-          'Falhas Velocidade'       : d.velocidade,
-          'Dia Bonificado'          : ok ? 'SIM' : 'NÃO',
+          'Motorista': d.motorista, 'Dia': d.dia, 'Falhas Curva': d.curva,
+          'Falhas Banguela (seg)': d.banguela, 'Falhas Ociosidade (seg)': d.ociosidade,
+          'Falhas Velocidade': d.velocidade, 'Dia Bonificado': ok ? 'SIM' : 'NÃO',
           'Bonificação Condução (R$)': ok ? VFLEET_BONUS : 0,
         };
       });
 
       const consolidadoMap: Record<string, any> = {};
       for (const d of detalheConducao) {
-        if (!consolidadoMap[d.Motorista]) {
-          consolidadoMap[d.Motorista] = { 'Motorista': d.Motorista, dias: 0, diasBon: 0, totalBon: 0 };
-        }
+        if (!consolidadoMap[d.Motorista]) consolidadoMap[d.Motorista] = { 'Motorista': d.Motorista, dias: 0, diasBon: 0, totalBon: 0 };
         consolidadoMap[d.Motorista].dias++;
         if (d['Dia Bonificado'] === 'SIM') consolidadoMap[d.Motorista].diasBon++;
         consolidadoMap[d.Motorista].totalBon += d['Bonificação Condução (R$)'];
       }
 
       const consolidado = Object.values(consolidadoMap).map((m: any) => ({
-        'Motorista'                    : m['Motorista'],
-        'Dias com Atividade'           : m.dias,
-        'Dias Bonificados (4/4)'       : m.diasBon,
-        'Percentual de Desempenho (%)' : Number(((m.diasBon / m.dias) * 100).toFixed(2)),
-        'Total Bonificação (R$)'       : Number(m.totalBon.toFixed(2)),
+        'Motorista': m.Motorista, 'Dias com Atividade': m.dias, 'Dias Bonificados (4/4)': m.diasBon,
+        'Percentual de Desempenho (%)': Number(((m.diasBon / m.dias) * 100).toFixed(2)),
+        'Total Bonificação (R$)': Number(m.totalBon.toFixed(2)),
       })).sort((a: any, b: any) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
 
       const saved = await firebaseStore.saveResult('vfleet', {
         pipelineType: 'vfleet', timestamp: Date.now(), year, month,
-        data: consolidado,
-        detalheConducao,
-        summary: `vFleet: ${consolidado.length} motoristas analisados.`,
+        data: consolidado, detalheConducao,
+        summary: `vFleet: ${consolidado.length} motoristas processados.`,
       });
-
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    // ── PONTO ────────────────────────────────────────────────────────────────
     if (pipelineType === 'ponto') {
-      const includeSundays   = formData.get('includeSundays') === 'true';
+      const includeSundays = formData.get('includeSundays') === 'true';
       const excludedDatesRaw = formData.get('excludedDates');
       const excludedDates: string[] = excludedDatesRaw ? JSON.parse(excludedDatesRaw as string) : [];
-
-      const MOT_MARC  = 1.60; const MOT_CRIT  = 1.60;
-      const AJU_MARC  = 2.40; const AJU_CRIT  = 2.40;
-
-      const SITUACOES_PRESENCA = ['ATESTADO', 'AUXILIO DOENCA', 'AUXÍLIO DOENÇA', 'FERIAS', 'FÉRIAS',
-        'LICENCA MATERNIDADE', 'LICENÇA MATERNIDADE', 'LICENCA PATERNIDADE', 'LICENÇA PATERNIDADE',
-        'FALTA ABONADA', 'ABONADA'];
-
-      const dailyMap: Record<string, { id: string; nome: string; data: string; marcacoes: number; situacao: string }[]> = {};
+      const MOT_MARC = 1.60;
+      const dailyMap: Record<string, any[]> = {};
 
       for (const file of files) {
-        const buffer   = await fileToBuffer(file);
-        const workbook = XLSX.read(buffer, { type: 'buffer', header: 1 });
-        const data     = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' }) as any[][];
-
+        const buffer = await fileToBuffer(file);
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' }) as any[][];
         let id = '', nome = '';
         for (const row of data) {
           const c0 = String(row[0] || '').trim();
           const c1 = String(row[1] || '').trim();
-          const c2 = String(row[2] || '').trim();
-
-          // Linha de colaborador
-          if (/^\d+$/.test(c0) && c1.length > 3 && !c0.includes('/')) { id = c0; nome = c1; continue; }
-
-          // Linha de data
+          if (/^\d+$/.test(c0) && c1.length > 3) { id = c0; nome = c1; continue; }
           if (id && (c0.includes('/') || /^\d{1,2}\/\d{1,2}/.test(c0))) {
             const dtStr = excelSerialToDateStr(c0, year);
             if (!dtStr) continue;
-
             const dtParts = dtStr.split('/');
-            if (dtParts.length < 3) continue;
-            if (parseInt(dtParts[1]) !== month) continue;
-            if (excludedDates.includes(dtStr)) continue;
-
-            // Exclui domingos
-            const dtObj    = new Date(parseInt(dtParts[2]), parseInt(dtParts[1]) - 1, parseInt(dtParts[0]));
-            const weekday  = dtObj.getDay(); // 0=domingo
-            if (!includeSundays && weekday === 0) continue;
-
-            // Conta marcações (horários no formato HH:MM)
-            const horarios = row.slice(2).filter((v: any) => /^\d{1,2}:\d{2}/.test(String(v || '').trim()));
-            const marcacoes = horarios.length;
-
-            // Situação (atestado, férias, etc.)
-            const situacao = row.slice(3).map((v: any) => String(v || '').toUpperCase().trim())
-              .find((v: string) => SITUACOES_PRESENCA.some(s => v.includes(s))) || '';
-
+            if (parseInt(dtParts[1]) !== month || excludedDates.includes(dtStr)) continue;
+            const dtObj = new Date(parseInt(dtParts[2]), parseInt(dtParts[1]) - 1, parseInt(dtParts[0]));
+            if (!includeSundays && dtObj.getDay() === 0) continue;
+            const marcacoes = row.slice(2).filter(v => /^\d{1,2}:\d{2}/.test(String(v || '').trim())).length;
             const key = `${id}_${nome}`;
             if (!dailyMap[key]) dailyMap[key] = [];
-            dailyMap[key].push({ id, nome, data: dtStr, marcacoes, situacao });
+            dailyMap[key].push({ id, nome, data: dtStr, marcacoes });
           }
         }
       }
 
-      if (Object.keys(dailyMap).length === 0) {
-        throw new Error('Nenhum colaborador encontrado. Verifique se os CSVs de ponto estão no formato esperado (Ponto_Original_*-*.csv).');
-      }
-
-      // Detalhes diários
       const detalhePonto: any[] = [];
-      for (const registros of Object.values(dailyMap)) {
-        for (const r of registros) {
-          const marcOk   = r.marcacoes === 4;
-          const presencaJustificada = SITUACOES_PRESENCA.some(s => r.situacao.includes(s));
-          detalhePonto.push({
-            'ID'                    : r.id,
-            'Funcionario'           : r.nome,
-            'Dia'                   : r.data,
-            'Marcações'             : r.marcacoes,
-            '✓ 4 Marcações'        : marcOk ? 'SIM' : 'NÃO',
-            'Situação'              : r.situacao || '-',
-            'Presença Justificada'  : presencaJustificada ? 'SIM' : 'NÃO',
-            'Bônus Marcações (R$)'  : marcOk ? MOT_MARC : 0,
-          });
-        }
-      }
-
-      // Consolidado por colaborador
       const consolidadoMap: Record<string, any> = {};
-      for (const d of detalhePonto) {
-        const key = `${d.ID}_${d.Funcionario}`;
-        if (!consolidadoMap[key]) {
-          consolidadoMap[key] = { ID: d.ID, Funcionario: d.Funcionario, totalDias: 0, presencas: 0, marcacoesOk: 0, totalBon: 0 };
+      for (const regs of Object.values(dailyMap)) {
+        for (const r of regs) {
+          const ok = r.marcacoes === 4;
+          detalhePonto.push({
+            'ID': r.id, 'Funcionario': r.nome, 'Dia': r.data, 'Marcações': r.marcacoes,
+            '✓ 4 Marcações': ok ? 'SIM' : 'NÃO', 'Bônus Marcações (R$)': ok ? MOT_MARC : 0
+          });
+          if (!consolidadoMap[r.id]) consolidadoMap[r.id] = { ID: r.id, Nome: r.nome, dias: 0, ok: 0, bon: 0 };
+          consolidadoMap[r.id].dias++;
+          if (ok) { consolidadoMap[r.id].ok++; consolidadoMap[r.id].bon += MOT_MARC; }
         }
-        const m = consolidadoMap[key];
-        m.totalDias++;
-        const presente = d['✓ 4 Marcações'] === 'SIM' || d['Presença Justificada'] === 'SIM';
-        if (presente) m.presencas++;
-        if (d['✓ 4 Marcações'] === 'SIM') { m.marcacoesOk++; m.totalBon += MOT_MARC; }
       }
 
       const consolidado = Object.values(consolidadoMap).map((m: any) => ({
-        'ID'                    : m.ID,
-        'Funcionario'           : m.Funcionario,
-        'Dias com Atividade'    : m.totalDias,
-        'Presenças'             : m.presencas,
-        'Faltas'                : Math.max(0, m.totalDias - m.presencas),
-        'Percentual (%)'        : Number(((m.presencas / Math.max(m.totalDias, 1)) * 100).toFixed(2)),
-        'Dias 4 Marcações OK'   : m.marcacoesOk,
-        'Total Bonificação (R$)': Number(m.totalBon.toFixed(2)),
+        'ID': m.ID, 'Funcionario': m.Nome, 'Dias com Atividade': m.dias,
+        'Dias 4 Marcações OK': m.ok, 'Percentual (%)': Number(((m.ok / m.dias) * 100).toFixed(2)),
+        'Total Bonificação (R$)': Number(m.bon.toFixed(2))
       }));
 
-      // Absenteísmo
-      const absenteismoData = consolidado.map((c: any) => {
-        const pct = c['Percentual (%)'];
-        const incentivo = pct >= 100 ? 50 : pct >= 90 ? 40 : pct >= 75 ? 25 : 0;
-        return {
-          'ID'               : c.ID,
-          'Nome'             : c.Funcionario,
-          'Total Dias'       : c['Dias com Atividade'],
-          'Total Presenças'  : c.Presenças,
-          'Faltas'           : c.Faltas,
-          'Percentual (%)'   : pct,
-          'Valor Incentivo'  : incentivo,
-        };
-      });
+      const absenteismoData = consolidado.map((c: any) => ({
+        'ID': c.ID, 'Nome': c.Funcionario, 'Total_Dias': c['Dias com Atividade'],
+        'Faltas': Math.max(0, c['Dias com Atividade'] - c['Dias 4 Marcações OK']),
+        'Percentual (%)': c['Percentual (%)'],
+        'Valor_Incentivo': c['Percentual (%)'] >= 90 ? 50 : 0
+      }));
 
       const saved = await firebaseStore.saveResult('ponto', {
         pipelineType: 'ponto', timestamp: Date.now(), year, month,
-        data: consolidado,
-        detalhePonto,
-        absenteismoData,
-        summary: `Ponto: ${consolidado.length} colaboradores processados (${detalhePonto.length} registros diários).`,
+        data: consolidado, detalhePonto, absenteismoData,
+        summary: `Ponto: ${consolidado.length} colaboradores processados.`
       });
-
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
     throw new Error('Pipeline não implementado.');
-
   } catch (error: any) {
     console.error('[Pipeline Error]', error);
-    return {
-      success: false,
-      error  : error.message || 'Erro desconhecido',
-      stack  : error.stack,
-      code   : error.code,
-      detail : error.detail,
-    };
+    return { success: false, error: error.message || 'Erro de processamento' };
   }
 }
