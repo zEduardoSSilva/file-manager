@@ -20,7 +20,7 @@ const excelSerialToDateStr = (serial: any, defaultYear: number): string => {
 };
 
 const hmsToSeconds = (hms: any): number => {
-  if (!hms || hms === "-") return 0;
+  if (!hms || hms === "-" || hms === "0") return 0;
   try {
     const s = String(hms);
     if (!s.includes(':')) return 0;
@@ -36,17 +36,6 @@ const toFloat = (val: any): number => {
   if (typeof val === 'number') return val;
   const clean = String(val).replace(/[^\d,.-]/g, '').replace(',', '.');
   return parseFloat(clean) || 0;
-};
-
-const findCol = (row: any, candidates: string[]): string | undefined => {
-  if (!row) return undefined;
-  const keys = Object.keys(row);
-  for (const cand of candidates) {
-    const normCand = cand.toLowerCase().trim();
-    const found = keys.find(k => k.toLowerCase().trim().includes(normCand));
-    if (found) return found;
-  }
-  return undefined;
 };
 
 async function fileToBuffer(file: File): Promise<Buffer> {
@@ -74,45 +63,30 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       for (const file of files) {
         const buffer = await fileToBuffer(file);
         const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(sheet) as any[];
+        const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
         
+        // Filtro rápido para evitar processamento inútil
         const filtered = data.filter(row => {
-          const statusVal = String(row[findCol(row, ['status_rota', 'status']) || ''] || '').toUpperCase();
-          return statusVal !== 'STANDBY';
+          const status = String(row['Status Rota'] || '').toUpperCase();
+          return status !== 'STANDBY';
         });
         baseDados.push(...filtered);
       }
 
-      if (baseDados.length === 0) throw new Error('Nenhum dado válido após filtrar StandBy.');
-
-      const sample = baseDados[0];
-      const colEmpresa = findCol(sample, ['empresa', 'deposito']) || 'Empresa';
-      const colData = findCol(sample, ['data_rota', 'data']) || 'Data';
-      const colDist = findCol(sample, ['distancia_cliente_metros', 'distancia']) || 'Distancia';
-      const colSla = findCol(sample, ['sla_janela_atendimento', 'sla']) || 'SLA';
-      const colChegada = findCol(sample, ['chegada_cliente_realizado', 'chegada']) || 'Chegada';
-      const colFim = findCol(sample, ['fim_atendimento_cliente_realizado', 'fim_atendimento']) || 'Fim';
-      const colPeso = findCol(sample, ['peso_pedido', 'peso']) || 'Peso';
-      const colOc = findCol(sample, ['descricao_ocorrencia', 'ocorrencia']) || 'Ocorrencia';
-      const colMot = findCol(sample, ['nome_motorista', 'motorista']) || 'Motorista';
-      const colAju = findCol(sample, ['nome_primeiro_ajudante', 'ajudante']) || 'Ajudante';
-      const colSeqP = findCol(sample, ['sequencia_entrega_planejado', 'sequencia_planejado']) || 'SeqP';
-      const colSeqR = findCol(sample, ['sequencia_entrega_realizado', 'sequencia_realizado']) || 'SeqR';
+      if (baseDados.length === 0) throw new Error('Nenhum dado válido (Status != STANDBY) encontrado.');
 
       const dailyMap: Record<string, any> = {};
 
-      // Processamento em uma única passada para otimizar
       baseDados.forEach(row => {
-        const dtStr = excelSerialToDateStr(row[colData], year);
+        const dtStr = excelSerialToDateStr(row['Data Rota'], year);
         if (!dtStr) return;
 
-        const empresa = String(row[colEmpresa] || 'N/A');
-        const motorista = String(row[colMot] || '').trim();
-        const ajudante = String(row[colAju] || '').trim();
+        const empresa = String(row['Nome Depósito'] || 'N/A');
+        const motorista = String(row['Nome Motorista'] || '').trim();
+        const ajudante = String(row['Nome Primeiro Ajudante'] || '').trim();
 
         const processarEntidade = (nome: string, cargo: 'MOTORISTA' | 'AJUDANTE') => {
-          if (!nome || nome === 'N.R.' || nome === '0' || nome.toUpperCase() === 'NULL' || nome.toUpperCase() === 'SEM AJUDANTE') return;
+          if (!nome || nome === '0' || nome.toUpperCase() === 'NULL' || nome.toUpperCase() === 'SEM AJUDANTE') return;
           
           const key = `${nome}_${cargo}_${dtStr}`;
           if (!dailyMap[key]) {
@@ -124,24 +98,37 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
 
           const d = dailyMap[key];
           d.Total_Pedidos++;
-          if (toFloat(row[colDist]) <= 100) d.Raio_OK++;
-          if (String(row[colSla] || '').toUpperCase().includes('SIM')) d.SLA_OK++;
-          const t1 = hmsToSeconds(row[colChegada]);
-          const t2 = hmsToSeconds(row[colFim]);
+          
+          // Critério 1: Raio <= 100m
+          if (toFloat(row['Distância Cliente (metros)']) <= 100) d.Raio_OK++;
+          
+          // Critério 2: SLA Janela Atendimento (contém "SIM")
+          if (String(row['SLA Janela Atendimento'] || '').toUpperCase().includes('SIM')) d.SLA_OK++;
+          
+          // Critério 3: Tempo Atendimento >= 1 min (60s)
+          const t1 = hmsToSeconds(row['Chegada Cliente Realizado']);
+          const t2 = hmsToSeconds(row['Fim Atendimento Cliente Realizado']);
           if (t2 - t1 >= 60) d.Tempo_OK++;
-          const sP = String(row[colSeqP] || '');
-          const sR = String(row[colSeqR] || '');
+          
+          // Critério 4: Sequência OK
+          const sP = String(row['Sequência Entrega Planejado'] || '');
+          const sR = String(row['Sequência Entrega Realizado'] || '');
           if (sP === sR && sP !== '') d.Seq_OK++;
-          const p = toFloat(row[colPeso]);
+          
+          // Pesos
+          const p = toFloat(row['Peso Pedido']);
           d.Peso_Total += p;
-          const oc = String(row[colOc] || '').trim();
-          if (oc !== '' && oc.toUpperCase() !== 'NULL' && oc.toUpperCase() !== 'NAN') d.Peso_Devolvido += p;
+          const oc = String(row['Descrição Ocorrência'] || '').trim();
+          if (oc !== '' && oc.toUpperCase() !== 'NULL' && oc.toUpperCase() !== 'NAN') {
+            d.Peso_Devolvido += p;
+          }
         };
 
         processarEntidade(motorista, 'MOTORISTA');
         processarEntidade(ajudante, 'AJUDANTE');
       });
 
+      // Geração da Aba Detalhe (Ordem exata solicitada)
       const detalheUnificado = Object.values(dailyMap).map(d => {
         const pR = Number(((d.Raio_OK / d.Total_Pedidos) * 100).toFixed(2));
         const pS = Number(((d.SLA_OK / d.Total_Pedidos) * 100).toFixed(2));
@@ -157,27 +144,27 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const valorCriterio = d.Cargo === 'MOTORISTA' ? MOT_BASE / 4 : AJU_BASE / 4;
         
         return {
-          'Empresa': d.Empresa, 
-          'Funcionario': d.Funcionario, 
-          'Cargo': d.Cargo, 
+          'Empresa': d.Empresa,
+          'Funcionario': d.Funcionario,
+          'Cargo': d.Cargo,
           'Dia': d.Dia,
-          'Total de Pedidos': d.Total_Pedidos, 
+          'Total de Pedidos': d.Total_Pedidos,
           'Peso Pedido Dia (Kg)': Number(d.Peso_Total.toFixed(2)),
           'Peso Devolvido Dia (Kg)': Number(d.Peso_Devolvido.toFixed(2)),
           '% Devolvido Dia': d.Peso_Total > 0 ? Number(((d.Peso_Devolvido / d.Peso_Total) * 100).toFixed(2)) : 0,
-          'Pedidos Raio OK': d.Raio_OK, 
-          '% Raio': pR, 
+          'Pedidos Raio OK': d.Raio_OK,
+          '% Raio': pR,
           '✓ Raio ≥70.0%': cR ? 'SIM' : 'NÃO',
-          'Pedidos SLA OK': d.SLA_OK, 
-          '% SLA': pS, 
+          'Pedidos SLA OK': d.SLA_OK,
+          '% SLA': pS,
           '✓ SLA ≥80.0%': cS ? 'SIM' : 'NÃO',
-          'Pedidos Tempo OK': d.Tempo_OK, 
-          '% Tempo': pT, 
+          'Pedidos Tempo OK': d.Tempo_OK,
+          '% Tempo': pT,
           '✓ Tempo ≥100.0%': cT ? 'SIM' : 'NÃO',
-          'Pedidos Sequência OK': d.Seq_OK, 
-          '% Sequência': pSeq, 
+          'Pedidos Sequência OK': d.Seq_OK,
+          '% Sequência': pSeq,
           '✓ Sequência ≥0.0%': cSeq ? 'SIM' : 'NÃO',
-          'Critérios Cumpridos (de 4)': cumpridos, 
+          'Critérios Cumpridos (de 4)': cumpridos,
           'Critérios Falhados': 4 - cumpridos,
           'Dia Bonificação Máxima (4/4)': cumpridos === 4 ? 'SIM' : 'NÃO',
           '% Bonificação': Number((cumpridos / 4 * 100).toFixed(2)),
@@ -185,20 +172,21 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         };
       });
 
+      // Geração da Aba Consolidado (Ordem exata solicitada)
       const consolidadoUnificado = Object.values(detalheUnificado.reduce((acc: any, curr: any) => {
         const key = `${curr.Funcionario}_${curr.Cargo}`;
         if (!acc[key]) {
           acc[key] = {
-            'Empresa': curr.Empresa, 
-            'Funcionario': curr.Funcionario, 
-            'Cargo': curr.Cargo, 
-            'Dias com Atividade': 0, 
-            'Dias Bonif. Máxima (4/4)': 0, 
-            'Total Bonificação (R$)': 0, 
-            'Total Critérios Cumpridos': 0, 
-            'Falhas Raio': 0, 
-            'Falhas SLA': 0, 
-            'Falhas Tempo': 0, 
+            'Empresa': curr.Empresa,
+            'Funcionario': curr.Funcionario,
+            'Cargo': curr.Cargo,
+            'Dias com Atividade': 0,
+            'Dias Bonif. Máxima (4/4)': 0,
+            'Total Bonificação (R$)': 0,
+            'Total Critérios Cumpridos': 0,
+            'Falhas Raio': 0,
+            'Falhas SLA': 0,
+            'Falhas Tempo': 0,
             'Falhas Sequência': 0
           };
         }
@@ -227,6 +215,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         'Falhas Sequência': m['Falhas Sequência']
       })).sort((a: any, b: any) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
 
+      // Salvar no Firestore e retornar
       const saved = await firebaseStore.saveResult('performaxxi', {
         pipelineType: 'performaxxi', timestamp: Date.now(), year, month,
         data: consolidadoUnificado, detalheGeral: detalheUnificado,
