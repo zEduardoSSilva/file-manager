@@ -108,14 +108,14 @@ export function VFleetPipelineView() {
       <Alert className="bg-primary/5 border-primary/20">
         <div className="flex items-center gap-2">
           <Info className="size-4 text-primary" />
-          <AlertTitle className="mb-0">Análise de Condução vFleet</AlertTitle>
+          <AlertTitle className="mb-0">Análise vFleet</AlertTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Anexe arquivos do tipo Boletim do Veículo e Histórico de Alertas. O sistema analisará os critérios de condução automaticamente.</p>
+                <p>Anexe os arquivos. O sistema analisará os critérios de condução automaticamente.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -211,7 +211,7 @@ export function VFleetPipelineView() {
                 onClick={() => runPipeline(false)} 
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise vFleet</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Salvar</>}
               </Button>
             </CardFooter>
           </Card>

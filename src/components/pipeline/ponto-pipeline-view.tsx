@@ -146,13 +146,13 @@ export function PontoPipelineView() {
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Anexe os CSVs de ponto original. O sistema consolidará a jornada diária e calculará o incentivo de absenteísmo proporcional.</p>
+                <p>Anexe os arquivos. O sistema consolidará a jornada diária e calculará o incentivo de absenteísmo proporcional.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-sm mt-2 text-indigo-800">
-          Esta análise cruza as marcações de ponto com as regras de jornada e aplica bônus por conformidade e incentivos financeiros de frequência.
+          Esta análise cruza as marcações de ponto com as regras de jornada e aplica bônus por conformidade.
         </AlertDescription>
       </Alert>
 
@@ -299,7 +299,7 @@ export function PontoPipelineView() {
                 onClick={() => runPipeline(false)} 
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise de Ponto</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Salvar</>}
               </Button>
             </CardFooter>
           </Card>

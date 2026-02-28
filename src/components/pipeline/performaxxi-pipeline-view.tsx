@@ -113,20 +113,20 @@ export function PerformaxxiPipelineView() {
       <Alert className="bg-accent/5 border-accent/20">
         <div className="flex items-center gap-2">
           <Info className="size-4 text-accent" />
-          <AlertTitle className="mb-0">Análise Unificada Performaxxi</AlertTitle>
+          <AlertTitle className="mb-0">Análise Performaxxi</AlertTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Anexe o relatório analítico de rotas. O sistema unificará Motoristas e Ajudantes em uma única base de dados.</p>
+                <p>Anexe os arquivos. O sistema analisará os critérios de performance automaticamente.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-sm mt-2">
-          Bônus proporcional: <strong>R$ 8,00</strong> (Motorista) e <strong>R$ 7,20</strong> (Ajudante) baseados em 4 critérios. Resultados salvos diretamente no Firestore.
+          Bônus proporcional: <strong>R$ 8,00</strong> (Motorista) e <strong>R$ 7,20</strong> (Ajudante) baseados em 4 critérios.
         </AlertDescription>
       </Alert>
 
@@ -212,7 +212,7 @@ export function PerformaxxiPipelineView() {
                 onClick={() => runPipeline(false)} 
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Salvar no Firebase</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Salvar</>}
               </Button>
             </CardFooter>
           </Card>

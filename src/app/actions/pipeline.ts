@@ -3,7 +3,7 @@
 
 import { firebaseStore, PipelineResult } from '@/lib/firebase';
 import * as XLSX from 'xlsx';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSunday, differenceInMinutes, parse } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSunday } from 'date-fns';
 
 export type PipelineResponse = 
   | { success: true; result: PipelineResult }
@@ -20,31 +20,21 @@ const excelSerialToDateStr = (serial: any, defaultYear: number): string => {
     return format(date, 'dd/MM/yyyy');
   }
   if (serial instanceof Date) return format(serial, 'dd/MM/yyyy');
-  return String(serial || "").trim();
+  const s = String(serial || "").trim();
+  if (s.includes('/') && s.length >= 8) return s;
+  return "";
 };
 
-const hmsToSeconds = (hms: string): number => {
+const hmsToSeconds = (hms: any): number => {
   if (!hms || hms === "-") return 0;
   try {
-    const parts = String(hms).split(':');
+    const s = String(hms);
+    if (!s.includes(':')) return 0;
+    const parts = s.split(':');
     if (parts.length === 3) return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+    if (parts.length === 2) return parseInt(parts[0]) * 60 + parseInt(parts[1]);
     return 0;
   } catch { return 0; }
-};
-
-const hmsToMinutes = (hms: string): number => {
-  if (!hms || hms === "-" || !String(hms).includes(':')) return 0;
-  try {
-    const parts = String(hms).split(':');
-    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-  } catch { return 0; }
-};
-
-const minutesToHms = (minutes: number | null): string => {
-  if (minutes === null || minutes === undefined) return "";
-  const h = Math.floor(Math.abs(minutes) / 60);
-  const m = Math.abs(minutes) % 60;
-  return `${minutes < 0 ? '-' : ''}${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
 
 const toFloat = (val: any): number => {
@@ -93,13 +83,14 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         rawData.push(...data);
       }
 
+      // Filtro Standby rápido
       const baseDados = rawData.filter(row => {
-        const statusCol = findCol(row, ['status_rota', 'status_da_rota', 'status']);
-        return String(row[statusCol || ''] || '').toUpperCase() !== 'STANDBY';
+        const statusVal = String(row[findCol(row, ['status_rota', 'status']) || ''] || '').toUpperCase();
+        return statusVal !== 'STANDBY';
       });
 
       const analisarGrupo = (tipo: 'MOTORISTA' | 'AJUDANTE') => {
-        const colNomeCand = tipo === 'MOTORISTA' ? ['nome_motorista', 'motorista'] : ['nome_primeiro_ajudante', 'nome_segundo_ajudante', 'ajudante'];
+        const colNomeCand = tipo === 'MOTORISTA' ? ['nome_motorista', 'motorista'] : ['nome_primeiro_ajudante', 'ajudante'];
         const baseValor = tipo === 'MOTORISTA' ? MOT_BASE : AJU_BASE;
         const valorPorCriterio = baseValor / 4;
 
@@ -108,9 +99,10 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         baseDados.forEach(row => {
           const colNome = findCol(row, colNomeCand);
           const nome = String(row[colNome || ''] || '').trim();
-          if (!nome || nome === 'N.R.') return;
+          if (!nome || nome === 'N.R.' || nome === '0') return;
 
           const dateStr = excelSerialToDateStr(row[findCol(row, ['data_rota', 'data'])] || '', year);
+          if (!dateStr) return;
           const key = `${nome}_${dateStr}`;
 
           if (!dailyMap[key]) {
@@ -130,18 +122,24 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
           }
 
           dailyMap[key].Total_Pedidos++;
-          if (toFloat(row[findCol(row, ['distancia_cliente_metros', 'distancia']) || '']) <= 100) dailyMap[key].Raio_OK++;
-          if (String(row[findCol(row, ['sla_janela_atendimento', 'sla']) || ''] || '').toUpperCase().match(/SIM|OK/)) dailyMap[key].SLA_OK++;
+          const dist = toFloat(row[findCol(row, ['distancia_cliente_metros', 'distancia']) || '']);
+          if (dist <= 100) dailyMap[key].Raio_OK++;
           
-          const t1 = hmsToSeconds(String(row[findCol(row, ['chegada_cliente_realizado', 'chegada']) || ''] || ''));
-          const t2 = hmsToSeconds(String(row[findCol(row, ['fim_atendimento_cliente_realizado', 'fim_atendimento']) || ''] || ''));
+          const sla = String(row[findCol(row, ['sla_janela_atendimento', 'sla']) || ''] || '').toUpperCase();
+          if (sla.includes('SIM') || sla.includes('OK')) dailyMap[key].SLA_OK++;
+          
+          const t1 = hmsToSeconds(row[findCol(row, ['chegada_cliente_realizado', 'chegada']) || '']);
+          const t2 = hmsToSeconds(row[findCol(row, ['fim_atendimento_cliente_realizado', 'fim_atendimento']) || '']);
           if (t2 - t1 >= 60) dailyMap[key].Tempo_OK++;
 
-          if (row['sequencia_entrega_planejado'] === row['sequencia_entrega_realizado']) dailyMap[key].Seq_OK++;
+          const sPlan = String(row['sequencia_entrega_planejado'] || '');
+          const sReal = String(row['sequencia_entrega_realizado'] || '');
+          if (sPlan === sReal && sPlan !== '') dailyMap[key].Seq_OK++;
 
           const peso = toFloat(row[findCol(row, ['peso_pedido', 'peso']) || '']);
           dailyMap[key].Peso_Total += peso;
-          if (String(row[findCol(row, ['descricao_ocorrencia', 'ocorrencia']) || ''] || '').trim() !== '') dailyMap[key].Peso_Devolvido += peso;
+          const oc = String(row[findCol(row, ['descricao_ocorrencia', 'ocorrencia']) || ''] || '').trim();
+          if (oc !== '' && oc.toUpperCase() !== 'NULL') dailyMap[key].Peso_Devolvido += peso;
         });
 
         return Object.values(dailyMap).map(d => {
@@ -163,9 +161,9 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             'Cargo': d.Cargo,
             'Dia': d.Dia,
             'Total de Pedidos': d.Total_Pedidos,
-            'Peso Pedido Dia (Kg)': d.Peso_Total.toFixed(2),
-            'Peso Devolvido Dia (Kg)': d.Peso_Devolvido.toFixed(2),
-            '% Devolvido Dia': d.Peso_Total > 0 ? ((d.Peso_Devolvido / d.Peso_Total) * 100).toFixed(2) : '0.00',
+            'Peso Pedido Dia (Kg)': Number(d.Peso_Total.toFixed(2)),
+            'Peso Devolvido Dia (Kg)': Number(d.Peso_Devolvido.toFixed(2)),
+            '% Devolvido Dia': d.Peso_Total > 0 ? Number(((d.Peso_Devolvido / d.Peso_Total) * 100).toFixed(2)) : 0,
             'Pedidos Raio OK': d.Raio_OK,
             '% Raio': pRaio,
             '✓ Raio ≥70.0%': cRaio ? 'SIM' : 'NÃO',
@@ -181,8 +179,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
             'Critérios Cumpridos (de 4)': cumpridos,
             'Critérios Falhados': 4 - cumpridos,
             'Dia Bonificação Máxima (4/4)': cumpridos === 4 ? 'SIM' : 'NÃO',
-            '% Bonificação': (cumpridos / 4 * 100).toFixed(2),
-            [`Bonificação ${tipo === 'MOTORISTA' ? 'Motorista' : 'Ajudante'} (R$)`]: Number((cumpridos * valorPorCriterio).toFixed(2))
+            '% Bonificação': Number((cumpridos / 4 * 100).toFixed(2)),
+            'Bonificação Funcionario (R$)': Number((cumpridos * valorPorCriterio).toFixed(2))
           };
         });
       };
@@ -191,37 +189,38 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
 
       const consolidadoUnificado = Object.values(detalheUnificado.reduce((acc: any, curr: any) => {
         const nome = curr.Funcionario;
-        if (!acc[nome]) {
-          acc[nome] = {
-            'Empresa': curr.Empresa, 'Funcionario': nome, 'Cargo': curr.Cargo, 'Dias com Atividade': 0, 'Dias Bonif. Máxima (4/4)': 0,
+        const cargo = curr.Cargo;
+        const key = `${nome}_${cargo}`;
+        if (!acc[key]) {
+          acc[key] = {
+            'Empresa': curr.Empresa, 'Funcionario': nome, 'Cargo': cargo, 'Dias com Atividade': 0, 'Dias Bonif. Máxima (4/4)': 0,
             'Total Bonificação (R$)': 0, 'Total Critérios Cumpridos': 0, 'Falhas Raio': 0, 'Falhas SLA': 0, 'Falhas Tempo': 0, 'Falhas Sequência': 0
           };
         }
-        acc[nome]['Dias com Atividade']++;
-        if (curr['Dia Bonificação Máxima (4/4)'] === 'SIM') acc[nome]['Dias Bonif. Máxima (4/4)']++;
-        acc[nome]['Total Bonificação (R$)'] += curr[`Bonificação ${curr.Cargo === 'MOTORISTA' ? 'Motorista' : 'Ajudante'} (R$)`];
-        acc[nome]['Total Critérios Cumpridos'] += curr['Critérios Cumpridos (de 4)'];
-        if (curr[`✓ Raio ≥70.0%`] === 'NÃO') acc[nome]['Falhas Raio']++;
-        if (curr[`✓ SLA ≥80.0%`] === 'NÃO') acc[nome]['Falhas SLA']++;
-        if (curr[`✓ Tempo ≥100.0%`] === 'NÃO') acc[nome]['Falhas Tempo']++;
-        if (curr[`✓ Sequência ≥0.0%`] === 'NÃO') acc[nome]['Falhas Sequência']++;
+        acc[key]['Dias com Atividade']++;
+        if (curr['Dia Bonificação Máxima (4/4)'] === 'SIM') acc[key]['Dias Bonif. Máxima (4/4)']++;
+        acc[key]['Total Bonificação (R$)'] += curr['Bonificação Funcionario (R$)'];
+        acc[key]['Total Critérios Cumpridos'] += curr['Critérios Cumpridos (de 4)'];
+        if (curr['✓ Raio ≥70.0%'] === 'NÃO') acc[key]['Falhas Raio']++;
+        if (curr['✓ SLA ≥80.0%'] === 'NÃO') acc[key]['Falhas SLA']++;
+        if (curr['✓ Tempo ≥100.0%'] === 'NÃO') acc[key]['Falhas Tempo']++;
+        if (curr['✓ Sequência ≥0.0%'] === 'NÃO') acc[key]['Falhas Sequência']++;
         return acc;
       }, {})).map((m: any) => ({
         ...m, 
         'Percentual de Desempenho (%)': Number(((m['Total Critérios Cumpridos'] / (m['Dias com Atividade'] * 4)) * 100).toFixed(2)),
         'Total Bonificação (R$)': Number(m['Total Bonificação (R$)'].toFixed(2))
-      }));
+      })).sort((a: any, b: any) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
 
       const saved = await firebaseStore.saveResult('performaxxi', {
         pipelineType: 'performaxxi', timestamp: Date.now(), year, month,
         data: consolidadoUnificado, detalheGeral: detalheUnificado,
-        summary: `Performaxxi: Analisados ${consolidadoUnificado.length} colaboradores.`
+        summary: `Performaxxi Unificado: Analisados ${consolidadoUnificado.length} funcionários.`
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    // --- VFLEET ---
     if (pipelineType === 'vfleet') {
       let bulletins: any[] = [];
       let alerts: any[] = [];
@@ -238,8 +237,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
 
       const dailyAnalysis: Record<string, any> = {};
       bulletins.forEach(row => {
-        const placa = normalizePlate(row['PLACA']);
         const diaStr = excelSerialToDateStr(row['DIA'] || row['DATA'], year);
+        if (!diaStr) return;
         const motorista = String(row['MOTORISTAS'] || '').split('-')[0].trim();
         if (!motorista || motorista.toUpperCase().includes('SEM IDENTIFICAÇÃO')) return;
         const key = `${motorista}_${diaStr}`;
@@ -278,7 +277,6 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    // --- PONTO ---
     if (pipelineType === 'ponto') {
       const includeSundays = formData.get('includeSundays') === 'true';
       const excludedDatesSet = new Set(JSON.parse(formData.get('excludedDates') as string || '[]'));
