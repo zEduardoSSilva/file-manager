@@ -1,4 +1,3 @@
-
 'use server';
 
 import { firebaseStore, PipelineResult } from '@/lib/firebase';
@@ -68,7 +67,7 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
     const month = parseInt(rawMonth as string);
 
     if (pipelineType === 'performaxxi') {
-      let rawData: any[] = [];
+      let baseDados: any[] = [];
       const MOT_BASE = 8.00;
       const AJU_BASE = 7.20;
 
@@ -77,13 +76,13 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const data = XLSX.utils.sheet_to_json(sheet) as any[];
-        rawData.push(...data);
+        
+        const filtered = data.filter(row => {
+          const statusVal = String(row[findCol(row, ['status_rota', 'status']) || ''] || '').toUpperCase();
+          return statusVal !== 'STANDBY';
+        });
+        baseDados.push(...filtered);
       }
-
-      const baseDados = rawData.filter(row => {
-        const statusVal = String(row[findCol(row, ['status_rota', 'status']) || ''] || '').toUpperCase();
-        return statusVal !== 'STANDBY';
-      });
 
       if (baseDados.length === 0) throw new Error('Nenhum dado válido após filtrar StandBy.');
 
@@ -98,92 +97,93 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       const colOc = findCol(sample, ['descricao_ocorrencia', 'ocorrencia']) || 'Ocorrencia';
       const colMot = findCol(sample, ['nome_motorista', 'motorista']) || 'Motorista';
       const colAju = findCol(sample, ['nome_primeiro_ajudante', 'ajudante']) || 'Ajudante';
+      const colSeqP = findCol(sample, ['sequencia_entrega_planejado', 'sequencia_planejado']) || 'SeqP';
+      const colSeqR = findCol(sample, ['sequencia_entrega_realizado', 'sequencia_realizado']) || 'SeqR';
 
-      const processarEquipe = (tipo: 'MOTORISTA' | 'AJUDANTE') => {
-        const colNome = tipo === 'MOTORISTA' ? colMot : colAju;
-        const valorBase = tipo === 'MOTORISTA' ? MOT_BASE : AJU_BASE;
-        const valorCriterio = valorBase / 4;
-        const dailyMap: Record<string, any> = {};
+      const dailyMap: Record<string, any> = {};
 
-        baseDados.forEach(row => {
-          const nome = String(row[colNome] || '').trim();
-          if (!nome || nome === 'N.R.' || nome === '0' || nome.toUpperCase() === 'NULL') return;
+      // Processamento em uma única passada para otimizar
+      baseDados.forEach(row => {
+        const dtStr = excelSerialToDateStr(row[colData], year);
+        if (!dtStr) return;
 
-          const dtStr = excelSerialToDateStr(row[colData], year);
-          if (!dtStr) return;
-          const key = `${nome}_${dtStr}`;
+        const empresa = String(row[colEmpresa] || 'N/A');
+        const motorista = String(row[colMot] || '').trim();
+        const ajudante = String(row[colAju] || '').trim();
 
+        const processarEntidade = (nome: string, cargo: 'MOTORISTA' | 'AJUDANTE') => {
+          if (!nome || nome === 'N.R.' || nome === '0' || nome.toUpperCase() === 'NULL' || nome.toUpperCase() === 'SEM AJUDANTE') return;
+          
+          const key = `${nome}_${cargo}_${dtStr}`;
           if (!dailyMap[key]) {
             dailyMap[key] = {
-              Empresa: String(row[colEmpresa] || 'N/A'), Funcionario: nome, Cargo: tipo, Dia: dtStr,
+              Empresa: empresa, Funcionario: nome, Cargo: cargo, Dia: dtStr,
               Total_Pedidos: 0, Raio_OK: 0, SLA_OK: 0, Tempo_OK: 0, Seq_OK: 0, Peso_Total: 0, Peso_Devolvido: 0
             };
           }
 
           const d = dailyMap[key];
           d.Total_Pedidos++;
-          
           if (toFloat(row[colDist]) <= 100) d.Raio_OK++;
           if (String(row[colSla] || '').toUpperCase().includes('SIM')) d.SLA_OK++;
-          
           const t1 = hmsToSeconds(row[colChegada]);
           const t2 = hmsToSeconds(row[colFim]);
           if (t2 - t1 >= 60) d.Tempo_OK++;
-
-          const sP = String(row['sequencia_entrega_planejado'] || '');
-          const sR = String(row['sequencia_entrega_realizado'] || '');
+          const sP = String(row[colSeqP] || '');
+          const sR = String(row[colSeqR] || '');
           if (sP === sR && sP !== '') d.Seq_OK++;
-
           const p = toFloat(row[colPeso]);
           d.Peso_Total += p;
           const oc = String(row[colOc] || '').trim();
           if (oc !== '' && oc.toUpperCase() !== 'NULL' && oc.toUpperCase() !== 'NAN') d.Peso_Devolvido += p;
-        });
+        };
 
-        return Object.values(dailyMap).map(d => {
-          const pR = Number(((d.Raio_OK / d.Total_Pedidos) * 100).toFixed(2));
-          const pS = Number(((d.SLA_OK / d.Total_Pedidos) * 100).toFixed(2));
-          const pT = Number(((d.Tempo_OK / d.Total_Pedidos) * 100).toFixed(2));
-          const pSeq = Number(((d.Seq_OK / d.Total_Pedidos) * 100).toFixed(2));
+        processarEntidade(motorista, 'MOTORISTA');
+        processarEntidade(ajudante, 'AJUDANTE');
+      });
 
-          const cR = pR >= 70;
-          const cS = pS >= 80;
-          const cT = pT >= 100;
-          const cSeq = pSeq >= 0;
+      const detalheUnificado = Object.values(dailyMap).map(d => {
+        const pR = Number(((d.Raio_OK / d.Total_Pedidos) * 100).toFixed(2));
+        const pS = Number(((d.SLA_OK / d.Total_Pedidos) * 100).toFixed(2));
+        const pT = Number(((d.Tempo_OK / d.Total_Pedidos) * 100).toFixed(2));
+        const pSeq = Number(((d.Seq_OK / d.Total_Pedidos) * 100).toFixed(2));
 
-          const cumpridos = (cR ? 1 : 0) + (cS ? 1 : 0) + (cT ? 1 : 0) + (cSeq ? 1 : 0);
-          
-          return {
-            'Empresa': d.Empresa, 
-            'Funcionario': d.Funcionario, 
-            'Cargo': d.Cargo, 
-            'Dia': d.Dia,
-            'Total de Pedidos': d.Total_Pedidos, 
-            'Peso Pedido Dia (Kg)': Number(d.Peso_Total.toFixed(2)),
-            'Peso Devolvido Dia (Kg)': Number(d.Peso_Devolvido.toFixed(2)),
-            '% Devolvido Dia': d.Peso_Total > 0 ? Number(((d.Peso_Devolvido / d.Peso_Total) * 100).toFixed(2)) : 0,
-            'Pedidos Raio OK': d.Raio_OK, 
-            '% Raio': pR, 
-            '✓ Raio ≥70.0%': cR ? 'SIM' : 'NÃO',
-            'Pedidos SLA OK': d.SLA_OK, 
-            '% SLA': pS, 
-            '✓ SLA ≥80.0%': cS ? 'SIM' : 'NÃO',
-            'Pedidos Tempo OK': d.Tempo_OK, 
-            '% Tempo': pT, 
-            '✓ Tempo ≥100.0%': cT ? 'SIM' : 'NÃO',
-            'Pedidos Sequência OK': d.Seq_OK, 
-            '% Sequência': pSeq, 
-            '✓ Sequência ≥0.0%': cSeq ? 'SIM' : 'NÃO',
-            'Critérios Cumpridos (de 4)': cumpridos, 
-            'Critérios Falhados': 4 - cumpridos,
-            'Dia Bonificação Máxima (4/4)': cumpridos === 4 ? 'SIM' : 'NÃO',
-            '% Bonificação': Number((cumpridos / 4 * 100).toFixed(2)),
-            'Bonificação Funcionario (R$)': Number((cumpridos * valorCriterio).toFixed(2))
-          };
-        });
-      };
+        const cR = pR >= 70;
+        const cS = pS >= 80;
+        const cT = pT >= 100;
+        const cSeq = pSeq >= 0;
 
-      const detalheUnificado = [...processarEquipe('MOTORISTA'), ...processarEquipe('AJUDANTE')];
+        const cumpridos = (cR ? 1 : 0) + (cS ? 1 : 0) + (cT ? 1 : 0) + (cSeq ? 1 : 0);
+        const valorCriterio = d.Cargo === 'MOTORISTA' ? MOT_BASE / 4 : AJU_BASE / 4;
+        
+        return {
+          'Empresa': d.Empresa, 
+          'Funcionario': d.Funcionario, 
+          'Cargo': d.Cargo, 
+          'Dia': d.Dia,
+          'Total de Pedidos': d.Total_Pedidos, 
+          'Peso Pedido Dia (Kg)': Number(d.Peso_Total.toFixed(2)),
+          'Peso Devolvido Dia (Kg)': Number(d.Peso_Devolvido.toFixed(2)),
+          '% Devolvido Dia': d.Peso_Total > 0 ? Number(((d.Peso_Devolvido / d.Peso_Total) * 100).toFixed(2)) : 0,
+          'Pedidos Raio OK': d.Raio_OK, 
+          '% Raio': pR, 
+          '✓ Raio ≥70.0%': cR ? 'SIM' : 'NÃO',
+          'Pedidos SLA OK': d.SLA_OK, 
+          '% SLA': pS, 
+          '✓ SLA ≥80.0%': cS ? 'SIM' : 'NÃO',
+          'Pedidos Tempo OK': d.Tempo_OK, 
+          '% Tempo': pT, 
+          '✓ Tempo ≥100.0%': cT ? 'SIM' : 'NÃO',
+          'Pedidos Sequência OK': d.Seq_OK, 
+          '% Sequência': pSeq, 
+          '✓ Sequência ≥0.0%': cSeq ? 'SIM' : 'NÃO',
+          'Critérios Cumpridos (de 4)': cumpridos, 
+          'Critérios Falhados': 4 - cumpridos,
+          'Dia Bonificação Máxima (4/4)': cumpridos === 4 ? 'SIM' : 'NÃO',
+          '% Bonificação': Number((cumpridos / 4 * 100).toFixed(2)),
+          'Bonificação Funcionario (R$)': Number((cumpridos * valorCriterio).toFixed(2))
+        };
+      });
 
       const consolidadoUnificado = Object.values(detalheUnificado.reduce((acc: any, curr: any) => {
         const key = `${curr.Funcionario}_${curr.Cargo}`;
@@ -213,25 +213,19 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         if (curr['✓ Sequência ≥0.0%'] === 'NÃO') m['Falhas Sequência']++;
         return acc;
       }, {})).map((m: any) => ({
-        ...m, 
-        'Percentual de Desempenho (%)': Number(((m['Total Critérios Cumpridos'] / (m['Dias com Atividade'] * 4)) * 100).toFixed(2)),
-        'Total Bonificação (R$)': Number(m['Total Bonificação (R$)'].toFixed(2))
-      }))
-      .sort((a: any, b: any) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)'])
-      .map((m: any) => ({
         'Empresa': m['Empresa'],
         'Funcionario': m['Funcionario'],
         'Cargo': m['Cargo'],
         'Dias com Atividade': m['Dias com Atividade'],
         'Dias Bonif. Máxima (4/4)': m['Dias Bonif. Máxima (4/4)'],
-        'Percentual de Desempenho (%)': m['Percentual de Desempenho (%)'],
-        'Total Bonificação (R$)': m['Total Bonificação (R$)'],
+        'Percentual de Desempenho (%)': Number(((m['Total Critérios Cumpridos'] / (m['Dias com Atividade'] * 4)) * 100).toFixed(2)),
+        'Total Bonificação (R$)': Number(m['Total Bonificação (R$)'].toFixed(2)),
         'Total Critérios Cumpridos': m['Total Critérios Cumpridos'],
         'Falhas Raio': m['Falhas Raio'],
         'Falhas SLA': m['Falhas SLA'],
         'Falhas Tempo': m['Falhas Tempo'],
         'Falhas Sequência': m['Falhas Sequência']
-      }));
+      })).sort((a: any, b: any) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
 
       const saved = await firebaseStore.saveResult('performaxxi', {
         pipelineType: 'performaxxi', timestamp: Date.now(), year, month,
