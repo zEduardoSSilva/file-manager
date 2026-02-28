@@ -75,11 +75,11 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
       for (const file of files) {
         const buffer = await fileToBuffer(file);
         const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-        const data = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]) as any[];
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json(sheet) as any[];
         rawData.push(...data);
       }
 
-      // 1. Filtrar StandBy
       const baseDados = rawData.filter(row => {
         const statusVal = String(row[findCol(row, ['status_rota', 'status']) || ''] || '').toUpperCase();
         return statusVal !== 'STANDBY';
@@ -183,10 +183,8 @@ export async function executePipeline(formData: FormData, pipelineType: 'vfleet'
         });
       };
 
-      // Unificar Motoristas e Ajudantes
       const detalheUnificado = [...processarEquipe('MOTORISTA'), ...processarEquipe('AJUDANTE')];
 
-      // Consolidar
       const consolidadoUnificado = Object.values(detalheUnificado.reduce((acc: any, curr: any) => {
         const key = `${curr.Funcionario}_${curr.Cargo}`;
         if (!acc[key]) {
