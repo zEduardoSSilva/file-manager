@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -75,55 +74,97 @@ export function PontoPipelineView() {
 
     try {
       addLog("Identificando arquivos anexados...", "info")
+      addLog(`Arquivos: ${files.map(f => f.name).join(', ')}`, "info")
+      addLog(`Período: ${String(month).padStart(2,'0')}/${year}`, "info")
+
       if (excludedDates.length > 0) {
         addLog(`Aplicando ${excludedDates.length} feriados/exclusões globais...`, "warn")
       }
       addLog(`Configuração: Domingos como dias úteis? ${includeSundays ? 'SIM' : 'NÃO'}`, "info")
-      
+
       await new Promise(r => setTimeout(r, 400))
       setProgress(20)
-      
+
       addLog("Analisando Jornada, HE, Almoço e Descanso Interjornada...", "info")
       addLog("Calculando bônus e absenteísmo...", "info")
-      
+
       setProgress(50)
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
       formData.append('includeSundays', includeSundays.toString())
-      
+
       const formattedExcluded = excludedDates.map(d => format(d, 'dd/MM/yyyy'))
       formData.append('excludedDates', JSON.stringify(formattedExcluded))
-      
+
       files.forEach(f => formData.append('files', f))
 
-      const response = await executePipeline(formData, 'ponto')
-      
-      if (response.success && response.result) {
-        const result = response.result;
-        setLastResult(result)
-        setProgress(100)
+      addLog("Enviando dados ao servidor...", "info")
 
-        if (downloadOnly) {
-          addLog("Gerando Excel Consolidado...", "success")
-          downloadMultipleSheets([
-            { data: result.detalhePonto || [], name: '03_Detalhe_Ponto' },
-            { data: result.data, name: '04_Consolidado' },
-            { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
-          ], `Ponto_Consolidado_${month}_${year}`)
-        } else {
-          addLog("Sincronização com o Firebase concluída.", "success")
-        }
-
-        toast({ 
-          title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "Excel analítico baixado." : "Dados Absenteísmo." 
-        });
-      } else {
-        throw new Error(response.success === false ? response.error : 'Erro desconhecido')
+      let response: any
+      try {
+        response = await executePipeline(formData, 'ponto')
+      } catch (networkErr: any) {
+        const detail = networkErr?.message || String(networkErr)
+        addLog(`Erro de comunicação com servidor: ${detail}`, "error")
+        if (networkErr?.cause) addLog(`Causa: ${String(networkErr.cause)}`, "error")
+        throw networkErr
       }
+
+      addLog(`Resposta recebida. Status: ${response?.success ? 'SUCESSO' : 'FALHA'}`, response?.success ? 'info' : 'warn')
+
+      if (!response?.success) {
+        const errMsg    = response?.error  || '(sem mensagem)'
+        const errStack  = response?.stack  || ''
+        const errCode   = response?.code   || ''
+        const errDetail = response?.detail || ''
+
+        addLog(`Erro retornado pelo servidor:`, "error")
+        addLog(`→ Mensagem : ${errMsg}`, "error")
+        if (errCode)   addLog(`→ Código   : ${errCode}`, "error")
+        if (errDetail) addLog(`→ Detalhe  : ${errDetail}`, "error")
+        if (errStack)  addLog(`→ Stack    : ${errStack.split('\n')[0]}`, "error")
+
+        throw new Error(errMsg)
+      }
+
+      const result = response.result;
+      setLastResult(result)
+      setProgress(100)
+
+      const resultKeys = Object.keys(result || {})
+      addLog(`Campos retornados: ${resultKeys.join(', ')}`, "info")
+
+      if (downloadOnly) {
+        addLog("Gerando Excel Consolidado...", "success")
+        downloadMultipleSheets([
+          { data: result.detalhePonto || [], name: '03_Detalhe_Ponto' },
+          { data: result.data, name: '04_Consolidado' },
+          { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
+        ], `Ponto_Consolidado_${month}_${year}`)
+
+        if (!result.detalhePonto || result.detalhePonto.length === 0)
+          addLog("⚠️ Aba '03_Detalhe_Ponto' veio vazia — verifique se o campo 'detalhePonto' é retornado pelo backend.", "warn")
+        if (!result.absenteismoData || result.absenteismoData.length === 0)
+          addLog("⚠️ Aba '10_Absenteismo_Resumo' veio vazia — verifique o campo 'absenteismoData'.", "warn")
+      } else {
+        addLog("Sincronização com o Firebase concluída.", "success")
+      }
+
+      toast({
+        title: downloadOnly ? "Arquivo Pronto" : "Concluído",
+        description: downloadOnly ? "Excel analítico baixado." : "Dados Absenteísmo."
+      });
+
     } catch (error: any) {
-      addLog(`FALHA: ${error.message}`, "error")
+      const msg = error?.message || String(error)
+      addLog(`FALHA GERAL: ${msg}`, "error")
+
+      if (msg.toLowerCase().includes('unexpected response') || msg.toLowerCase().includes('fetch')) {
+        addLog("Dica: O servidor pode ter retornado HTML de erro (500/404) em vez de JSON.", "warn")
+        addLog("Verifique os logs do servidor (terminal / Vercel / Firebase Functions).", "warn")
+      }
+
       setProgress(0)
     } finally {
       setIsExecuting(false)
@@ -183,10 +224,10 @@ export function PontoPipelineView() {
               <AIParamAssistant onParamsUpdate={(m, y) => { setMonth(m); setYear(y); }} currentMonth={month} currentYear={year} />
 
               <div className="flex items-center space-x-2 p-3 rounded-lg border bg-muted/5">
-                <Checkbox 
-                  id="include-sundays" 
-                  checked={includeSundays} 
-                  onCheckedChange={(checked) => setIncludeSundays(!!checked)} 
+                <Checkbox
+                  id="include-sundays"
+                  checked={includeSundays}
+                  onCheckedChange={(checked) => setIncludeSundays(!!checked)}
                 />
                 <div className="grid gap-1.5 leading-none">
                   <label
@@ -213,9 +254,9 @@ export function PontoPipelineView() {
                     excludedDates.sort((a,b) => a.getTime() - b.getTime()).map((date, i) => (
                       <Badge key={i} variant="secondary" className="flex items-center gap-1 pr-1">
                         {format(date, 'dd/MM/yyyy')}
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           className="size-4 p-0 h-4 w-4 rounded-full hover:bg-destructive hover:text-white"
                           onClick={() => removeDate(date)}
                         >
@@ -278,7 +319,7 @@ export function PontoPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-indigo-600">
-                  <span>Sincronizando com Firebase</span>
+                    <span>Sincronizando com Firebase</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -286,17 +327,17 @@ export function PontoPipelineView() {
               )}
             </CardContent>
             <CardFooter className="bg-muted/5 border-t pt-6 flex flex-col sm:flex-row gap-3">
-              <Button 
-                variant="outline" 
-                className="flex-1 border-indigo-200 text-indigo-600 hover:bg-indigo-50" 
-                onClick={() => runPipeline(true)} 
+              <Button
+                variant="outline"
+                className="flex-1 border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+                onClick={() => runPipeline(true)}
                 disabled={isExecuting || files.length === 0}
               >
                 <Download className="mr-2 size-4" /> Exportar Excel
               </Button>
-              <Button 
-                className="flex-[2] h-12 text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md" 
-                onClick={() => runPipeline(false)} 
+              <Button
+                className="flex-[2] h-12 text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md"
+                onClick={() => runPipeline(false)}
                 disabled={isExecuting || files.length === 0}
               >
                 {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Salvar</>}
@@ -325,9 +366,9 @@ export function PontoPipelineView() {
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (
                     <div key={i} className={`
-                      ${log.includes('[ERRO]') ? 'text-destructive font-semibold' : 
-                        log.includes('[OK]') ? 'text-green-600' : 
-                        log.includes('[AVISO]') ? 'text-amber-600' : 
+                      ${log.includes('[ERRO]') ? 'text-destructive font-semibold' :
+                        log.includes('[OK]') ? 'text-green-600' :
+                        log.includes('[AVISO]') ? 'text-amber-600' :
                         'text-slate-500'}
                     `}>
                       {log}

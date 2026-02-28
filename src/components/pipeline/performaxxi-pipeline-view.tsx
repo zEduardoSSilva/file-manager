@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -64,6 +63,8 @@ export function PerformaxxiPipelineView() {
 
     try {
       addLog("Identificando arquivos anexados...", "info")
+      addLog(`Arquivos: ${files.map(f => f.name).join(', ')}`, "info")
+      addLog(`Período: ${String(month).padStart(2,'0')}/${year}`, "info")
       await new Promise(r => setTimeout(r, 400))
       setProgress(15)
       
@@ -77,32 +78,75 @@ export function PerformaxxiPipelineView() {
       formData.append('month', month.toString())
       files.forEach(f => formData.append('files', f))
 
-      const response = await executePipeline(formData, 'performaxxi')
+      addLog("Enviando dados ao servidor...", "info")
       
-      if (response.success && response.result) {
-        const result = response.result;
-        setLastResult(result)
-        setProgress(100)
-        
-        if (downloadOnly) {
-          addLog("Gerando Excel Consolidado...", "success")
-          downloadMultipleSheets([
-            { data: result.detalheGeral || [], name: '01_Detalhe_Geral' },
-            { data: result.data, name: '02_Consolidado_Geral' }
-          ], `Performaxxi_Final_${month}_${year}`)
-        } else {
-          addLog("Sincronização com o Firebase concluída.", "success")
-        }
-
-        toast({ 
-          title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "Excel analítico baixado." : "Dados Performaxxi." 
-        });
-      } else {
-        throw new Error(response.success === false ? response.error : 'Erro desconhecido')
+      let response: any
+      try {
+        response = await executePipeline(formData, 'performaxxi')
+      } catch (networkErr: any) {
+        // Captura erros de rede / timeout / resposta malformada
+        const detail = networkErr?.message || String(networkErr)
+        addLog(`Erro de comunicação com servidor: ${detail}`, "error")
+        if (networkErr?.cause) addLog(`Causa: ${String(networkErr.cause)}`, "error")
+        throw networkErr
       }
+
+      addLog(`Resposta recebida. Status: ${response?.success ? 'SUCESSO' : 'FALHA'}`, response?.success ? 'info' : 'warn')
+
+      if (!response?.success) {
+        // Exibe todos os campos de erro disponíveis na resposta
+        const errMsg   = response?.error   || '(sem mensagem)'
+        const errStack = response?.stack   || ''
+        const errCode  = response?.code    || ''
+        const errDetail = response?.detail || ''
+
+        addLog(`Erro retornado pelo servidor:`, "error")
+        addLog(`→ Mensagem : ${errMsg}`, "error")
+        if (errCode)   addLog(`→ Código   : ${errCode}`, "error")
+        if (errDetail) addLog(`→ Detalhe  : ${errDetail}`, "error")
+        if (errStack)  addLog(`→ Stack    : ${errStack.split('\n')[0]}`, "error")
+
+        throw new Error(errMsg)
+      }
+
+      const result = response.result;
+      setLastResult(result)
+      setProgress(100)
+
+      // Mostra campos disponíveis no result para diagnóstico
+      const resultKeys = Object.keys(result || {})
+      addLog(`Campos retornados: ${resultKeys.join(', ')}`, "info")
+
+      if (downloadOnly) {
+        addLog("Gerando Excel Consolidado...", "success")
+        downloadMultipleSheets([
+          { data: result.detalheGeral || [], name: '01_Detalhe_Geral' },
+          { data: result.data, name: '02_Consolidado_Geral' }
+        ], `Performaxxi_Final_${month}_${year}`)
+
+        if (!result.detalheGeral || result.detalheGeral.length === 0) {
+          addLog("⚠️ Aba '01_Detalhe_Geral' veio vazia — verifique se o campo 'detalheGeral' é retornado pelo backend.", "warn")
+        }
+      } else {
+        addLog("Sincronização com o Firebase concluída.", "success")
+      }
+
+      toast({ 
+        title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
+        description: downloadOnly ? "Excel analítico baixado." : "Dados Performaxxi." 
+      });
+
     } catch (error: any) {
-      addLog(`FALHA: ${error.message}`, "error")
+      // Fallback — captura qualquer coisa não tratada acima
+      const msg = error?.message || String(error)
+      addLog(`FALHA GERAL: ${msg}`, "error")
+
+      // Tenta extrair informação extra de respostas HTTP inesperadas
+      if (msg.toLowerCase().includes('unexpected response') || msg.toLowerCase().includes('fetch')) {
+        addLog("Dica: O servidor pode ter retornado HTML de erro (500/404) em vez de JSON.", "warn")
+        addLog("Verifique os logs do servidor (terminal / Vercel / Firebase Functions).", "warn")
+      }
+
       setProgress(0)
     } finally {
       setIsExecuting(false)
@@ -140,7 +184,7 @@ export function PerformaxxiPipelineView() {
                 Configuração Performaxxi
               </CardTitle>
               <CardDescription>
-              Análise de Performance
+                Análise de Performance
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">

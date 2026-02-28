@@ -63,40 +63,80 @@ export function VFleetPipelineView() {
 
     try {
       addLog("Identificando arquivos anexados...", "info")
+      addLog(`Arquivos: ${files.map(f => f.name).join(', ')}`, "info")
+      addLog(`Período: ${String(month).padStart(2,'0')}/${year}`, "info")
+
       await new Promise(r => setTimeout(r, 400))
       setProgress(15)
-      
+
       const formData = new FormData()
       formData.append('year', year.toString())
       formData.append('month', month.toString())
       files.forEach(f => formData.append('files', f))
 
-      const response = await executePipeline(formData, 'vfleet')
-      
-      if (response.success && response.result) {
-        const result = response.result;
-        setLastResult(result)
-        setProgress(100)
-        
-        if (downloadOnly) {
-          addLog("Gerando Excel Consolidado...", "success")
-          downloadMultipleSheets([
-            { data: result.detalhePonto || [], name: '04_Detalhe_Diario' },
-            { data: result.data, name: '05_Consolidado_Motorista' }
-          ], `vFleet_Analitico_${month}_${year}`)
-        } else {
-          addLog("Sincronização com o Firebase concluída.", "success")
-        }
-        
-        toast({ 
-          title: downloadOnly ? "Arquivo Pronto" : "Concluído", 
-          description: downloadOnly ? "Excel analítico baixado." : "Dados vFleet." 
-        });
-      } else {
-        throw new Error(response.success === false ? response.error : 'Erro desconhecido');
+      addLog("Enviando dados ao servidor...", "info")
+
+      let response: any
+      try {
+        response = await executePipeline(formData, 'vfleet')
+      } catch (networkErr: any) {
+        const detail = networkErr?.message || String(networkErr)
+        addLog(`Erro de comunicação com servidor: ${detail}`, "error")
+        if (networkErr?.cause) addLog(`Causa: ${String(networkErr.cause)}`, "error")
+        throw networkErr
       }
+
+      addLog(`Resposta recebida. Status: ${response?.success ? 'SUCESSO' : 'FALHA'}`, response?.success ? 'info' : 'warn')
+
+      if (!response?.success) {
+        const errMsg    = response?.error  || '(sem mensagem)'
+        const errStack  = response?.stack  || ''
+        const errCode   = response?.code   || ''
+        const errDetail = response?.detail || ''
+
+        addLog(`Erro retornado pelo servidor:`, "error")
+        addLog(`→ Mensagem : ${errMsg}`, "error")
+        if (errCode)   addLog(`→ Código   : ${errCode}`, "error")
+        if (errDetail) addLog(`→ Detalhe  : ${errDetail}`, "error")
+        if (errStack)  addLog(`→ Stack    : ${errStack.split('\n')[0]}`, "error")
+
+        throw new Error(errMsg)
+      }
+
+      const result = response.result;
+      setLastResult(result)
+      setProgress(100)
+
+      const resultKeys = Object.keys(result || {})
+      addLog(`Campos retornados: ${resultKeys.join(', ')}`, "info")
+
+      if (downloadOnly) {
+        addLog("Gerando Excel Consolidado...", "success")
+        downloadMultipleSheets([
+          { data: result.detalheConducao || result.detalhePonto || [], name: '04_Detalhe_Diario' },
+          { data: result.data, name: '05_Consolidado_Motorista' }
+        ], `vFleet_Analitico_${month}_${year}`)
+
+        if (!result.detalheConducao && !result.detalhePonto)
+          addLog("⚠️ Aba '04_Detalhe_Diario' veio vazia — verifique se o campo 'detalheConducao' é retornado pelo backend.", "warn")
+      } else {
+        addLog("Sincronização com o Firebase concluída.", "success")
+      }
+
+      toast({
+        title: downloadOnly ? "Arquivo Pronto" : "Concluído",
+        description: downloadOnly ? "Excel analítico baixado." : "Dados vFleet."
+      });
+
     } catch (error: any) {
-      addLog(`FALHA: ${error.message}`, "error")
+      const msg = error?.message || String(error)
+      addLog(`FALHA GERAL: ${msg}`, "error")
+
+      if (msg.toLowerCase().includes('unexpected response') || msg.toLowerCase().includes('fetch')) {
+        addLog("Dica: O servidor pode ter retornado HTML de erro (500/404) em vez de JSON.", "warn")
+        addLog("Verifique os logs do servidor (terminal / Vercel / Firebase Functions).", "warn")
+      }
+
       setProgress(0)
     } finally {
       setIsExecuting(false)
@@ -121,7 +161,7 @@ export function VFleetPipelineView() {
           </TooltipProvider>
         </div>
         <AlertDescription className="text-sm mt-2">
-          Esta análise processa falhas de <strong>Curva, Banguela, Ociosidade e Velocidade</strong>. 
+          Esta análise processa falhas de <strong>Curva, Banguela, Ociosidade e Velocidade</strong>.
           O bônus de R$ 4,80 é concedido para dias sem nenhuma violação.
         </AlertDescription>
       </Alert>
@@ -154,7 +194,7 @@ export function VFleetPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold text-primary">Relatório Analítico de Condução({files.length})</Label>
+                  <Label className="text-base font-semibold text-primary">Relatório Analítico de Condução ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
                     <Upload className="mr-2 size-4" /> Selecionar Lote
                   </Button>
@@ -190,7 +230,7 @@ export function VFleetPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-primary">
-                  <span>Sincronizando com Firebase</span>
+                    <span>Sincronizando com Firebase</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -198,17 +238,17 @@ export function VFleetPipelineView() {
               )}
             </CardContent>
             <CardFooter className="bg-muted/5 border-t pt-6 flex flex-col sm:flex-row gap-3">
-              <Button 
-                variant="outline" 
-                className="flex-1 border-primary/30 text-primary hover:bg-primary/5" 
-                onClick={() => runPipeline(true)} 
+              <Button
+                variant="outline"
+                className="flex-1 border-primary/30 text-primary hover:bg-primary/5"
+                onClick={() => runPipeline(true)}
                 disabled={isExecuting || files.length === 0}
               >
                 <Download className="mr-2 size-4" /> Exportar Excel
               </Button>
-              <Button 
-                className="flex-[2] h-12 text-base font-semibold shadow-md" 
-                onClick={() => runPipeline(false)} 
+              <Button
+                className="flex-[2] h-12 text-base font-semibold shadow-md"
+                onClick={() => runPipeline(false)}
                 disabled={isExecuting || files.length === 0}
               >
                 {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Salvar</>}
@@ -230,7 +270,7 @@ export function VFleetPipelineView() {
                   <p>Aguardando relatórios do vFleet.</p>
                   <div className="text-[10px] border-l-2 pl-2 mt-4">
                     <strong>Sugestão:</strong><br/>
-                    • Boletim_do_Veiculo
+                    • Boletim_do_Veiculo<br/>
                     • Historico_Alertas
                   </div>
                 </div>
@@ -238,9 +278,9 @@ export function VFleetPipelineView() {
                 <div className="space-y-1.5">
                   {logs.map((log, i) => (
                     <div key={i} className={`
-                      ${log.includes('[ERRO]') ? 'text-destructive font-semibold' : 
-                        log.includes('[OK]') ? 'text-green-600' : 
-                        log.includes('[AVISO]') ? 'text-amber-600' : 
+                      ${log.includes('[ERRO]') ? 'text-destructive font-semibold' :
+                        log.includes('[OK]') ? 'text-green-600' :
+                        log.includes('[AVISO]') ? 'text-amber-600' :
                         'text-slate-500'}
                     `}>
                       {log}

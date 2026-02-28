@@ -96,23 +96,6 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
               ))}
             </SidebarMenu>
           </SidebarGroup>
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-wider">Gestão</SidebarGroupLabel>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Parâmetros">
-                  <Settings2 className="size-4" />
-                  <span className="text-xs sm:text-sm">Parâmetros</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Histórico">
-                  <History className="size-4" />
-                  <span className="text-xs sm:text-sm">Histórico</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroup>
         </SidebarContent>
         <SidebarFooter className="border-t pt-2">
            <SidebarMenu>
@@ -131,15 +114,13 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset className="min-w-0 max-w-full overflow-hidden flex flex-col">
-        <header className="flex h-12 sm:h-16 shrink-0 items-center gap-2 px-3 sm:px-4 border-b">
-          <SidebarTrigger className="-ml-1 size-8" />
-          <div className="flex-1 min-w-0">
-             <h1 className="text-sm sm:text-lg font-bold text-primary truncate">File Studio</h1>
-          </div>
+      <SidebarInset className="min-w-0 flex-1 flex flex-col overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center gap-2 px-4 border-b">
+          <SidebarTrigger className="-ml-1" />
+          <h1 className="text-sm sm:text-base font-bold text-primary truncate">vFleet Studio</h1>
         </header>
-        <main className="flex-1 min-w-0 max-w-full overflow-hidden p-3 sm:p-6 bg-background">
-          <div className="max-w-full overflow-auto h-full">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-6 bg-background min-w-0">
+          <div className="max-w-full overflow-hidden min-w-0">
             {children}
           </div>
         </main>
