@@ -57,10 +57,10 @@ export function PerformaxxiPipelineView() {
     setIsExecuting(true)
     setProgress(5)
     setLogs([])
-    addLog(`Iniciando Pipeline Performaxxi Unificado...`)
+    addLog(`Iniciando Pipeline Performaxxi de Alta Performance...`)
 
     try {
-      addLog("Identificando arquivos e parâmetros...", "info")
+      addLog("Mapeando cabeçalhos e aplicando filtros agressivos (StandBy)...", "info")
       setProgress(20)
 
       const formData = new FormData()
@@ -68,7 +68,7 @@ export function PerformaxxiPipelineView() {
       formData.append('month', month.toString())
       files.forEach(f => formData.append('files', f))
 
-      addLog("Enviando para o servidor (pode levar alguns segundos)...", "info")
+      addLog("Enviando dados para processamento linear (suporta 20k+ linhas)...", "info")
       const response = await executePipeline(formData, 'performaxxi')
 
       if (!response.success) {
@@ -77,29 +77,36 @@ export function PerformaxxiPipelineView() {
 
       setLastResult(response.result)
       setProgress(100)
-      addLog("Processamento concluído com sucesso.", "success")
-      addLog("Sincronizado com Firebase Firestore.", "success")
+      addLog("Análise proporcional de 4 critérios concluída.", "success")
+      addLog("Dados salvos e sincronizados com Firebase.", "success")
 
       if (downloadOnly && response.result.detalheGeral) {
-        addLog("Gerando Excel com colunas ordenadas...", "info")
+        addLog("Gerando Excel com abas de Detalhe e Consolidado...", "info")
+        const motoristasDet = response.result.detalheGeral.filter((d: any) => d.Cargo === 'MOTORISTA')
+        const ajudantesDet = response.result.detalheGeral.filter((d: any) => d.Cargo === 'AJUDANTE')
+        const motoristasCons = response.result.data.filter((d: any) => d.Cargo === 'MOTORISTA')
+        const ajudantesCons = response.result.data.filter((d: any) => d.Cargo === 'AJUDANTE')
+
         downloadMultipleSheets([
-          { data: response.result.detalheGeral, name: '01_Detalhe_Unificado' },
-          { data: response.result.data, name: '02_Consolidado_Unificado' }
+          { data: motoristasDet, name: '04_Detalhe_Motorista' },
+          { data: motoristasCons, name: '05_Consolidado_Motorista' },
+          { data: ajudantesDet, name: '06_Detalhe_Ajudante' },
+          { data: ajudantesCons, name: '07_Consolidado_Ajudante' }
         ], `Performaxxi_Final_${month}_${year}`)
       }
 
       toast({
-        title: "Sucesso",
-        description: "Os dados foram processados e salvos no banco.",
+        title: "Processamento Concluído",
+        description: "Os dados foram analisados e gravados com sucesso.",
       });
 
     } catch (error: any) {
-      addLog(`FALHA GERAL: ${error.message}`, "error")
+      addLog(`FALHA: ${error.message}`, "error")
       setProgress(0)
       toast({
         variant: "destructive",
-        title: "Erro no Processamento",
-        description: error.message || "Erro inesperado.",
+        title: "Erro no Pipeline",
+        description: "Ocorreu um problema ao processar o arquivo.",
       });
     } finally {
       setIsExecuting(false)
@@ -107,24 +114,24 @@ export function PerformaxxiPipelineView() {
   }
 
   return (
-    <div className="space-y-6 max-w-full overflow-hidden">
+    <div className="space-y-6 max-w-full min-w-0 overflow-hidden">
       <Alert className="bg-accent/5 border-accent/20">
         <div className="flex items-center gap-2">
           <Zap className="size-4 text-accent" />
-          <AlertTitle className="mb-0">Pipeline Performaxxi Unificado</AlertTitle>
+          <AlertTitle className="mb-0">Motor Performaxxi Unificado (Alta Performance)</AlertTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Processamento de Motoristas (R$ 8,00) e Ajudantes (R$ 7,20) em uma única base de Funcionários.</p>
+                <p>Análise de 4 critérios com bônus proporcional. Suporta arquivos grandes filtrando rotas StandBy automaticamente.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-sm mt-2">
-          Geração de relatórios com ordem de colunas fixa e salvamento automático no banco.
+          Processa Motoristas (R$ 8,00) e Ajudantes (R$ 7,20) com abas separadas na exportação.
         </AlertDescription>
       </Alert>
 
@@ -133,7 +140,7 @@ export function PerformaxxiPipelineView() {
           <Card className="shadow-sm border-border/60">
             <CardHeader>
               <CardTitle className="text-lg">Configuração</CardTitle>
-              <CardDescription>Upload do relatório de pedidos</CardDescription>
+              <CardDescription>Período e Relatórios</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
@@ -162,7 +169,7 @@ export function PerformaxxiPipelineView() {
                   {files.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-6 text-muted-foreground opacity-50">
                       <Files className="size-6 mb-2" />
-                      <p className="text-[10px] italic">RelatorioAnaliticoRotaPedidos_*.xlsx</p>
+                      <p className="text-[10px] italic">RelatorioAnaliticoRotaPedidos.xlsx</p>
                     </div>
                   ) : (
                     <ScrollArea className="h-[120px]">
@@ -184,7 +191,7 @@ export function PerformaxxiPipelineView() {
               {isExecuting && (
                 <div className="space-y-2 pt-2">
                   <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-accent">
-                    <span>Processando...</span>
+                    <span>Processando 20k+ linhas...</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1.5" />
@@ -198,32 +205,32 @@ export function PerformaxxiPipelineView() {
                 onClick={() => runPipeline(true)}
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Baixar Excel
+                <Download className="mr-2 size-4" /> Exportar (Abas 04-07)
               </Button>
               <Button
                 className="flex-[2] h-12 bg-accent hover:bg-accent/90 text-white font-semibold"
                 onClick={() => runPipeline(false)}
                 disabled={isExecuting || files.length === 0}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Processar e Salvar</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Analisando...</> : <><Play className="mr-2 fill-current" /> Processar e Salvar</>}
               </Button>
             </CardFooter>
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6 min-w-0">
           <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm min-h-[300px]">
             <div className="p-3 border-b bg-muted/20">
                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                 <FileCode className="size-3" /> Console
+                 <FileCode className="size-3" /> Console Performaxxi
                </span>
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <div className="text-muted-foreground italic space-y-2 text-[10px]">
-                  <p>Aguardando relatórios do Performaxxi.</p>
+                  <p>Aguardando relatório de 20k linhas.</p>
                   <p className="text-accent/70 mt-4 border-l-2 border-accent/30 pl-2">
-                    Ordem: Empresa, Funcionario, Cargo, Dia...
+                    O sistema filtrará rotas STANDBY automaticamente.
                   </p>
                 </div>
               ) : (

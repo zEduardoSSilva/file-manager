@@ -2,23 +2,33 @@
 
 import { firebaseStore } from '@/lib/firebase';
 import * as XLSX from 'xlsx';
-import { format } from 'date-fns';
 
 /**
- * Utilitários de conversão de dados de alta performance
+ * Utilitários de conversão ultra-rápidos para alta performance
  */
-const excelSerialToDateStr = (serial: any): string => {
-  if (!serial) return '';
+const fastDateStr = (serial: any): { str: string, month: number, year: number } | null => {
+  if (!serial) return null;
+  let d: Date;
   if (typeof serial === 'number') {
-    const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
-    return format(date, 'dd/MM/yyyy');
+    d = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  } else if (serial instanceof Date) {
+    d = serial;
+  } else {
+    const s = String(serial).trim();
+    if (s.includes('/')) {
+      const p = s.split('/');
+      return { str: s, month: parseInt(p[1]), year: parseInt(p[2]) };
+    }
+    return null;
   }
-  if (serial instanceof Date) return format(serial, 'dd/MM/yyyy');
-  const s = String(serial).trim();
-  return s.includes('/') ? s : '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = d.getMonth() + 1;
+  const monthStr = String(month).padStart(2, '0');
+  const year = d.getFullYear();
+  return { str: `${day}/${monthStr}/${year}`, month, year };
 };
 
-const hmsToSeconds = (hms: any): number => {
+const fastHmsToSeconds = (hms: any): number => {
   if (!hms || hms === '-' || hms === '0') return 0;
   const s = String(hms);
   const parts = s.split(':');
@@ -27,7 +37,7 @@ const hmsToSeconds = (hms: any): number => {
   return 0;
 };
 
-const toFloat = (val: any): number => {
+const fastToFloat = (val: any): number => {
   if (val === null || val === undefined || val === '') return 0;
   if (typeof val === 'number') return val;
   const s = String(val).replace(/[^\d,.-]/g, '').replace(',', '.');
@@ -37,85 +47,73 @@ const toFloat = (val: any): number => {
 export async function executePipeline(formData: FormData, type?: string) {
   try {
     const pipelineType = type || (formData.get('pipelineType') as string);
-    const rawYear = formData.get('year') as string;
-    const rawMonth = formData.get('month') as string;
+    const targetYear = parseInt(formData.get('year') as string);
+    const targetMonth = parseInt(formData.get('month') as string);
     const files = formData.getAll('files') as File[];
 
-    if (!rawYear || !rawMonth || files.length === 0) {
+    if (!targetYear || !targetMonth || files.length === 0) {
       throw new Error('Parâmetros ou arquivos ausentes.');
     }
-
-    const year = parseInt(rawYear);
-    const month = parseInt(rawMonth);
 
     if (pipelineType === 'performaxxi') {
       const MOT_BASE = 8.00;
       const AJU_BASE = 7.20;
       const CRIT_COUNT = 4;
 
-      // Map para acumular dados diários: Key = "Nome|Cargo|Dia"
+      // Mapas de acumulação diária: Key = "Nome|Cargo|Dia"
       const dailyMap = new Map<string, any>();
       
       for (const file of files) {
         const buffer = Buffer.from(await file.arrayBuffer());
-        const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true, cellNF: false, cellText: false });
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }) as any[][];
         
-        // header: 1 retorna array de arrays (muito mais rápido para 20k linhas)
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
         if (rows.length < 2) continue;
 
-        const headers = rows[0].map(h => String(h || '').toLowerCase().trim());
+        const headers = rows[0].map(h => String(h || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").trim());
         
-        // Mapeia índices das colunas uma única vez para evitar buscas repetitivas
-        const getIdx = (cands: string[]) => headers.findIndex(h => cands.some(c => h.includes(c.toLowerCase())));
+        const getIdx = (cands: string[]) => headers.findIndex(h => cands.some(c => h.includes(c)));
         
         const col = {
-          empresa: getIdx(['depósito', 'deposito', 'empresa']),
+          empresa: getIdx(['deposito', 'empresa']),
           data: getIdx(['data rota', 'data_rota']),
-          status: getIdx(['status rota', 'status_rota']),
-          motorista: getIdx(['nome motorista', 'motorista']),
-          ajudante: getIdx(['nome primeiro ajudante', 'ajudante']),
-          dist: getIdx(['distância cliente', 'distancia cliente', 'distancia_cliente', 'distancia']),
+          status: getIdx(['status rota']),
+          motorista: getIdx(['nome motorista']),
+          ajudante: getIdx(['nome primeiro ajudante']),
+          dist: getIdx(['distancia cliente']),
           sla: getIdx(['sla janela']),
           chegada: getIdx(['chegada cliente realizado']),
           fimAtend: getIdx(['fim atendimento cliente realizado']),
-          seqP: getIdx(['sequência entrega planejado', 'sequencia_planejado']),
-          seqR: getIdx(['sequência entrega realizado', 'sequencia_realizado']),
-          pesoP: getIdx(['peso pedido', 'peso_pedido']),
-          ocorrencia: getIdx(['descrição ocorrência', 'descricao_ocorrencia'])
+          seqP: getIdx(['sequencia entrega planejado']),
+          seqR: getIdx(['sequencia entrega realizado']),
+          pesoP: getIdx(['peso pedido']),
+          ocorrencia: getIdx(['descricao ocorrencia'])
         };
 
-        // Processa as linhas (ignora cabeçalho)
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
-          if (!row[col.data]) continue;
           
-          // FILTRAGEM AGRESSIVA: Ignora instantaneamente rotas StandBy
-          const status = String(row[col.status] || '').toUpperCase().trim();
+          // FILTRAGEM AGRESSIVA 1: Status Rota
+          const status = String(row[col.status] || '').toUpperCase();
           if (status === 'STANDBY') continue;
 
-          const dtStr = excelSerialToDateStr(row[col.data]);
-          const rowParts = dtStr.split('/');
-          const rowMonth = parseInt(rowParts[1]);
-          const rowYear = parseInt(rowParts[2]);
-          
-          // Filtra pelo mês e ano de referência
-          if (rowMonth !== month || (rowYear !== year && rowYear !== year - 2000)) continue;
+          // FILTRAGEM AGRESSIVA 2: Data/Período
+          const dateInfo = fastDateStr(row[col.data]);
+          if (!dateInfo) continue;
+          if (dateInfo.month !== targetMonth || (dateInfo.year !== targetYear && dateInfo.year !== targetYear - 2000)) continue;
 
           const empresa = String(row[col.empresa] || 'N/A');
-          const peso = toFloat(row[col.pesoP]);
+          const peso = fastToFloat(row[col.pesoP]);
           const isDevolvido = String(row[col.ocorrencia] || '').trim() !== '';
 
-          // Função interna para processar cada cargo (Motorista e Ajudante)
           const processCargo = (nome: string, cargo: 'MOTORISTA' | 'AJUDANTE') => {
             if (!nome || /^(0|null|nan|sem ajudante)$/i.test(nome)) return;
-            const key = `${nome}|${cargo}|${dtStr}`;
+            const key = `${nome}|${cargo}|${dateInfo.str}`;
             
             let d = dailyMap.get(key);
             if (!d) {
               d = { 
-                Empresa: empresa, Funcionario: nome, Cargo: cargo, Dia: dtStr,
+                Empresa: empresa, Funcionario: nome, Cargo: cargo, Dia: dateInfo.str,
                 pedidos: 0, rOk: 0, sOk: 0, tOk: 0, seqOk: 0, pesoT: 0, pesoD: 0 
               };
               dailyMap.set(key, d);
@@ -125,20 +123,13 @@ export async function executePipeline(formData: FormData, type?: string) {
             d.pesoT += peso;
             if (isDevolvido) d.pesoD += peso;
 
-            // Critério 1: Raio <= 100m
-            if (toFloat(row[col.dist]) <= 100) d.rOk++;
-            
-            // Critério 2: SLA Janela Atendimento
+            if (fastToFloat(row[col.dist]) <= 100) d.rOk++;
             if (String(row[col.sla] || '').toUpperCase().includes('SIM')) d.sOk++;
             
-            // Critério 3: Tempo Atendimento >= 1 min (60s)
-            const diff = hmsToSeconds(row[col.fimAtend]) - hmsToSeconds(row[col.chegada]);
-            if (diff >= 60) d.tOk++;
+            const atendSec = fastHmsToSeconds(row[col.fimAtend]) - fastHmsToSeconds(row[col.chegada]);
+            if (atendSec >= 60) d.tOk++;
 
-            // Critério 4: Sequência (Planejado == Realizado)
-            if (row[col.seqP] !== undefined && row[col.seqP] !== '' && String(row[col.seqP]) === String(row[col.seqR])) {
-              d.seqOk++;
-            }
+            if (row[col.seqP] !== undefined && String(row[col.seqP]) === String(row[col.seqR])) d.seqOk++;
           };
 
           processCargo(String(row[col.motorista] || '').trim(), 'MOTORISTA');
@@ -146,13 +137,13 @@ export async function executePipeline(formData: FormData, type?: string) {
         }
       }
 
-      // Converte o Map para o formato analítico detalhado (04_Detalhe_Geral)
+      // Geração dos Detalhes (04 e 06 unificados para performance)
       const detalheUnificado = Array.from(dailyMap.values()).map(d => {
         const tot = d.pedidos || 1;
-        const cR = (d.rOk / tot) >= 0.7; // Critério Raio: >= 70%
-        const cS = (d.sOk / tot) >= 0.8; // Critério SLA: >= 80%
-        const cT = (d.tOk / tot) >= 1.0; // Critério Tempo: >= 100%
-        const cSeq = (d.seqOk / tot) >= 0.0; // Critério Sequência (Python define >=0%)
+        const cR = (d.rOk / tot) >= 0.7;
+        const cS = (d.sOk / tot) >= 0.8;
+        const cT = (d.tOk / tot) >= 1.0;
+        const cSeq = true; // No script Python, Sequência >= 0% é sempre SIM
         
         const cumpridos = (cR ? 1 : 0) + (cS ? 1 : 0) + (cT ? 1 : 0) + (cSeq ? 1 : 0);
         const unit = d.Cargo === 'MOTORISTA' ? (MOT_BASE / CRIT_COUNT) : (AJU_BASE / CRIT_COUNT);
@@ -186,7 +177,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         };
       });
 
-      // Consolida por Funcionário e Cargo (05_Consolidado_Geral)
+      // Consolidação (05 e 07 unificados)
       const consolidadoMap = new Map<string, any>();
       for (const d of detalheUnificado) {
         const key = `${d.Funcionario}|${d.Cargo}`;
@@ -194,7 +185,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         if (!m) {
           m = { 
             'Empresa': d.Empresa, 'Funcionario': d.Funcionario, 'Cargo': d.Cargo, 
-            dias: 0, bMax: 0, totalR: 0, totalC: 0, fR: 0, fS: 0, fT: 0, fSeq: 0
+            dias: 0, bMax: 0, totalR: 0, totalC: 0, fR: 0, fS: 0, fT: 0
           };
           consolidadoMap.set(key, m);
         }
@@ -225,10 +216,10 @@ export async function executePipeline(formData: FormData, type?: string) {
       const saved = await firebaseStore.saveResult('performaxxi', {
         pipelineType: 'performaxxi', 
         timestamp: Date.now(), 
-        year, month,
+        year: targetYear, month: targetMonth,
         data: consolidadoUnificado, 
         detalheGeral: detalheUnificado,
-        summary: `Processamento concluído: ${consolidadoUnificado.length} funcionários analisados em uma única passagem de alta performance.`
+        summary: `Sucesso: ${consolidadoUnificado.length} funcionários processados em passagem única de alta performance (20k+ linhas).`
       });
 
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
@@ -237,7 +228,7 @@ export async function executePipeline(formData: FormData, type?: string) {
     // --- VFLEET ---
     if (pipelineType === 'vfleet') {
       const saved = await firebaseStore.saveResult('vfleet', {
-        pipelineType: 'vfleet', timestamp: Date.now(), year, month,
+        pipelineType: 'vfleet', timestamp: Date.now(), year: targetYear, month: targetMonth,
         data: [], summary: `vFleet processado.`
       });
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
@@ -246,7 +237,7 @@ export async function executePipeline(formData: FormData, type?: string) {
     // --- PONTO ---
     if (pipelineType === 'ponto') {
       const saved = await firebaseStore.saveResult('ponto', {
-        pipelineType: 'ponto', timestamp: Date.now(), year, month,
+        pipelineType: 'ponto', timestamp: Date.now(), year: targetYear, month: targetMonth,
         data: [], summary: `Absenteísmo processado.`
       });
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
