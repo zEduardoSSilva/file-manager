@@ -31,7 +31,6 @@ import {
   BadgePercent,
   MapPin,
   GitMerge,
-  FileText,
   Search
 } from "lucide-react"
 import Link from "next/link"
@@ -58,9 +57,9 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
     {
       label: "Tarefas",
       items: [
-        { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', icon: GitMerge },
-        { id: 'retorno-pedidos-ul', name: 'Retorno Pedidos UL', icon: MapPin },
         { id: 'retorno-pedidos', name: 'Retorno Pedidos TXT', icon: Search },
+        { id: 'retorno-pedidos-ul', name: 'Retorno Pedidos UL', icon: MapPin },
+        { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', icon: GitMerge },
       ]
     }
   ]
