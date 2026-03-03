@@ -91,27 +91,30 @@ export default function Home() {
             </CardHeader>
             <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {quickLinks.map((link) => (
-                  <Button 
-                    key={link.id} 
-                    variant="outline" 
-                    className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 transition-all border-muted/60" 
-                    asChild
-                  >
-                    <Link href={`/pipeline/${link.id}`}>
-                      <div className="flex items-center gap-3 w-full min-w-0">
-                        <div className={`size-8 sm:size-10 shrink-0 rounded-lg ${link.color} flex items-center justify-center`}>
-                          <link.icon className="size-4 sm:size-5" />
+                {quickLinks.map((link) => {
+                  const Icon = link.icon;
+                  return (
+                    <Button 
+                      key={link.id} 
+                      variant="outline" 
+                      className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 transition-all border-muted/60" 
+                      asChild
+                    >
+                      <Link href={`/pipeline/${link.id}`}>
+                        <div className="flex items-center gap-3 w-full min-w-0">
+                          <div className={`size-8 sm:size-10 shrink-0 rounded-lg ${link.color} flex items-center justify-center`}>
+                            <Icon className="size-4 sm:size-5" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-[12px] sm:text-sm leading-tight">{link.name}</p>
+                            <p className="text-[10px] text-muted-foreground leading-tight mt-0.5 truncate">{link.desc}</p>
+                          </div>
+                          <ArrowUpRight className="size-3 shrink-0 text-muted-foreground ml-auto opacity-40" />
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-[12px] sm:text-sm leading-tight">{link.name}</p>
-                          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5 truncate">{link.desc}</p>
-                        </div>
-                        <ArrowUpRight className="size-3 shrink-0 text-muted-foreground ml-auto opacity-40" />
-                      </div>
-                    </Link>
-                  </Button>
-                ))}
+                      </Link>
+                    </Button>
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

@@ -104,21 +104,24 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
                 {group.label}
               </SidebarGroupLabel>
               <SidebarMenu>
-                {group.items.map((p) => (
-                  <SidebarMenuItem key={p.id}>
-                    <SidebarMenuButton 
-                      tooltip={p.name} 
-                      isActive={pathname === `/pipeline/${p.id}`}
-                      asChild
-                    >
-                      <Link href={`/pipeline/${p.id}`}>
-                        <p.icon className="size-4" />
-                        <span className="text-xs sm:text-sm">{p.name}</span>
-                        <ChevronRight className="ml-auto size-3 opacity-50" />
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {group.items.map((p) => {
+                  const Icon = p.icon;
+                  return (
+                    <SidebarMenuItem key={p.id}>
+                      <SidebarMenuButton 
+                        tooltip={p.name} 
+                        isActive={pathname === `/pipeline/${p.id}`}
+                        asChild
+                      >
+                        <Link href={`/pipeline/${p.id}`}>
+                          <Icon className="size-4" />
+                          <span className="text-xs sm:text-sm">{p.name}</span>
+                          <ChevronRight className="ml-auto size-3 opacity-50" />
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             </SidebarGroup>
           ))}
