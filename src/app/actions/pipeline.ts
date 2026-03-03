@@ -17,7 +17,12 @@ const fastDateStr = (val: any): { str: string, month: number, year: number } | n
   } else {
     const s = String(val).trim();
     const p = s.split('/');
-    if (p.length === 3) return { str: `${p[0]}/${p[1].padStart(2, '0')}/${p[2]}`, month: parseInt(p[1]), year: parseInt(p[2]) };
+    if (p.length === 3) {
+      const day = p[0].padStart(2, '0');
+      const month = p[1].padStart(2, '0');
+      const year = p[2].length === 2 ? `20${p[2]}` : p[2];
+      return { str: `${day}/${month}/${year}`, month: parseInt(month), year: parseInt(year) };
+    }
     return null;
   }
   const day = String(d.getDate()).padStart(2, '0');
@@ -50,8 +55,7 @@ export async function executePipeline(formData: FormData, type?: string) {
       const AJU_BASE = 7.20;
       const CRIT_COUNT = 4;
 
-      // Map para agrupar dados diários por funcionário
-      // Chave: Nome|Cargo|Dia
+      // Map para agrupar dados diários por funcionário (Nome|Cargo|Dia)
       const dailyMap = new Map<string, any>();
       
       for (const file of files) {
@@ -62,7 +66,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         
         if (rows.length < 2) continue;
 
-        // Mapeamento dinâmico de cabeçalhos (uma única vez)
+        // Mapeamento dinâmico de cabeçalhos (uma única vez por arquivo)
         const headers = rows[0].map(h => String(h || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").trim());
         const getIdx = (cands: string[]) => headers.findIndex(h => cands.some(c => h.includes(c)));
         
@@ -78,11 +82,9 @@ export async function executePipeline(formData: FormData, type?: string) {
           fimAtend: getIdx(['fim atendimento cliente realizado', 'fim atendimento']),
           seqP: getIdx(['sequencia entrega planejado', 'seq planejado']),
           seqR: getIdx(['sequencia entrega realizado', 'seq realizado']),
-          pesoP: getIdx(['peso pedido', 'peso']),
-          ocorrencia: getIdx(['descricao ocorrencia', 'ocorrencia'])
         };
 
-        // Loop principal otimizado (Linear)
+        // Loop linear otimizado
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
           
@@ -92,7 +94,7 @@ export async function executePipeline(formData: FormData, type?: string) {
 
           // FILTRAGEM DE PERÍODO
           const dateInfo = fastDateStr(row[col.data]);
-          if (!dateInfo || dateInfo.month !== targetMonth || (dateInfo.year !== targetYear && dateInfo.year !== targetYear - 2000)) continue;
+          if (!dateInfo || dateInfo.month !== targetMonth || dateInfo.year !== targetYear) continue;
 
           const empresa = String(row[col.empresa] || 'N/A');
           const dist = fastToFloat(row[col.dist]);
@@ -102,7 +104,7 @@ export async function executePipeline(formData: FormData, type?: string) {
           try {
             const start = new Date(row[col.chegada]).getTime();
             const end = new Date(row[col.fimAtend]).getTime();
-            if (end - start >= 60000) timeOk = true;
+            if (end - start >= 60000) timeOk = true; // >= 1 minuto
           } catch (e) {}
 
           const seqOk = row[col.seqP] !== undefined && String(row[col.seqP]) === String(row[col.seqR]);
@@ -138,7 +140,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         const cR = (d.rOk / d.pedidos) >= 0.7; // Meta Raio 70%
         const cS = (d.sOk / d.pedidos) >= 0.8; // Meta SLA 80%
         const cT = (d.tOk / d.pedidos) >= 1.0; // Meta Tempo 100%
-        const cSeq = true; // Meta Sequência (script Python considera True por padrão no exemplo)
+        const cSeq = d.seqOk === d.pedidos;    // Sequência total
         
         const cumpridos = (cR ? 1 : 0) + (cS ? 1 : 0) + (cT ? 1 : 0) + (cSeq ? 1 : 0);
         const unit = d.Cargo === 'MOTORISTA' ? (MOT_BASE / CRIT_COUNT) : (AJU_BASE / CRIT_COUNT);
@@ -163,6 +165,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         if (!cR) m['Falhas Raio']++;
         if (!cS) m['Falhas SLA']++;
         if (!cT) m['Falhas Tempo']++;
+        if (!cSeq) m['Falhas Sequência']++;
       }
 
       const consolidado = Array.from(consolidadoMap.values()).map(m => {
@@ -182,12 +185,8 @@ export async function executePipeline(formData: FormData, type?: string) {
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
-    // Outros pipelines (vfleet, ponto) simplificados para evitar timeout
-    const savedFallback = await firebaseStore.saveResult(pipelineType as any, {
-      pipelineType: pipelineType as any, timestamp: Date.now(), year: targetYear, month: targetMonth,
-      data: [], summary: `Pipeline ${pipelineType} processado.`
-    });
-    return { success: true, result: JSON.parse(JSON.stringify(savedFallback)) };
+    // Fallback para outros tipos
+    return { success: false, error: 'Pipeline não implementado para este tipo.' };
 
   } catch (error: any) {
     console.error("Erro no Pipeline:", error);
