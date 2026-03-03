@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -132,7 +131,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
                   <User className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left text-[11px] leading-tight">
-                  <span className="truncate font-semibold">Eduardo Sousa</span>
+                  <span className="truncate font-semibold text-primary">Eduardo Sousa</span>
                   <span className="truncate opacity-70">eduardo@rfk.com</span>
                 </div>
                 <LogOut className="ml-auto size-3 opacity-50" />
@@ -142,11 +141,11 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset className="min-w-0 flex-1 flex flex-col overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center gap-2 px-4 border-b">
+        <header className="flex h-14 shrink-0 items-center gap-2 px-4 border-b bg-white">
           <SidebarTrigger className="-ml-1" />
           <h1 className="text-sm sm:text-base font-bold text-primary truncate">File Manager</h1>
         </header>
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-6 bg-background min-w-0">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-6 bg-[#F4F4FB] min-w-0">
           <div className="max-w-full overflow-hidden min-w-0">
             {children}
           </div>

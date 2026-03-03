@@ -19,12 +19,12 @@ export async function generateStaticParams() {
   ]
 }
 
-// Carregamento dinâmico de todos os sistemas
+// Carregamento dinâmico de todos os sistemas para melhorar performance de start
 const VFleetPipelineView = dynamic(() => import("@/components/pipeline/vfleet-pipeline-view").then(mod => mod.VFleetPipelineView), { 
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-primary" /></div> 
 })
 const PerformaxxiPipelineView = dynamic(() => import("@/components/pipeline/performaxxi-pipeline-view").then(mod => mod.PerformaxxiPipelineView), {
-  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-accent" /></div>
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-amber-500" /></div>
 })
 const PontoPipelineView = dynamic(() => import("@/components/pipeline/ponto-pipeline-view").then(mod => mod.PontoPipelineView), {
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-indigo-600" /></div>
@@ -32,20 +32,20 @@ const PontoPipelineView = dynamic(() => import("@/components/pipeline/ponto-pipe
 const CcoPipelineView = dynamic(() => import("@/components/pipeline/cco-pipeline-view").then(mod => mod.CcoPipelineView), {
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-blue-600" /></div>
 })
-const CoordenadorPipelineView = dynamic(() => import("@/components/pipeline/cordenador-pipeline-view").then(mod => mod.CoordenadorPipelineView), {
+const CoordenadorPipelineView = dynamic(() => import("@/components/pipeline/coordenador-pipeline-view").then(mod => mod.CoordenadorPipelineView), {
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-violet-600" /></div>
 })
 const FaturistaPipelineView = dynamic(() => import("@/components/pipeline/faturista-pipeline-view").then(mod => mod.FaturistaPipelineView), {
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-emerald-600" /></div>
 })
 const RoadshowPipelineView = dynamic(() => import("@/components/pipeline/roadshow-pipeline-view").then(mod => mod.RoadshowPipelineView), {
-  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-amber-600" /></div>
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-orange-600" /></div>
 })
-const DevolucoesPipelineView = dynamic(() => import("@/components/pipeline/devolucao-pipeline-view").then(mod => mod.DevolucoesPipelineView), {
+const DevolucoesPipelineView = dynamic(() => import("@/components/pipeline/devolucoes-pipeline-view").then(mod => mod.DevolucoesPipelineView), {
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-rose-600" /></div>
 })
-const ConsolidadorPipelineView = dynamic(() => import("@/components/pipeline/consolidador-pipeline-view").then(mod => mod.executeConsolidadorPipeline), {
-  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-primary" /></div>
+const ConsolidadorPipelineView = dynamic(() => import("@/components/pipeline/consolidador-pipeline-view").then(mod => mod.ConsolidadorPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-slate-600" /></div>
 })
 
 export default async function PipelinePage({ params }: { params: Promise<{ id: string }> }) {

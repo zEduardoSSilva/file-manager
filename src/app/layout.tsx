@@ -1,7 +1,6 @@
-
 import type { Metadata } from 'next';
 import './globals.css';
-import { Toaster } from "@/components/ui/toast"
+import { Toaster } from "@/components/ui/toaster"
 import { Inter, Source_Code_Pro } from 'next/font/google'
 
 const inter = Inter({
@@ -18,7 +17,7 @@ const sourceCodePro = Source_Code_Pro({
 
 export const metadata: Metadata = {
   title: 'File Manager | Precision Logistics Analysis',
-  description: 'Data processing pipeline management for logistics operations',
+  description: 'Sistema de gerenciamento e análise de pipelines logísticos otimizado para alta performance.',
 };
 
 export default function RootLayout({

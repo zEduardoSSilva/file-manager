@@ -1,4 +1,3 @@
-
 import { PipelineLayout } from "@/components/pipeline/pipeline-layout"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { 
@@ -18,7 +17,6 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 
 export default function Home() {
   const quickLinks = [
@@ -65,12 +63,12 @@ export default function Home() {
           </Card>
           <Card className="min-w-0">
             <CardHeader className="flex flex-row items-center justify-between pb-1 sm:pb-2 space-y-0 p-3 sm:p-6">
-              <CardTitle className="text-[9px] sm:text-xs font-medium uppercase tracking-wider truncate">Performance</CardTitle>
+              <CardTitle className="text-[9px] sm:text-xs font-medium uppercase tracking-wider truncate">Eficiência</CardTitle>
               <BarChart3 className="size-3 sm:size-4 text-muted-foreground shrink-0" />
             </CardHeader>
             <CardContent className="p-3 sm:p-6 pt-0 sm:pt-0">
               <div className="text-base sm:text-2xl font-bold">94.2%</div>
-              <p className="text-[8px] sm:text-xs text-muted-foreground truncate">Eficiência operacional</p>
+              <p className="text-[8px] sm:text-xs text-muted-foreground truncate">Média de Performance</p>
             </CardContent>
           </Card>
           <Card className="min-w-0">
@@ -80,7 +78,7 @@ export default function Home() {
             </CardHeader>
             <CardContent className="p-3 sm:p-6 pt-0 sm:pt-0">
               <div className="text-base sm:text-2xl font-bold">01/26</div>
-              <p className="text-[8px] sm:text-xs text-muted-foreground truncate">Jan/2026 concluído</p>
+              <p className="text-[8px] sm:text-xs text-muted-foreground truncate">Período Concluído</p>
             </CardContent>
           </Card>
         </div>
@@ -88,7 +86,7 @@ export default function Home() {
         <div className="grid grid-cols-1 gap-6">
           <Card className="flex flex-col shadow-sm overflow-hidden min-w-0">
             <CardHeader className="p-4 sm:p-6">
-              <CardTitle className="text-base sm:text-lg">Acesso Rápido aos Pipelines</CardTitle>
+              <CardTitle className="text-base sm:text-lg text-primary">Acesso Rápido aos Pipelines</CardTitle>
               <CardDescription className="text-[10px] sm:text-sm">Inicie os fluxos de processamento em um clique.</CardDescription>
             </CardHeader>
             <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
@@ -97,7 +95,7 @@ export default function Home() {
                   <Button 
                     key={link.id} 
                     variant="outline" 
-                    className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-muted/50 transition-all border-muted/60" 
+                    className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 transition-all border-muted/60" 
                     asChild
                   >
                     <Link href={`/pipeline/${link.id}`}>

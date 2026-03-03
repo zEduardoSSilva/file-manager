@@ -1,4 +1,3 @@
-
 # File Manager - Pilot Program
 
 Sistema de processamento e análise de pipelines de logística otimizado para alta performance (20.000+ linhas).
