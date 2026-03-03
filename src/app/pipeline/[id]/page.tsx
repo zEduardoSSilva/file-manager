@@ -85,7 +85,7 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
     consolidador: 'Consolidador Final',
     'mercanete-roadshow': 'Mercanete x Roadshow',
     'retorno-pedidos-ul': 'Retorno Pedidos UL',
-    'retorno-pedidos': 'Retorno Pedidos TXT'
+    'retorno-pedidos': 'Retorn. Pedidos TXT'
   };
 
   const descriptions: Record<string, string> = {
