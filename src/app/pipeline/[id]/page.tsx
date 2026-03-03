@@ -1,4 +1,3 @@
-
 import { PipelineLayout } from "@/components/pipeline/pipeline-layout"
 import { notFound } from "next/navigation"
 import dynamic from "next/dynamic"
@@ -11,11 +10,16 @@ export async function generateStaticParams() {
     { id: 'vfleet' },
     { id: 'performaxxi' },
     { id: 'ponto' },
+    { id: 'cco' },
+    { id: 'coordenadores' },
+    { id: 'faturista' },
+    { id: 'roadshow' },
+    { id: 'devolucoes' },
     { id: 'consolidador' },
   ]
 }
 
-// Carregamento dinâmico otimizado
+// Carregamento dinâmico de todos os sistemas
 const VFleetPipelineView = dynamic(() => import("@/components/pipeline/vfleet-pipeline-view").then(mod => mod.VFleetPipelineView), { 
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-primary" /></div> 
 })
@@ -25,14 +29,29 @@ const PerformaxxiPipelineView = dynamic(() => import("@/components/pipeline/perf
 const PontoPipelineView = dynamic(() => import("@/components/pipeline/ponto-pipeline-view").then(mod => mod.PontoPipelineView), {
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-indigo-600" /></div>
 })
-const ConsolidadorPipelineView = dynamic(() => import("@/components/pipeline/consolidador-pipeline-view").then(mod => mod.ConsolidadorPipelineView), {
+const CcoPipelineView = dynamic(() => import("@/components/pipeline/cco-pipeline-view").then(mod => mod.CcoPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-blue-600" /></div>
+})
+const CoordenadorPipelineView = dynamic(() => import("@/components/pipeline/cordenador-pipeline-view").then(mod => mod.CoordenadorPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-violet-600" /></div>
+})
+const FaturistaPipelineView = dynamic(() => import("@/components/pipeline/faturista-pipeline-view").then(mod => mod.FaturistaPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-emerald-600" /></div>
+})
+const RoadshowPipelineView = dynamic(() => import("@/components/pipeline/roadshow-pipeline-view").then(mod => mod.RoadshowPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-amber-600" /></div>
+})
+const DevolucoesPipelineView = dynamic(() => import("@/components/pipeline/devolucao-pipeline-view").then(mod => mod.DevolucoesPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-rose-600" /></div>
+})
+const ConsolidadorPipelineView = dynamic(() => import("@/components/pipeline/consolidador-pipeline-view").then(mod => mod.executeConsolidadorPipeline), {
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-primary" /></div>
 })
 
 export default async function PipelinePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   
-  const validIds = ['vfleet', 'performaxxi', 'ponto', 'consolidador'];
+  const validIds = ['vfleet', 'performaxxi', 'ponto', 'cco', 'coordenadores', 'faturista', 'roadshow', 'devolucoes', 'consolidador'];
   if (!validIds.includes(id)) {
     return notFound();
   }
@@ -41,14 +60,24 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
     vfleet: 'vFleet Pilot',
     performaxxi: 'Performaxxi Único',
     ponto: 'Ponto e Absenteísmo',
+    cco: 'Consolidador CCO',
+    coordenadores: 'Pipeline Coordenadores',
+    faturista: 'Eficiência Faturista',
+    roadshow: 'Ocupação Roadshow',
+    devolucoes: 'Gestão de Devoluções',
     consolidador: 'Consolidador Final'
   };
 
   const descriptions: Record<string, string> = {
-    vfleet: 'Pipeline de remuneração variável: alertas de telemetria e análise de condução (R$ 4,80).',
-    performaxxi: 'Sequência de rotas e performance de motoristas (R$ 8,00) e ajudantes (R$ 7,20).',
-    ponto: 'Gestão de jornada e presença: análise de CSVs de ponto e incentivos de absenteísmo.',
-    consolidador: 'Unificação de todas as fontes de dados para geração dos relatórios de pagamento finais.'
+    vfleet: 'Remuneração variável por telemetria: Curva, Banguela, Ociosidade e Velocidade.',
+    performaxxi: 'Performance operacional: Raio, SLA, Tempo e Sequenciamento de rotas.',
+    ponto: 'Análise de jornada e incentivo de absenteísmo para motoristas e ajudantes.',
+    cco: 'Consolidação de médias diárias por empresa com bonificação de R$ 16,00.',
+    coordenadores: 'Unificação modular: Rotas (R$ 48) + Tempo Interno (R$ 12).',
+    faturista: 'Meta de horários para Entrega de Cintas e Liberação para Roteirização.',
+    roadshow: 'Ocupação de Jornada vs Ocupação de Veículo por região.',
+    devolucoes: 'Cruzamento de Controle Logístico com Faturamento para análise de perdas.',
+    consolidador: 'Relatório final consolidado para fechamento de folha e pagamentos.'
   };
 
   return (
@@ -67,6 +96,11 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
           {id === 'vfleet' && <VFleetPipelineView />}
           {id === 'performaxxi' && <PerformaxxiPipelineView />}
           {id === 'ponto' && <PontoPipelineView />}
+          {id === 'cco' && <CcoPipelineView />}
+          {id === 'coordenadores' && <CoordenadorPipelineView />}
+          {id === 'faturista' && <FaturistaPipelineView />}
+          {id === 'roadshow' && <RoadshowPipelineView />}
+          {id === 'devolucoes' && <DevolucoesPipelineView />}
           {id === 'consolidador' && <ConsolidadorPipelineView />}
         </Suspense>
       </div>

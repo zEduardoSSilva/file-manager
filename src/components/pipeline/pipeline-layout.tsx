@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -18,16 +17,19 @@ import {
 } from "@/components/ui/sidebar"
 import { 
   Truck, 
-  Settings2, 
   Database, 
   LayoutDashboard, 
-  History,
   LogOut,
   ChevronRight,
   User,
   Zap,
   Clock,
-  FileStack
+  FileStack,
+  Building2,
+  TrendingUp,
+  PackageX,
+  BadgePercent,
+  MapPin
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -35,11 +37,31 @@ import { usePathname } from "next/navigation"
 export function PipelineLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  const pipelines = [
-    { id: 'vfleet', name: 'vFleet', icon: Truck },
-    { id: 'performaxxi', name: 'Performaxxi', icon: Zap },
-    { id: 'ponto', name: 'Absenteísmo', icon: Clock },
-    { id: 'consolidador', name: 'Consolidador', icon: FileStack },
+  const navGroups = [
+    {
+      label: "Operacional",
+      items: [
+        { id: 'vfleet', name: 'vFleet Pilot', icon: Truck },
+        { id: 'performaxxi', name: 'Performaxxi', icon: Zap },
+        { id: 'ponto', name: 'Absenteísmo', icon: Clock },
+      ]
+    },
+    {
+      label: "Gestão e Comercial",
+      items: [
+        { id: 'faturista', name: 'Faturista', icon: BadgePercent },
+        { id: 'roadshow', name: 'Roadshow', icon: MapPin },
+        { id: 'devolucoes', name: 'Devoluções', icon: PackageX },
+      ]
+    },
+    {
+      label: "Consolidação",
+      items: [
+        { id: 'coordenadores', name: 'Coordenadores', icon: Building2 },
+        { id: 'cco', name: 'CCO Empresa', icon: TrendingUp },
+        { id: 'consolidador', name: 'Final', icon: FileStack },
+      ]
+    }
   ]
 
   return (
@@ -54,7 +76,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
                     <Database className="size-4" />
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">File Studio</span>
+                    <span className="truncate font-semibold">vFleet Studio</span>
                     <span className="truncate text-[10px] opacity-70">Logistics Engine</span>
                   </div>
                 </Link>
@@ -64,38 +86,42 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-wider">Principal</SidebarGroupLabel>
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton tooltip="Dashboard" isActive={pathname === '/'} asChild>
                   <Link href="/">
                     <LayoutDashboard className="size-4" />
-                    <span className="text-xs sm:text-sm">Dashboard</span>
+                    <span className="text-xs sm:text-sm font-semibold">Dashboard</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroup>
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-wider">Pipelines Ativos</SidebarGroupLabel>
-            <SidebarMenu>
-              {pipelines.map((p) => (
-                <SidebarMenuItem key={p.id}>
-                  <SidebarMenuButton 
-                    tooltip={p.name} 
-                    isActive={pathname === `/pipeline/${p.id}`}
-                    asChild
-                  >
-                    <Link href={`/pipeline/${p.id}`}>
-                      <p.icon className="size-4" />
-                      <span className="text-xs sm:text-sm">{p.name}</span>
-                      <ChevronRight className="ml-auto size-3 opacity-50" />
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroup>
+
+          {navGroups.map((group) => (
+            <SidebarGroup key={group.label}>
+              <SidebarGroupLabel className="text-[10px] uppercase tracking-wider font-black text-muted-foreground/70">
+                {group.label}
+              </SidebarGroupLabel>
+              <SidebarMenu>
+                {group.items.map((p) => (
+                  <SidebarMenuItem key={p.id}>
+                    <SidebarMenuButton 
+                      tooltip={p.name} 
+                      isActive={pathname === `/pipeline/${p.id}`}
+                      asChild
+                    >
+                      <Link href={`/pipeline/${p.id}`}>
+                        <p.icon className="size-4" />
+                        <span className="text-xs sm:text-sm">{p.name}</span>
+                        <ChevronRight className="ml-auto size-3 opacity-50" />
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
+          ))}
         </SidebarContent>
         <SidebarFooter className="border-t pt-2">
            <SidebarMenu>
