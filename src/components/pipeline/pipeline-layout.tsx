@@ -29,7 +29,10 @@ import {
   TrendingUp,
   PackageX,
   BadgePercent,
-  MapPin
+  MapPin,
+  GitMerge,
+  FileText,
+  Search
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -39,27 +42,25 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
 
   const navGroups = [
     {
-      label: "Operacional",
+      label: "Indicadores",
       items: [
         { id: 'vfleet', name: 'vFleet Pilot', icon: Truck },
         { id: 'performaxxi', name: 'Performaxxi', icon: Zap },
         { id: 'ponto', name: 'Absenteísmo', icon: Clock },
-      ]
-    },
-    {
-      label: "Gestão e Comercial",
-      items: [
         { id: 'faturista', name: 'Faturista', icon: BadgePercent },
         { id: 'roadshow', name: 'Roadshow', icon: MapPin },
         { id: 'devolucoes', name: 'Devoluções', icon: PackageX },
-      ]
-    },
-    {
-      label: "Consolidação",
-      items: [
         { id: 'coordenadores', name: 'Coordenadores', icon: Building2 },
         { id: 'cco', name: 'CCO Empresa', icon: TrendingUp },
         { id: 'consolidador', name: 'Final', icon: FileStack },
+      ]
+    },
+    {
+      label: "Tarefas",
+      items: [
+        { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', icon: GitMerge },
+        { id: 'retorno-pedidos-ul', name: 'Retorno Pedidos UL', icon: MapPin },
+        { id: 'retorno-pedidos', name: 'Retorno Pedidos TXT', icon: Search },
       ]
     }
   ]

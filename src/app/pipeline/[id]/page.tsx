@@ -16,6 +16,9 @@ export async function generateStaticParams() {
     { id: 'roadshow' },
     { id: 'devolucoes' },
     { id: 'consolidador' },
+    { id: 'mercanete-roadshow' },
+    { id: 'retorno-pedidos-ul' },
+    { id: 'retorno-pedidos' },
   ]
 }
 
@@ -47,11 +50,25 @@ const DevolucoesPipelineView = dynamic(() => import("@/components/pipeline/devol
 const ConsolidadorPipelineView = dynamic(() => import("@/components/pipeline/consolidador-pipeline-view").then(mod => mod.ConsolidadorPipelineView), {
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-slate-600" /></div>
 })
+const MercaneteRoadshowPipelineView = dynamic(() => import("@/components/pipeline/mercanete-roadshow-pipeline-view").then(mod => mod.MercaneteRoadshowPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-blue-500" /></div>
+})
+const RetornoPedidosUlPipelineView = dynamic(() => import("@/components/pipeline/retorno-pedidos-ul-pipeline-view").then(mod => mod.RetornoPedidosUlPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-amber-600" /></div>
+})
+const RetornoPedidosPipelineView = dynamic(() => import("@/components/pipeline/retorno-pedidos-pipeline-view").then(mod => mod.RetornoPedidosPipelineView), {
+  loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-slate-600" /></div>
+})
 
 export default async function PipelinePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   
-  const validIds = ['vfleet', 'performaxxi', 'ponto', 'cco', 'coordenadores', 'faturista', 'roadshow', 'devolucoes', 'consolidador'];
+  const validIds = [
+    'vfleet', 'performaxxi', 'ponto', 'cco', 'coordenadores', 
+    'faturista', 'roadshow', 'devolucoes', 'consolidador',
+    'mercanete-roadshow', 'retorno-pedidos-ul', 'retorno-pedidos'
+  ];
+  
   if (!validIds.includes(id)) {
     return notFound();
   }
@@ -65,7 +82,10 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
     faturista: 'Eficiência Faturista',
     roadshow: 'Ocupação Roadshow',
     devolucoes: 'Gestão de Devoluções',
-    consolidador: 'Consolidador Final'
+    consolidador: 'Consolidador Final',
+    'mercanete-roadshow': 'Mercanete x Roadshow',
+    'retorno-pedidos-ul': 'Retorno Pedidos UL',
+    'retorno-pedidos': 'Retorno Pedidos TXT'
   };
 
   const descriptions: Record<string, string> = {
@@ -77,7 +97,10 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
     faturista: 'Meta de horários para Entrega de Cintas e Liberação para Roteirização.',
     roadshow: 'Ocupação de Jornada vs Ocupação de Veículo por região.',
     devolucoes: 'Cruzamento de Controle Logístico com Faturamento para análise de perdas.',
-    consolidador: 'Relatório final consolidado para fechamento de folha e pagamentos.'
+    consolidador: 'Relatório final consolidado para fechamento de folha e pagamentos.',
+    'mercanete-roadshow': 'Sistema de matching com prioridade e propagação de status entre Mercanete e Roadshow.',
+    'retorno-pedidos-ul': 'Extração e verificação de pedidos a partir de arquivos .ul.',
+    'retorno-pedidos': 'Extração e verificação de pedidos a partir de arquivos de texto .txt.'
   };
 
   return (
@@ -102,6 +125,9 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
           {id === 'roadshow' && <RoadshowPipelineView />}
           {id === 'devolucoes' && <DevolucoesPipelineView />}
           {id === 'consolidador' && <ConsolidadorPipelineView />}
+          {id === 'mercanete-roadshow' && <MercaneteRoadshowPipelineView />}
+          {id === 'retorno-pedidos-ul' && <RetornoPedidosUlPipelineView />}
+          {id === 'retorno-pedidos' && <RetornoPedidosPipelineView />}
         </Suspense>
       </div>
     </PipelineLayout>
