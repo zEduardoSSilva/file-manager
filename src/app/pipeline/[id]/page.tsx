@@ -84,7 +84,7 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
     devolucoes: 'Gestão de Devoluções',
     consolidador: 'Consolidador Final',
     'mercanete-roadshow': 'Mercanete x Roadshow',
-    'retorno-pedidos-ul': 'Retorno Pedidos UL',
+    'retorno-pedidos-ul': 'Retorn. Pedidos UL',
     'retorno-pedidos': 'Retorn. Pedidos TXT'
   };
 

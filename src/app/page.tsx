@@ -35,7 +35,7 @@ export default function Home() {
 
   const tasks = [
     { id: 'retorno-pedidos', name: 'Retorn. Pedidos TXT', desc: 'Processamento .txt', icon: Search, color: 'bg-slate-100 text-slate-600' },
-    { id: 'retorno-pedidos-ul', name: 'Retorno Pedidos UL', desc: 'Processamento .ul', icon: MapPin, color: 'bg-amber-50 text-amber-600' },
+    { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL', desc: 'Processamento .ul', icon: MapPin, color: 'bg-amber-50 text-amber-600' },
     { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', desc: 'Matching de Status', icon: GitMerge, color: 'bg-blue-50 text-blue-500' },
   ]
 

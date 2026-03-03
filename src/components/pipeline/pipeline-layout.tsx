@@ -58,7 +58,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
       label: "Tarefas",
       items: [
         { id: 'retorno-pedidos', name: 'Retorn. Pedidos TXT', icon: Search },
-        { id: 'retorno-pedidos-ul', name: 'Retorno Pedidos UL', icon: MapPin },
+        { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL', icon: MapPin },
         { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', icon: GitMerge },
       ]
     }
