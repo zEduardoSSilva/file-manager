@@ -25,10 +25,8 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 
 export interface DriverConsolidated {
-  'ID'?: string;
   'Empresa'?: string;
   'Funcionario'?: string;
-  'Motorista'?: string;
   'Cargo'?: 'MOTORISTA' | 'AJUDANTE';
   'Dias com Atividade'?: number;
   'Dias Bonif. Máxima (4/4)'?: number;
@@ -39,11 +37,6 @@ export interface DriverConsolidated {
   'Falhas SLA'?: number;
   'Falhas Tempo'?: number;
   'Falhas Sequência'?: number;
-  'Dias_Trabalhados'?: number;
-  '💰 Total_Bonus_Marcacoes'?: number;
-  '💰 Total_Bonus_Criterios'?: number;
-  '💵 BONIFICACAO_TOTAL'?: number;
-  'Total_Ajustes_Manuais'?: number;
 }
 
 export interface AbsenteismoData {
@@ -51,14 +44,9 @@ export interface AbsenteismoData {
   'Nome': string;
   'Grupo': string;
   'Total_Dias': number;
-  'Presenças Físicas': number;
-  'Atestados/Férias': number;
-  'Abonos Manuais': number;
-  'Total Presenças': number;
   'Faltas': number;
   'Percentual (%)': number;
   'Valor_Incentivo': number;
-  'Datas_Abonos_Manuais': string;
 }
 
 export interface PipelineResult {
@@ -69,7 +57,6 @@ export interface PipelineResult {
   month: number;
   data: any[];
   absenteismoData?: AbsenteismoData[];
-  detalheGeral?: any[];
   summary?: string;
 }
 
@@ -80,7 +67,6 @@ export const firebaseStore = {
         ...result,
         createdAt: Timestamp.now()
       });
-      console.log(`Documento salvo com ID: ${docRef.id}`);
       return { ...result, id: docRef.id };
     } catch (error) {
       console.error("Erro ao salvar no Firestore:", error);

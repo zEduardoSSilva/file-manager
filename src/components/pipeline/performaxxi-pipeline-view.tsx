@@ -7,10 +7,8 @@ import {
   Play, 
   Trash2,
   FileCode,
-  Files,
   Loader2,
   Zap,
-  Download,
   HelpCircle
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -57,7 +55,7 @@ export function PerformaxxiPipelineView() {
     setIsExecuting(true)
     setProgress(10)
     setLogs([])
-    addLog(`Iniciando Performaxxi Ultra-Rápido (20k+ linhas)...`)
+    addLog(`Iniciando Performaxxi Ultra-Rápido (Filtragem STANDBY)...`)
 
     try {
       const formData = new FormData()
@@ -65,7 +63,7 @@ export function PerformaxxiPipelineView() {
       formData.append('month', month.toString())
       files.forEach(f => formData.append('files', f))
 
-      addLog("Enviando para o servidor e filtrando STANDBY...", "info")
+      addLog("Processando 20k+ linhas e consolidando cargos...", "info")
       const response = await executePipeline(formData, 'performaxxi')
 
       if (!response.success) {
@@ -74,12 +72,12 @@ export function PerformaxxiPipelineView() {
 
       setLastResult(response.result)
       setProgress(100)
-      addLog("Análise unificada (Motoristas/Ajudantes) concluída em tempo recorde.", "success")
-      addLog("Dados sincronizados com Firebase.", "success")
+      addLog("Análise unificada concluída com sucesso.", "success")
+      addLog(`Firebase ID: ${response.result.id}`, "success")
 
       toast({
         title: "Processamento Concluído",
-        description: `Sucesso: ${response.result.data.length} funcionários analisados.`,
+        description: `${response.result.data.length} funcionários analisados.`,
       });
 
     } catch (error: any) {
@@ -88,7 +86,7 @@ export function PerformaxxiPipelineView() {
       toast({
         variant: "destructive",
         title: "Erro no Pipeline",
-        description: "Não foi possível completar o processamento. Verifique o arquivo.",
+        description: error.message,
       });
     } finally {
       setIsExecuting(false)
@@ -107,13 +105,13 @@ export function PerformaxxiPipelineView() {
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Otimizado para 20.000+ linhas. Ignora STANDBY e processa Motoristas e Ajudantes simultaneamente.</p>
+                <p>Otimizado para 20.000+ linhas. Ignora STANDBY e processa Motoristas (R$ 8,00) e Ajudantes (R$ 7,20) em segundos.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-xs mt-2">
-          Processa Motoristas (R$ 8,00) e Ajudantes (R$ 7,20) usando a regra proporcional de 4 critérios.
+          Bonificação Proporcional (4 critérios: Raio, SLA, Tempo, Sequência).
         </AlertDescription>
       </Alert>
 
@@ -139,18 +137,18 @@ export function PerformaxxiPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="font-semibold">Relatório Analítico de Rotas ({files.length})</Label>
+                  <Label className="font-semibold">Relatório de Rotas ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('perf-upload')?.click()}>
                     <Upload className="mr-2 size-4" /> Selecionar
                   </Button>
                   <input id="perf-upload" type="file" multiple className="hidden" onChange={handleFileChange} />
                 </div>
 
-                <div className="border rounded-lg bg-muted/10 p-2 min-h-[80px]">
+                <div className="border-2 border-dashed rounded-lg bg-muted/10 p-4 min-h-[100px] flex items-center justify-center">
                   {files.length === 0 ? (
-                    <p className="text-center py-6 text-muted-foreground text-xs italic">Arraste o arquivo RelatorioAnaliticoRotaPedidos.xlsx</p>
+                    <p className="text-center text-muted-foreground text-xs italic">Selecione o arquivo .xlsx</p>
                   ) : (
-                    <div className="space-y-1">
+                    <div className="w-full space-y-2">
                       {files.map((file, idx) => (
                         <div key={idx} className="flex items-center justify-between bg-white p-2 rounded-md border text-xs">
                           <span className="truncate flex-1 font-medium">{file.name}</span>
@@ -167,14 +165,14 @@ export function PerformaxxiPipelineView() {
               {isExecuting && (
                 <div className="space-y-2">
                   <div className="flex justify-between text-[10px] font-bold text-primary uppercase">
-                    <span>Processando em Lote</span>
+                    <span>Processando Dados</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1" />
                 </div>
               )}
             </CardContent>
-            <CardFooter className="bg-muted/5 border-t pt-4 flex flex-col sm:flex-row gap-3">
+            <CardFooter className="bg-muted/5 border-t pt-4">
               <Button
                 className="w-full h-12 bg-primary text-white font-bold text-base shadow-md"
                 onClick={runPipeline}
@@ -194,7 +192,7 @@ export function PerformaxxiPipelineView() {
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed">
               {logs.length === 0 ? (
-                <p className="text-muted-foreground italic">Aguardando arquivo para análise proporcional.</p>
+                <p className="text-muted-foreground italic">Aguardando arquivo...</p>
               ) : (
                 <div className="space-y-1">
                   {logs.map((log, i) => (
