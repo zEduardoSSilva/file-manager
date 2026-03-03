@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -23,7 +24,6 @@ import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
-import { downloadMultipleSheets } from "@/lib/excel-utils"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -52,7 +52,7 @@ export function PerformaxxiPipelineView() {
     }
   }
 
-  const runPipeline = async (downloadOnly = false) => {
+  const runPipeline = async () => {
     if (files.length === 0) return;
     setIsExecuting(true)
     setProgress(10)
@@ -74,18 +74,12 @@ export function PerformaxxiPipelineView() {
 
       setLastResult(response.result)
       setProgress(100)
-      addLog("Análise linear de 4 critérios concluída em tempo recorde.", "success")
-      addLog("Dados salvos e sincronizados com Firebase.", "success")
-
-      if (downloadOnly) {
-        addLog("Aguarde: Gerando Excel via Banco de Dados...", "info")
-        // No modo real, buscaríamos o detalheGeral do banco aqui se ele não vier no response
-        toast({ title: "Modo Exportação", description: "O Excel consolidado está disponível no dashboard." });
-      }
+      addLog("Análise unificada (Motoristas/Ajudantes) concluída em tempo recorde.", "success")
+      addLog("Dados sincronizados com Firebase.", "success")
 
       toast({
-        title: "Sucesso",
-        description: "As 20.000+ linhas foram processadas sem timeout.",
+        title: "Processamento Concluído",
+        description: `Sucesso: ${response.result.data.length} funcionários analisados.`,
       });
 
     } catch (error: any) {
@@ -94,7 +88,7 @@ export function PerformaxxiPipelineView() {
       toast({
         variant: "destructive",
         title: "Erro no Pipeline",
-        description: "O servidor ainda está demorando. Tente diminuir o número de arquivos.",
+        description: "Não foi possível completar o processamento. Verifique o arquivo.",
       });
     } finally {
       setIsExecuting(false)
@@ -113,13 +107,13 @@ export function PerformaxxiPipelineView() {
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Otimizado para 20.000 linhas. Ignora STANDBY e foca nos 4 critérios de bonificação proporcional.</p>
+                <p>Otimizado para 20.000+ linhas. Ignora STANDBY e processa Motoristas e Ajudantes simultaneamente.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-xs mt-2">
-          Processa Motoristas (R$ 8,00) e Ajudantes (R$ 7,20) em única passagem.
+          Processa Motoristas (R$ 8,00) e Ajudantes (R$ 7,20) usando a regra proporcional de 4 critérios.
         </AlertDescription>
       </Alert>
 
@@ -145,7 +139,7 @@ export function PerformaxxiPipelineView() {
 
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <Label className="font-semibold">Arquivo de Rotas ({files.length})</Label>
+                  <Label className="font-semibold">Relatório Analítico de Rotas ({files.length})</Label>
                   <Button variant="outline" size="sm" onClick={() => document.getElementById('perf-upload')?.click()}>
                     <Upload className="mr-2 size-4" /> Selecionar
                   </Button>
@@ -154,12 +148,12 @@ export function PerformaxxiPipelineView() {
 
                 <div className="border rounded-lg bg-muted/10 p-2 min-h-[80px]">
                   {files.length === 0 ? (
-                    <p className="text-center py-6 text-muted-foreground text-xs italic">RelatorioAnaliticoRotaPedidos.xlsx</p>
+                    <p className="text-center py-6 text-muted-foreground text-xs italic">Arraste o arquivo RelatorioAnaliticoRotaPedidos.xlsx</p>
                   ) : (
                     <div className="space-y-1">
                       {files.map((file, idx) => (
                         <div key={idx} className="flex items-center justify-between bg-white p-2 rounded-md border text-xs">
-                          <span className="truncate flex-1">{file.name}</span>
+                          <span className="truncate flex-1 font-medium">{file.name}</span>
                           <Button variant="ghost" size="icon" className="size-6 ml-2" onClick={() => setFiles(files.filter((_, i) => i !== idx))}>
                             <Trash2 className="size-3 text-destructive" />
                           </Button>
@@ -173,7 +167,7 @@ export function PerformaxxiPipelineView() {
               {isExecuting && (
                 <div className="space-y-2">
                   <div className="flex justify-between text-[10px] font-bold text-primary uppercase">
-                    <span>Processando 20k linhas</span>
+                    <span>Processando em Lote</span>
                     <span>{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-1" />
@@ -182,19 +176,11 @@ export function PerformaxxiPipelineView() {
             </CardContent>
             <CardFooter className="bg-muted/5 border-t pt-4 flex flex-col sm:flex-row gap-3">
               <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => runPipeline(true)}
+                className="w-full h-12 bg-primary text-white font-bold text-base shadow-md"
+                onClick={runPipeline}
                 disabled={isExecuting || files.length === 0}
               >
-                <Download className="mr-2 size-4" /> Exportar Excel
-              </Button>
-              <Button
-                className="flex-[2] h-12 bg-primary text-white font-bold"
-                onClick={() => runPipeline(false)}
-                disabled={isExecuting || files.length === 0}
-              >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Processando...</> : <><Play className="mr-2 fill-current" /> Iniciar Análise</>}
+                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Analisando...</> : <><Play className="mr-2 fill-current" /> Iniciar Processamento</>}
               </Button>
             </CardFooter>
           </Card>
