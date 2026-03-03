@@ -51,13 +51,14 @@ export interface AbsenteismoData {
 
 export interface PipelineResult {
   id?: string;
-  pipelineType: 'vfleet' | 'performaxxi' | 'ponto';
+  pipelineType: string;
   timestamp: number;
   year: number;
   month: number;
   data: any[];
   absenteismoData?: AbsenteismoData[];
   summary?: string;
+  [key: string]: any; // Permite campos extras como detalheConducao, resumoMensal, etc.
 }
 
 export const firebaseStore = {
