@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { AIParamAssistant } from "./ai-param-assistant"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { executePipeline } from "@/app/actions/pipeline"
+import { executePerformaxxiPipeline } from "@/app/actions/performaxxi-pipeline"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
@@ -64,7 +64,7 @@ export function PerformaxxiPipelineView() {
       files.forEach(f => formData.append('files', f))
 
       addLog("Processando 20k+ linhas e consolidando cargos...", "info")
-      const response = await executePipeline(formData, 'performaxxi')
+      const response = await executePerformaxxiPipeline(formData, 'performaxxi')
 
       if (!response.success) {
         throw new Error(response.error)

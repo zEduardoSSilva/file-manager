@@ -24,7 +24,7 @@ import { Progress } from "@/components/ui/progress"
 import { downloadMultipleSheets } from "@/lib/excel-utils"
 import { Badge } from "@/components/ui/badge"
 
-export function ConsolidadorPipelineView() {
+export function executeConsolidadorPipeline() {
   const [year, setYear] = React.useState(2026)
   const [month, setMonth] = React.useState(1)
   const [isExecuting, setIsExecuting] = React.useState(false)

@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { AIParamAssistant } from "./ai-param-assistant"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { executePipeline } from "@/app/actions/pipeline"
+import { executePontoPipeline } from "@/app/actions/ponto-pipeline"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
@@ -103,7 +103,7 @@ export function PontoPipelineView() {
 
       let response: any
       try {
-        response = await executePipeline(formData, 'ponto')
+        response = await executePontoPipeline(formData)
       } catch (networkErr: any) {
         const detail = networkErr?.message || String(networkErr)
         addLog(`Erro de comunicação com servidor: ${detail}`, "error")

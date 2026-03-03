@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { AIParamAssistant } from "./ai-param-assistant"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { executePipeline } from "@/app/actions/pipeline"
+import { executeVFleetPipeline } from "@/app/actions/vfleet-pipeline"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { DataViewer } from "./data-viewer"
@@ -78,47 +78,26 @@ export function VFleetPipelineView() {
 
       let response: any
       try {
-        response = await executePipeline(formData, 'vfleet')
+        response = await executeVFleetPipeline(formData)
       } catch (networkErr: any) {
         const detail = networkErr?.message || String(networkErr)
         addLog(`Erro de comunicação com servidor: ${detail}`, "error")
-        if (networkErr?.cause) addLog(`Causa: ${String(networkErr.cause)}`, "error")
         throw networkErr
       }
 
-      addLog(`Resposta recebida. Status: ${response?.success ? 'SUCESSO' : 'FALHA'}`, response?.success ? 'info' : 'warn')
-
       if (!response?.success) {
-        const errMsg    = response?.error  || '(sem mensagem)'
-        const errStack  = response?.stack  || ''
-        const errCode   = response?.code   || ''
-        const errDetail = response?.detail || ''
-
-        addLog(`Erro retornado pelo servidor:`, "error")
-        addLog(`→ Mensagem : ${errMsg}`, "error")
-        if (errCode)   addLog(`→ Código   : ${errCode}`, "error")
-        if (errDetail) addLog(`→ Detalhe  : ${errDetail}`, "error")
-        if (errStack)  addLog(`→ Stack    : ${errStack.split('\n')[0]}`, "error")
-
-        throw new Error(errMsg)
+        throw new Error(response?.error || 'Erro desconhecido no servidor.')
       }
 
       const result = response.result;
       setLastResult(result)
       setProgress(100)
 
-      const resultKeys = Object.keys(result || {})
-      addLog(`Campos retornados: ${resultKeys.join(', ')}`, "info")
-
       if (downloadOnly) {
         addLog("Gerando Excel Consolidado...", "success")
         downloadMultipleSheets([
-          { data: result.detalheConducao || result.detalhePonto || [], name: '04_Detalhe_Diario' },
           { data: result.data, name: '05_Consolidado_Motorista' }
         ], `vFleet_Analitico_${month}_${year}`)
-
-        if (!result.detalheConducao && !result.detalhePonto)
-          addLog("⚠️ Aba '04_Detalhe_Diario' veio vazia — verifique se o campo 'detalheConducao' é retornado pelo backend.", "warn")
       } else {
         addLog("Sincronização com o Firebase concluída.", "success")
       }
@@ -129,14 +108,7 @@ export function VFleetPipelineView() {
       });
 
     } catch (error: any) {
-      const msg = error?.message || String(error)
-      addLog(`FALHA GERAL: ${msg}`, "error")
-
-      if (msg.toLowerCase().includes('unexpected response') || msg.toLowerCase().includes('fetch')) {
-        addLog("Dica: O servidor pode ter retornado HTML de erro (500/404) em vez de JSON.", "warn")
-        addLog("Verifique os logs do servidor (terminal / Vercel / Firebase Functions).", "warn")
-      }
-
+      addLog(`FALHA GERAL: ${error?.message || String(error)}`, "error")
       setProgress(0)
     } finally {
       setIsExecuting(false)
