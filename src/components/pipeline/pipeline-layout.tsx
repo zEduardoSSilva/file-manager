@@ -36,47 +36,48 @@ import {
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
+// Mover constantes para fora do componente evita re-criação desnecessária em cada render
+const NAV_GROUPS = [
+  {
+    label: "Indicadores",
+    items: [
+      { id: 'vfleet', name: 'vFleet Pilot', icon: Truck },
+      { id: 'performaxxi', name: 'Performaxxi', icon: Zap },
+      { id: 'ponto', name: 'Absenteísmo', icon: Clock },
+      { id: 'faturista', name: 'Faturista', icon: BadgePercent },
+      { id: 'roadshow', name: 'Roadshow', icon: MapPin },
+      { id: 'devolucoes', name: 'Devoluções', icon: PackageX },
+      { id: 'coordenadores', name: 'Coordenadores', icon: Building2 },
+      { id: 'cco', name: 'CCO Empresa', icon: TrendingUp },
+      { id: 'consolidador', name: 'Final', icon: FileStack },
+    ]
+  },
+  {
+    label: "Tarefas",
+    items: [
+      { id: 'retorno-pedidos', name: 'Retorn. Pedidos TXT', icon: Search },
+      { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL', icon: MapPin },
+      { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', icon: GitMerge },
+    ]
+  }
+]
+
 export function PipelineLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  const navGroups = [
-    {
-      label: "Indicadores",
-      items: [
-        { id: 'vfleet', name: 'vFleet Pilot', icon: Truck },
-        { id: 'performaxxi', name: 'Performaxxi', icon: Zap },
-        { id: 'ponto', name: 'Absenteísmo', icon: Clock },
-        { id: 'faturista', name: 'Faturista', icon: BadgePercent },
-        { id: 'roadshow', name: 'Roadshow', icon: MapPin },
-        { id: 'devolucoes', name: 'Devoluções', icon: PackageX },
-        { id: 'coordenadores', name: 'Coordenadores', icon: Building2 },
-        { id: 'cco', name: 'CCO Empresa', icon: TrendingUp },
-        { id: 'consolidador', name: 'Final', icon: FileStack },
-      ]
-    },
-    {
-      label: "Tarefas",
-      items: [
-        { id: 'retorno-pedidos', name: 'Retorn. Pedidos TXT', icon: Search },
-        { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL', icon: MapPin },
-        { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', icon: GitMerge },
-      ]
-    }
-  ]
-
   return (
     <SidebarProvider>
-      <Sidebar variant="inset" collapsible="icon">
+      <Sidebar variant="inset" collapsible="icon" className="will-change-transform translate-z-0">
         <SidebarHeader className="border-b pb-4 pt-4">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg" asChild>
                 <Link href="/">
-                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
                     <Database className="size-4" />
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">File Manager</span>
+                    <span className="truncate font-bold">File Manager</span>
                     <span className="truncate text-[10px] opacity-70">Logistics Intelligence</span>
                   </div>
                 </Link>
@@ -98,7 +99,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
             </SidebarMenu>
           </SidebarGroup>
 
-          {navGroups.map((group) => (
+          {NAV_GROUPS.map((group) => (
             <SidebarGroup key={group.label}>
               <SidebarGroupLabel className="text-[10px] uppercase tracking-wider font-black text-muted-foreground/70">
                 {group.label}
@@ -143,12 +144,12 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset className="min-w-0 flex-1 flex flex-col overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center gap-2 px-4 border-b bg-white">
+      <SidebarInset className="min-w-0 flex-1 flex flex-col overflow-hidden bg-[#F4F4FB]">
+        <header className="flex h-14 shrink-0 items-center gap-2 px-4 border-b bg-white/80 backdrop-blur-sm sticky top-0 z-30">
           <SidebarTrigger className="-ml-1" />
           <h1 className="text-sm sm:text-base font-bold text-primary truncate">File Manager</h1>
         </header>
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-6 bg-[#F4F4FB] min-w-0">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-6 min-w-0 scroll-smooth">
           <div className="max-w-full overflow-hidden min-w-0">
             {children}
           </div>
