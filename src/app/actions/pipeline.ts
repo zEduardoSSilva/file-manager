@@ -13,7 +13,6 @@ const fastDateStr = (val: any): { str: string, month: number, year: number } | n
   if (val instanceof Date) {
     d = val;
   } else if (typeof val === 'number') {
-    // Conversão de data serial do Excel
     d = new Date(Math.round((val - 25569) * 86400 * 1000));
   } else {
     const s = String(val).trim();
@@ -51,7 +50,6 @@ export async function executePipeline(formData: FormData, type?: string) {
       const AJU_BASE = 7.20;
       const CRIT_COUNT = 4;
 
-      // Usamos um mapa para acumular dados diários de forma linear
       const dailyMap = new Map<string, any>();
       
       for (const file of files) {
@@ -62,7 +60,6 @@ export async function executePipeline(formData: FormData, type?: string) {
         
         if (rows.length < 2) continue;
 
-        // Mapeia cabeçalhos UMA ÚNICA VEZ para performance
         const headers = rows[0].map(h => String(h || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "").trim());
         const getIdx = (cands: string[]) => headers.findIndex(h => cands.some(c => h.includes(c)));
         
@@ -85,7 +82,7 @@ export async function executePipeline(formData: FormData, type?: string) {
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
           
-          // FILTRO 1: StandBy (Curto-circuito de performance)
+          // FILTRO 1: StandBy (Curto-circuito)
           const status = String(row[col.status] || '').toUpperCase();
           if (status === 'STANDBY') continue;
 
@@ -94,10 +91,18 @@ export async function executePipeline(formData: FormData, type?: string) {
           if (!dateInfo || dateInfo.month !== targetMonth || (dateInfo.year !== targetYear && dateInfo.year !== targetYear - 2000)) continue;
 
           const empresa = String(row[col.empresa] || 'N/A');
-          const peso = fastToFloat(row[col.pesoP]);
-          const isDevolvido = String(row[col.ocorrencia] || '').trim() !== '';
+          const dist = fastToFloat(row[col.dist]);
+          const slaOk = String(row[col.sla] || '').toUpperCase().includes('SIM');
+          
+          let timeOk = false;
+          try {
+            const start = new Date(row[col.chegada]).getTime();
+            const end = new Date(row[col.fimAtend]).getTime();
+            if (end - start >= 60000) timeOk = true;
+          } catch (e) {}
 
-          // Processa tanto motorista quanto ajudante em uma única passada
+          const seqOk = row[col.seqP] !== undefined && String(row[col.seqP]) === String(row[col.seqR]);
+
           const processRole = (nome: string, cargo: 'MOTORISTA' | 'AJUDANTE') => {
             if (!nome || /^(0|null|nan|sem ajudante)$/i.test(nome)) return;
             const key = `${nome}|${cargo}|${dateInfo.str}`;
@@ -106,26 +111,16 @@ export async function executePipeline(formData: FormData, type?: string) {
             if (!d) {
               d = { 
                 Empresa: empresa, Funcionario: nome, Cargo: cargo, Dia: dateInfo.str,
-                pedidos: 0, rOk: 0, sOk: 0, tOk: 0, seqOk: 0, pesoT: 0, pesoD: 0 
+                pedidos: 0, rOk: 0, sOk: 0, tOk: 0, seqOk: 0
               };
               dailyMap.set(key, d);
             }
 
             d.pedidos++;
-            d.pesoT += peso;
-            if (isDevolvido) d.pesoD += peso;
-            if (fastToFloat(row[col.dist]) <= 100) d.rOk++;
-            if (String(row[col.sla] || '').toUpperCase().includes('SIM')) d.sOk++;
-            
-            // Tempo de atendimento (>= 1 min)
-            try {
-              const start = new Date(row[col.chegada]).getTime();
-              const end = new Date(row[col.fimAtend]).getTime();
-              if (end - start >= 60000) d.tOk++;
-            } catch (e) {}
-
-            // Sequência
-            if (row[col.seqP] !== undefined && String(row[col.seqP]) === String(row[col.seqR])) d.seqOk++;
+            if (dist <= 100) d.rOk++;
+            if (slaOk) d.sOk++;
+            if (timeOk) d.tOk++;
+            if (seqOk) d.seqOk++;
           };
 
           processRole(String(row[col.motorista] || '').trim(), 'MOTORISTA');
@@ -133,15 +128,12 @@ export async function executePipeline(formData: FormData, type?: string) {
         }
       }
 
-      // Consolidação final (Pandas-style)
       const consolidadoMap = new Map<string, any>();
-      const detalheGeral: any[] = []; // Opcional, para salvar no banco
-
       for (const d of dailyMap.values()) {
         const cR = (d.rOk / d.pedidos) >= 0.7;
         const cS = (d.sOk / d.pedidos) >= 0.8;
         const cT = (d.tOk / d.pedidos) >= 1.0;
-        const cSeq = true; // Por padrão no seu script
+        const cSeq = true; // Mantendo padrão do seu script
         const cumpridos = (cR ? 1 : 0) + (cS ? 1 : 0) + (cT ? 1 : 0) + (cSeq ? 1 : 0);
         const unit = d.Cargo === 'MOTORISTA' ? (MOT_BASE / CRIT_COUNT) : (AJU_BASE / CRIT_COUNT);
         const bonusDia = Number((cumpridos * unit).toFixed(2));
@@ -165,7 +157,6 @@ export async function executePipeline(formData: FormData, type?: string) {
         if (!cR) m['Falhas Raio']++;
         if (!cS) m['Falhas SLA']++;
         if (!cT) m['Falhas Tempo']++;
-        // Falhas seq 0 por padrão conforme seu script
       }
 
       const consolidado = Array.from(consolidadoMap.values()).map(m => {
@@ -177,13 +168,11 @@ export async function executePipeline(formData: FormData, type?: string) {
         };
       }).sort((a, b) => b['Percentual de Desempenho (%)'] - a['Percentual de Desempenho (%)']);
 
-      // Salva no Firebase
       const saved = await firebaseStore.saveResult('performaxxi', {
         pipelineType: 'performaxxi', timestamp: Date.now(), year: targetYear, month: targetMonth,
-        data: consolidado, summary: `Sucesso: ${consolidado.length} colaboradores processados em única passagem (20k+ linhas).`
+        data: consolidado, summary: `Processamento de ${consolidado.length} funcionários concluído com filtragem STANDBY.`
       });
 
-      // Retornamos apenas o necessário para o cliente para evitar timeout de payload gigante
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
 
@@ -191,7 +180,7 @@ export async function executePipeline(formData: FormData, type?: string) {
     if (pipelineType === 'vfleet') {
       const saved = await firebaseStore.saveResult('vfleet', {
         pipelineType: 'vfleet', timestamp: Date.now(), year: targetYear, month: targetMonth,
-        data: [], summary: `vFleet processado.`
+        data: [], summary: `Pipeline vFleet processado.`
       });
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
@@ -200,7 +189,7 @@ export async function executePipeline(formData: FormData, type?: string) {
     if (pipelineType === 'ponto') {
       const saved = await firebaseStore.saveResult('ponto', {
         pipelineType: 'ponto', timestamp: Date.now(), year: targetYear, month: targetMonth,
-        data: [], summary: `Absenteísmo processado.`
+        data: [], summary: `Pipeline Absenteísmo processado.`
       });
       return { success: true, result: JSON.parse(JSON.stringify(saved)) };
     }
