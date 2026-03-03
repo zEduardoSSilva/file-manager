@@ -5,7 +5,17 @@ import dynamic from "next/dynamic"
 import { Suspense } from "react"
 import { Loader2 } from "lucide-react"
 
-// Carregamento dinâmico para melhorar a performance de navegação
+// IDs válidos para pre-renderização
+export async function generateStaticParams() {
+  return [
+    { id: 'vfleet' },
+    { id: 'performaxxi' },
+    { id: 'ponto' },
+    { id: 'consolidador' },
+  ]
+}
+
+// Carregamento dinâmico otimizado
 const VFleetPipelineView = dynamic(() => import("@/components/pipeline/vfleet-pipeline-view").then(mod => mod.VFleetPipelineView), { 
   loading: () => <div className="flex items-center justify-center p-12"><Loader2 className="size-8 animate-spin text-primary" /></div> 
 })
@@ -27,14 +37,14 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
     return notFound();
   }
 
-  const titles = {
+  const titles: Record<string, string> = {
     vfleet: 'vFleet Pilot',
     performaxxi: 'Performaxxi Único',
     ponto: 'Ponto e Absenteísmo',
     consolidador: 'Consolidador Final'
   };
 
-  const descriptions = {
+  const descriptions: Record<string, string> = {
     vfleet: 'Pipeline de remuneração variável: alertas de telemetria e análise de condução (R$ 4,80).',
     performaxxi: 'Sequência de rotas e performance de motoristas (R$ 8,00) e ajudantes (R$ 7,20).',
     ponto: 'Gestão de jornada e presença: análise de CSVs de ponto e incentivos de absenteísmo.',
@@ -46,10 +56,10 @@ export default async function PipelinePage({ params }: { params: Promise<{ id: s
       <div className="max-w-6xl mx-auto">
         <div className="mb-8">
           <h2 className="text-3xl font-bold tracking-tight mb-2">
-            {titles[id as keyof typeof titles]}
+            {titles[id]}
           </h2>
           <p className="text-muted-foreground">
-            {descriptions[id as keyof typeof descriptions]}
+            {descriptions[id]}
           </p>
         </div>
         
