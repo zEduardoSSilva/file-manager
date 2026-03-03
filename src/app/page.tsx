@@ -1,3 +1,4 @@
+
 import { PipelineLayout } from "@/components/pipeline/pipeline-layout"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { 
@@ -37,7 +38,7 @@ export default function Home() {
       <div className="space-y-4 sm:space-y-6 max-w-full min-w-0 overflow-hidden">
         <div className="px-1">
           <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Dashboard Executivo</h2>
-          <p className="text-[10px] sm:text-sm text-muted-foreground">Sistema central de processamento logístico vFleet Studio.</p>
+          <p className="text-[10px] sm:text-sm text-muted-foreground">Sistema central de processamento logístico File Manager.</p>
         </div>
 
         {/* Stats Grid */}
@@ -116,57 +117,6 @@ export default function Home() {
               </div>
             </CardContent>
           </Card>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Card className="flex flex-col shadow-sm overflow-hidden min-w-0">
-              <CardHeader className="p-4 sm:p-6">
-                <CardTitle className="text-base sm:text-lg">Status do Servidor</CardTitle>
-                <CardDescription className="text-[10px] sm:text-sm">Monitoramento de processamento em tempo real.</CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
-                <div className="space-y-3">
-                  {[
-                    { label: "Firebase Firestore", status: "Online", color: "bg-green-500" },
-                    { label: "Genkit AI Engine", status: "Pronto", color: "bg-green-500" },
-                    { label: "Server Actions", status: "Otimizado (50MB)", color: "bg-blue-500" },
-                  ].map((item, i) => (
-                    <div key={i} className="flex items-center justify-between text-xs border-b border-border/50 pb-2 last:border-0 last:pb-0">
-                      <span className="text-muted-foreground font-medium">{item.label}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold">{item.status}</span>
-                        <div className={`size-2 rounded-full ${item.color} animate-pulse`} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="flex flex-col shadow-sm overflow-hidden min-w-0">
-              <CardHeader className="p-4 sm:p-6">
-                <CardTitle className="text-base sm:text-lg">Atividade Recente</CardTitle>
-                <CardDescription className="text-[10px] sm:text-sm">Últimas execuções de sistema.</CardDescription>
-              </CardHeader>
-              <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0 min-w-0 overflow-hidden">
-                <div className="space-y-3">
-                  {[
-                    { user: "Eduardo S.", action: "Performaxxi", time: "2h atrás", period: "01/26", color: "bg-amber-500" },
-                    { user: "Sistema", action: "vFleet", time: "5h atrás", period: "01/26", color: "bg-primary" },
-                    { user: "Eduardo S.", action: "Roadshow", time: "Ontem", period: "12/25", color: "bg-orange-500" }
-                  ].map((item, i) => (
-                    <div key={i} className="flex items-center gap-3 text-xs border-b border-border/50 pb-2 last:border-0 last:pb-0 min-w-0 overflow-hidden">
-                      <div className={`size-1.5 shrink-0 rounded-full ${item.color}`} />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-[10px] sm:text-xs truncate">{item.action} <span className="text-muted-foreground font-normal">por {item.user}</span></p>
-                        <p className="text-[9px] text-muted-foreground">{item.time}</p>
-                      </div>
-                      <Badge variant="secondary" className="text-[8px] h-3 px-1 shrink-0 font-bold">{item.period}</Badge>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
         </div>
       </div>
     </PipelineLayout>
