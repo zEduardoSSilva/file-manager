@@ -64,7 +64,7 @@ export function PerformaxxiPipelineView() {
       files.forEach(f => formData.append('files', f))
 
       addLog("Processando 20k+ linhas e consolidando cargos...", "info")
-      const response = await executePerformaxxiPipeline(formData, 'performaxxi')
+      const response = await executePerformaxxiPipeline(formData)
 
       if (!response.success) {
         throw new Error(response.error)
