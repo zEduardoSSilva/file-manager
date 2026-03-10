@@ -14,40 +14,72 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Info, CheckCircle2 } from "lucide-react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 
-// Componente de Tabela Memoizado para evitar re-renders pesados
-const DataTable = React.memo(({ data, limit = 100 }: { data: any[], limit?: number }) => {
+// Tabela virtualizada — renderiza apenas linhas visíveis
+const DataTable = React.memo(({ data, limit = 500 }: { data: any[], limit?: number }) => {
   if (!data || data.length === 0) return <p className="text-xs p-4 italic text-muted-foreground">Nenhum dado consolidado encontrado.</p>;
   
-  const headers = Object.keys(data[0]);
+  const headers = React.useMemo(() => Object.keys(data[0]), [data]);
   const displayData = React.useMemo(() => data.slice(0, limit), [data, limit]);
+  const parentRef = React.useRef<HTMLDivElement>(null)
+
+  const rowVirtualizer = useVirtualizer({
+    count: displayData.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 36,
+    overscan: 20,
+  })
+
+  const formatCell = React.useCallback((h: string, value: any) => {
+    if (h.includes('R$') || h.includes('Bonificação') || h.includes('Total')) {
+      return Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, style: 'currency', currency: 'BRL' })
+    }
+    return value
+  }, [])
 
   return (
-    <div className="rounded-md border overflow-x-auto min-w-0 w-full bg-white shadow-sm scrollbar-thin scrollbar-thumb-muted">
-      <Table className="min-w-max w-full table-auto border-collapse">
-        <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
-          <TableRow className="bg-muted/50 border-b">
-            {headers.map((h, i) => (
-              <TableHead key={i} className="text-[10px] uppercase font-black py-3 px-4 whitespace-nowrap text-muted-foreground">
-                {h}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {displayData.map((row, i) => (
-            <TableRow key={i} className="hover:bg-primary/5 transition-colors border-b last:border-0 group">
-              {headers.map((h, j) => (
-                <TableCell key={j} className="py-2 px-4 text-[11px] whitespace-nowrap group-hover:text-primary transition-colors">
-                  {h.includes('R$') || h.includes('Bonificação') || h.includes('Total') 
-                    ? Number(row[h] || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, style: 'currency', currency: 'BRL' })
-                    : row[h]}
-                </TableCell>
+    <div className="rounded-md border overflow-hidden min-w-0 w-full bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <Table className="min-w-max w-full table-auto border-collapse">
+          <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
+            <TableRow className="bg-muted/50 border-b">
+              {headers.map((h, i) => (
+                <TableHead key={i} className="text-[10px] uppercase font-black py-3 px-4 whitespace-nowrap text-muted-foreground">
+                  {h}
+                </TableHead>
               ))}
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+        </Table>
+      </div>
+      <div ref={parentRef} className="overflow-auto max-h-[500px]">
+        <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const row = displayData[virtualRow.index]
+            return (
+              <div
+                key={virtualRow.index}
+                className="flex hover:bg-primary/5 transition-colors border-b last:border-0 group"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                }}
+              >
+                {headers.map((h, j) => (
+                  <div key={j} className="py-2 px-4 text-[11px] whitespace-nowrap group-hover:text-primary transition-colors flex-shrink-0" style={{ minWidth: 120 }}>
+                    {formatCell(h, row[h])}
+                  </div>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+      </div>
       {data.length > limit && (
         <p className="text-[10px] text-center p-3 text-muted-foreground bg-muted/5 italic border-t font-medium">
           Exibindo os primeiros {limit} registros de {data.length}. Use o botão Exportar Excel para ver todos os dados.
