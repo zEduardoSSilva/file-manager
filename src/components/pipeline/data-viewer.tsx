@@ -18,10 +18,8 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 
 // Tabela virtualizada — renderiza apenas linhas visíveis
 const DataTable = React.memo(({ data, limit = 500 }: { data: any[], limit?: number }) => {
-  if (!data || data.length === 0) return <p className="text-xs p-4 italic text-muted-foreground">Nenhum dado consolidado encontrado.</p>;
-  
-  const headers = React.useMemo(() => Object.keys(data[0]), [data]);
-  const displayData = React.useMemo(() => data.slice(0, limit), [data, limit]);
+  const headers = React.useMemo(() => data && data.length > 0 ? Object.keys(data[0]) : [], [data]);
+  const displayData = React.useMemo(() => data ? data.slice(0, limit) : [], [data, limit]);
   const parentRef = React.useRef<HTMLDivElement>(null)
 
   const rowVirtualizer = useVirtualizer({
@@ -37,6 +35,8 @@ const DataTable = React.memo(({ data, limit = 500 }: { data: any[], limit?: numb
     }
     return value
   }, [])
+
+  if (!data || data.length === 0) return <p className="text-xs p-4 italic text-muted-foreground">Nenhum dado consolidado encontrado.</p>;
 
   return (
     <div className="rounded-md border overflow-hidden min-w-0 w-full bg-white shadow-sm">
