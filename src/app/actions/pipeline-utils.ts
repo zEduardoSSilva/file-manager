@@ -29,7 +29,7 @@ export async function readAllFilesFromFormData(formData: FormData, fieldName: st
 }
 
 export async function saveToFirebase(type: string, year: number, month: number, data: any[], extras: Record<string, any> = {}): Promise<PipelineResult> {
-  const result: Omit<PipelineResult, 'id'> = {
+  const pipelineData: Omit<PipelineResult, 'id'> = {
     pipelineType: type,
     timestamp: Date.now(),
     year,
@@ -37,5 +37,6 @@ export async function saveToFirebase(type: string, year: number, month: number, 
     data,
     ...extras,
   };
-  return await firebaseStore.saveResult(type, result);
+  const saved = await firebaseStore.saveResult(type, pipelineData);
+  return { ...pipelineData, id: saved.id } as PipelineResult;
 }

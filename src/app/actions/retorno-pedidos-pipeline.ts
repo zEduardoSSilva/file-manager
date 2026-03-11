@@ -1,6 +1,6 @@
 import { PipelineResponse, readAllFilesFromFormData, saveToFirebase } from './pipeline-utils';
 
-export async function executeRetornoPedidosPipeline(formData: FormData): Promise<PipelineResponse> {
+export async function executeRetornoPedidosPipeline(formData: FormData, _type?: string): Promise<PipelineResponse> {
   try {
     const year = parseInt(formData.get('year') as string);
     const month = parseInt(formData.get('month') as string);
