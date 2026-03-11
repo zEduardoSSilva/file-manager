@@ -24,8 +24,8 @@ const firebaseConfig = {
   projectId: "file-manager-hub-50030334",
   storageBucket: "file-manager-hub-50030334.firebasestorage.app",
   messagingSenderId: "624881199937",
-  appId: "1:624881199937:web:b496e44b9da1bd2ca80fc0",
-  measurementId: "G-NPNRV89152"
+  appId: "1:624881199937:web:32a47c8c0e94d72aa80fc0",
+  measurementId: "G-022RTQT8XG"
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
