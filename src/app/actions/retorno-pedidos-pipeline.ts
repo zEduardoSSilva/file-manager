@@ -1,18 +1,21 @@
-import { PipelineResponse, readAllFilesFromFormData, saveToFirebase } from './pipeline-utils';
+"use server"
 
-export async function executeRetornoPedidosPipeline(formData: FormData, _type?: string): Promise<PipelineResponse> {
-  try {
-    const year = parseInt(formData.get('year') as string);
-    const month = parseInt(formData.get('month') as string);
-    const sheetsData = await readAllFilesFromFormData(formData, 'files');
-    const allData = sheetsData.flat();
+import { PipelineArgs, PipelineResponse, ProcessorOutput, processAndSave } from "./pipeline-utils"
 
-    const result = await saveToFirebase('retorno-pedidos', year, month, allData, {
-      summary: `Retorno Pedidos TXT: ${allData.length} registros processados.`,
-    });
+// Como este pipeline parece apenas ler e salvar, não precisamos de um schema de validação complexo aqui.
+// A função `readAll` da classe FileReader vai converter o Excel para JSON.
 
-    return { success: true, result };
-  } catch (error: any) {
-    return { success: false, result: {} as any, error: error.message };
+async function processRetornoPedidosData({ files }: PipelineArgs): Promise<ProcessorOutput> {
+  // Usamos `readAll` sem um schema para simplesmente converter os arquivos para JSON.
+  const data = await files.readAll("files")
+  const flatData = data.flat()
+
+  return {
+    data: flatData,
+    summary: `Retorno Pedidos: ${flatData.length} registros processados.`,
   }
+}
+
+export const executeRetornoPedidosPipeline = async (formData: FormData): Promise<PipelineResponse> => {
+  return processAndSave("retorno-pedidos", formData, processRetornoPedidosData)
 }

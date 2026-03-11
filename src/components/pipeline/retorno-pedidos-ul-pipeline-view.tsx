@@ -108,7 +108,7 @@ export function RetornoPedidosUlPipelineView() {
 
       toast({
         title      : 'Retorno Pedidos UL — Concluído',
-        description: response.result.summary,
+        description: response.result.summary || "Análise concluída.",
       })
     } catch (error: any) {
       addLog(`FALHA: ${error.message}`, 'error')

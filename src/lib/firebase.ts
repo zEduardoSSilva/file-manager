@@ -1,6 +1,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
+// import { getAnalytics } from "firebase/analytics";
 import { 
   getFirestore, 
   collection, 
@@ -32,7 +32,7 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 
 // Initialize Firebase
-const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
+// const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
 
 export interface DriverConsolidated {
   'Empresa'?: string;
@@ -55,7 +55,7 @@ export interface AbsenteismoData {
   'Grupo': string;
   'Total_Dias': number;
   'Faltas': number;
-  'Percentual (%)': number;
+  'Percentual (%)'?: number;
   'Valor_Incentivo': number;
 }
 

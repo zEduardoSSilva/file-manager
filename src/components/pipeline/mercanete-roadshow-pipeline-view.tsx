@@ -52,7 +52,7 @@ export function MercaneteRoadshowPipelineView() {
       setProgress(60); addLog('Fase 03 — Matching + coalescência (LK1 > LK2 > LK3)...')
       setProgress(80); addLog('Fase 04 — Propagando Status_RoadShow por grupo...')
       setProgress(92)
-      const response = await executeMercaneteRoadshowPipeline(fd, 'mercanete-roadshow')
+      const response = await executeMercaneteRoadshowPipeline(fd)
       if (!response.success) throw new Error(response.error)
       setLastResult(response.result); setProgress(100)
       const rm = response.result.resumoMatch ?? {}
@@ -61,7 +61,7 @@ export function MercaneteRoadshowPipelineView() {
       if ((rm.semMatch ?? 0) > 0) addLog(`Sem match: ${rm.semMatch}`, 'warn')
       addLog(`LK1:${mv.lk1 ?? 0} LK2:${mv.lk2 ?? 0} LK3:${mv.lk3 ?? 0} Prop:${mv.propagado ?? 0}`, 'info')
       addLog(`Firebase ID: ${response.result.id}`, 'success')
-      toast({ title: 'Mercanete × Roadshow — Concluído', description: response.result.summary })
+      toast({ title: 'Mercanete × Roadshow — Concluído', description: response.result.summary || "Análise concluída." })
     } catch (error: any) {
       addLog(`FALHA: ${error.message}`, 'error'); setProgress(0)
       toast({ variant: 'destructive', title: 'Erro no Pipeline', description: error.message })

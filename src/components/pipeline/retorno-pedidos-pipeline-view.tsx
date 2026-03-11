@@ -89,7 +89,7 @@ export function RetornoPedidosPipelineView() {
       addLog('Etapa 3/3 — Comparando chaves primárias (Código_Cliente + Número_Pedido)...')
       setProgress(90)
 
-      const response = await executeRetornoPedidosPipeline(formData, 'retorno-pedidos')
+      const response = await executeRetornoPedidosPipeline(formData)
       if (!response.success) throw new Error(response.error)
 
       setLastResult(response.result)
@@ -105,7 +105,7 @@ export function RetornoPedidosPipelineView() {
 
       toast({
         title      : 'Retorno de Pedidos — Concluído',
-        description: response.result.summary,
+        description: response.result.summary || "Análise concluída.",
       })
     } catch (error: any) {
       addLog(`FALHA: ${error.message}`, 'error')

@@ -9,7 +9,7 @@ export default defineConfig({
     react(),
   ],
   server: {
-    port: 3000
+    port: 9002
   },
   resolve: {
     alias: {

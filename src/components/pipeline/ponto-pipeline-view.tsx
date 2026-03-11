@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { 
-  Upload, 
-  Play, 
+import {
+  Upload,
+  Play,
   Trash2,
   FileCode,
   Files,
@@ -12,7 +12,6 @@ import {
   Download,
   Calendar as CalendarIcon,
   X,
-  CheckCircle2,
   Info,
   HelpCircle
 } from "lucide-react"
@@ -25,7 +24,6 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { executePontoPipeline } from "@/app/actions/ponto-pipeline"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
-import { DataViewer } from "./data-viewer"
 import { Progress } from "@/components/ui/progress"
 import { downloadMultipleSheets } from "@/lib/excel-utils"
 import { Calendar } from "@/components/ui/calendar"
@@ -36,10 +34,69 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+
+// Componente específico para visualizar os resultados do Ponto
+function PontoResultViewer({ result }: { result: PipelineResult }) {
+  const { resumoMensal } = result;
+
+  if (!resumoMensal || resumoMensal.length === 0) {
+    return (
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Resultado da Execução</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-muted-foreground">Nenhum dado processado para exibir.</p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  return (
+    <Card className="mt-6 animate-in fade-in duration-500">
+      <CardHeader>
+        <CardTitle>Resumo Mensal de Ponto</CardTitle>
+        <CardDescription>
+          {`Análise consolidada de ${resumoMensal.length} funcionários.`}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ScrollArea className="h-[400px] border rounded-md">
+          <Table>
+            <TableHeader className="sticky top-0 bg-muted/95 backdrop-blur-sm">
+              <TableRow>
+                <TableHead>Funcionário</TableHead>
+                <TableHead className="text-center">Dias Trab.</TableHead>
+                <TableHead className="text-center">H. Trab.</TableHead>
+                <TableHead className="text-center">H. Extras</TableHead>
+                <TableHead className="text-center">Absenteísmo</TableHead>
+                <TableHead className="text-right">Banco de Horas</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {resumoMensal.map((funcionario: any, index: number) => (
+                <TableRow key={index}>
+                  <TableCell className="font-medium">{funcionario.nome}</TableCell>
+                  <TableCell className="text-center">{funcionario.diasTrabalhados}</TableCell>
+                  <TableCell className="text-center">{funcionario.totalHorasTrabalhadas}</TableCell>
+                  <TableCell className="text-center font-semibold text-green-600">{funcionario.totalHorasExtras}</TableCell>
+                  <TableCell className="text-center font-semibold text-red-600">{funcionario.totalAbsenteismo}</TableCell>
+                  <TableCell className="text-right font-mono">{funcionario.bancoDeHorasFinal}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ScrollArea>
+      </CardContent>
+    </Card>
+  )
+}
+
 
 export function PontoPipelineView() {
-  const [year, setYear] = React.useState(2026)
-  const [month, setMonth] = React.useState(1)
+  const [year, setYear] = React.useState(new Date().getFullYear())
+  const [month, setMonth] = React.useState(new Date().getMonth() + 1)
   const [files, setFiles] = React.useState<File[]>([])
   const [excludedDates, setExcludedDates] = React.useState<Date[]>([])
   const [includeSundays, setIncludeSundays] = React.useState(false)
@@ -75,7 +132,7 @@ export function PontoPipelineView() {
     try {
       addLog("Identificando arquivos anexados...", "info")
       addLog(`Arquivos: ${files.map(f => f.name).join(', ')}`, "info")
-      addLog(`Período: ${String(month).padStart(2,'0')}/${year}`, "info")
+      addLog(`Período: ${String(month).padStart(2, '0')}/${year}`, "info")
 
       if (excludedDates.length > 0) {
         addLog(`Aplicando ${excludedDates.length} feriados/exclusões globais...`, "warn")
@@ -101,68 +158,42 @@ export function PontoPipelineView() {
 
       addLog("Enviando dados ao servidor...", "info")
 
-      let response: any
-      try {
-        response = await executePontoPipeline(formData)
-      } catch (networkErr: any) {
-        const detail = networkErr?.message || String(networkErr)
-        addLog(`Erro de comunicação com servidor: ${detail}`, "error")
-        if (networkErr?.cause) addLog(`Causa: ${String(networkErr.cause)}`, "error")
-        throw networkErr
-      }
+      const response = await executePontoPipeline(formData)
 
       addLog(`Resposta recebida. Status: ${response?.success ? 'SUCESSO' : 'FALHA'}`, response?.success ? 'info' : 'warn')
 
       if (!response?.success) {
-        const errMsg    = response?.error  || '(sem mensagem)'
-        const errStack  = response?.stack  || ''
-        const errCode   = response?.code   || ''
-        const errDetail = response?.detail || ''
-
-        addLog(`Erro retornado pelo servidor:`, "error")
-        addLog(`→ Mensagem : ${errMsg}`, "error")
-        if (errCode)   addLog(`→ Código   : ${errCode}`, "error")
-        if (errDetail) addLog(`→ Detalhe  : ${errDetail}`, "error")
-        if (errStack)  addLog(`→ Stack    : ${errStack.split('\n')[0]}`, "error")
-
-        throw new Error(errMsg)
+        throw new Error(response?.error || 'Ocorreu um erro desconhecido no servidor.');
       }
 
       const result = response.result;
       setLastResult(result)
       setProgress(100)
 
-      const resultKeys = Object.keys(result || {})
-      addLog(`Campos retornados: ${resultKeys.join(', ')}`, "info")
+      addLog(result.summary || "Processamento concluído.", "success")
+
 
       if (downloadOnly) {
         addLog("Gerando Excel Consolidado...", "success")
         downloadMultipleSheets([
-          { data: result.detalhePonto || [], name: '03_Detalhe_Ponto' },
-          { data: result.data, name: '04_Consolidado' },
-          { data: result.absenteismoData || [], name: '10_Absenteismo_Resumo' }
+          { data: result.resumoMensal || [], name: 'Resumo_Mensal' },
+          { data: result.data || [], name: 'Dados_Brutos' }
         ], `Ponto_Consolidado_${month}_${year}`)
-
-        if (!result.detalhePonto || result.detalhePonto.length === 0)
-          addLog("⚠️ Aba '03_Detalhe_Ponto' veio vazia — verifique se o campo 'detalhePonto' é retornado pelo backend.", "warn")
-        if (!result.absenteismoData || result.absenteismoData.length === 0)
-          addLog("⚠️ Aba '10_Absenteismo_Resumo' veio vazia — verifique o campo 'absenteismoData'.", "warn")
       } else {
         addLog("Sincronização com o Firebase concluída.", "success")
       }
 
       toast({
         title: downloadOnly ? "Arquivo Pronto" : "Concluído",
-        description: downloadOnly ? "Excel analítico baixado." : "Dados Absenteísmo."
+        description: downloadOnly ? "Excel analítico baixado." : result.summary || "Dados de Absenteísmo salvos."
       });
 
     } catch (error: any) {
       const msg = error?.message || String(error)
       addLog(`FALHA GERAL: ${msg}`, "error")
 
-      if (msg.toLowerCase().includes('unexpected response') || msg.toLowerCase().includes('fetch')) {
-        addLog("Dica: O servidor pode ter retornado HTML de erro (500/404) em vez de JSON.", "warn")
-        addLog("Verifique os logs do servidor (terminal / Vercel / Firebase Functions).", "warn")
+      if (msg.toLowerCase().includes('unexpected') || msg.toLowerCase().includes('fetch')) {
+        addLog("Dica: O servidor pode estar offline ou retornou um erro interno (500). Verifique os logs.", "warn")
       }
 
       setProgress(0)
@@ -187,13 +218,13 @@ export function PontoPipelineView() {
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Anexe os arquivos. O sistema consolidará a jornada diária e calculará o incentivo de absenteísmo proporcional.</p>
+                <p>Anexe os arquivos de ponto. O sistema consolidará a jornada diária e calculará o incentivo de absenteísmo proporcional.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-sm mt-2 text-indigo-800">
-          Esta análise cruza as marcações de ponto com as regras de jornada e aplica bônus por conformidade.
+          Esta análise cruza as marcações de ponto com as regras de jornada para gerar um resumo mensal por funcionário.
         </AlertDescription>
       </Alert>
 
@@ -251,7 +282,7 @@ export function PontoPipelineView() {
                   {excludedDates.length === 0 ? (
                     <span className="text-xs text-muted-foreground italic">Nenhum feriado selecionado.</span>
                   ) : (
-                    excludedDates.sort((a,b) => a.getTime() - b.getTime()).map((date, i) => (
+                    excludedDates.sort((a, b) => a.getTime() - b.getTime()).map((date, i) => (
                       <Badge key={i} variant="secondary" className="flex items-center gap-1 pr-1">
                         {format(date, 'dd/MM/yyyy')}
                         <Button
@@ -349,18 +380,14 @@ export function PontoPipelineView() {
         <div className="space-y-6">
           <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm">
             <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
-               <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                 <FileCode className="size-3" /> Console de Execução
-               </span>
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                <FileCode className="size-3" /> Console de Execução
+              </span>
             </div>
             <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
               {logs.length === 0 ? (
                 <div className="text-muted-foreground italic space-y-2">
                   <p>Aguardando relatórios de Ponto.</p>
-                  <div className="text-[10px] border-l-2 pl-2 mt-4">
-                    <strong>Sugestão:</strong><br/>
-                    • Ponto_Original
-                  </div>
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -369,8 +396,8 @@ export function PontoPipelineView() {
                       ${log.includes('[ERRO]') ? 'text-destructive font-semibold' :
                         log.includes('[OK]') ? 'text-green-600' :
                         log.includes('[AVISO]') ? 'text-amber-600' :
-                        'text-slate-500'}
-                    `}>
+                        'text-slate-500'}`
+                    }>
                       {log}
                     </div>
                   ))}
@@ -381,7 +408,7 @@ export function PontoPipelineView() {
         </div>
       </div>
 
-      {lastResult && !isExecuting && <DataViewer result={lastResult} />}
+      {lastResult && !isExecuting && <PontoResultViewer result={lastResult} />}
     </div>
   )
 }

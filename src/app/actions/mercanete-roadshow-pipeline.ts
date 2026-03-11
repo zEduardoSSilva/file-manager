@@ -1,18 +1,43 @@
-import { PipelineResponse, readAllFilesFromFormData, saveToFirebase } from './pipeline-utils';
 
-export async function executeMercaneteRoadshowPipeline(formData: FormData, _type?: string): Promise<PipelineResponse> {
-  try {
-    const year = parseInt(formData.get('year') as string);
-    const month = parseInt(formData.get('month') as string);
-    const sheetsData = await readAllFilesFromFormData(formData, 'files');
-    const allData = sheetsData.flat();
+"use server"
 
-    const result = await saveToFirebase('mercanete-roadshow', year, month, allData, {
-      summary: `Mercanete x Roadshow: ${allData.length} registros processados.`,
-    });
+import { z } from "zod"
+import { intersectionWith,isEqual } from "lodash"
+import { PipelineArgs, PipelineResponse, ProcessorOutput, processAndSave } from "./pipeline-utils"
 
-    return { success: true, result };
-  } catch (error: any) {
-    return { success: false, result: {} as any, error: error.message };
+const MercaneteSchema = z.object({
+  "Nome Cliente": z.string(),
+  "Código": z.number(),
+  "Endereço": z.string(),
+  // Adicionar mais campos se necessário
+})
+
+const RoadshowSchema = z.object({
+  "Nome Cliente": z.string(),
+  "Código": z.number(),
+  "Endereço": z.string(),
+  // Adicionar mais campos se necessário
+})
+
+async function processMercaneteRoadshowData({ year, month, files }: PipelineArgs): Promise<ProcessorOutput> {
+  const mercanetePromise = files.read("fileMercanete", MercaneteSchema)
+  const roadshowPromise = files.read("fileRoadshow", RoadshowSchema)
+  const [mercaneteData, roadshowData] = await Promise.all([mercanetePromise, roadshowPromise])
+
+  const commonClients = intersectionWith(mercaneteData, roadshowData, (a, b) => {
+    return a["Código"] === b["Código"] && a["Nome Cliente"] === b["Nome Cliente"]
+  })
+
+  return {
+    data: commonClients,
+    summary: `Mercanete x Roadshow: ${commonClients.length} clientes em comum encontrados.`,
+    config: {
+      mercaneteCount: mercaneteData.length,
+      roadshowCount: roadshowData.length,
+    }
   }
+}
+
+export const executeMercaneteRoadshowPipeline = async (formData: FormData): Promise<PipelineResponse> => {
+  return processAndSave("mercanete-roadshow", formData, processMercaneteRoadshowData)
 }
