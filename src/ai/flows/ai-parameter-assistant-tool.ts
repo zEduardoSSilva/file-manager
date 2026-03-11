@@ -1,98 +1,78 @@
-'use server';
 /**
- * @fileOverview A Genkit flow for assisting users in adjusting pipeline parameters using natural language.
- *
- * - adjustPipelineParameters - A function that takes a natural language prompt and extracts pipeline parameters.
- * - AdjustPipelineParametersInput - The input type for the adjustPipelineParameters function.
- * - AdjustPipelineParametersOutput - The return type for the adjustPipelineParameters function.
+ * @fileOverview Client-side parameter extraction from natural language.
+ * Replaces the Genkit server-side flow with a simple regex-based parser.
  */
 
-import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
+export interface AdjustPipelineParametersInput {
+  naturalLanguagePrompt: string;
+  currentYear: number;
+  currentMonth: number;
+}
 
-// Input schema for the pipeline parameter adjustment
-const AdjustPipelineParametersInputSchema = z.object({
-  naturalLanguagePrompt: z
-    .string()
-    .describe('The natural language prompt from the user to adjust pipeline parameters.'),
-  currentYear: z
-    .number()
-    .int()
-    .min(2000) // Assuming a reasonable range for years
-    .max(2100)
-    .default(new Date().getFullYear()) // Default to current year if not provided by caller
-    .describe('The current default year for the pipeline. Used as a fallback if not specified in the prompt.'),
-  currentMonth: z
-    .number()
-    .int()
-    .min(1)
-    .max(12)
-    .default(new Date().getMonth() + 1) // Default to current month if not provided by caller (getMonth is 0-indexed)
-    .describe('The current default month for the pipeline. Used as a fallback if not specified in the prompt.'),
-});
-export type AdjustPipelineParametersInput = z.infer<typeof AdjustPipelineParametersInputSchema>;
+export interface AdjustPipelineParametersOutput {
+  year: number;
+  month: number;
+  reasoning: string;
+}
 
-// Output schema for the adjusted pipeline parameters
-const AdjustPipelineParametersOutputSchema = z.object({
-  year: z
-    .number()
-    .int()
-    .min(2000)
-    .max(2100)
-    .describe('The extracted year for the pipeline parameters. Defaults to current year if not specified.'),
-  month: z
-    .number()
-    .int()
-    .min(1)
-    .max(12)
-    .describe('The extracted month for the pipeline parameters. Defaults to current month if not specified.'),
-  reasoning: z
-    .string()
-    .describe('Explanation of how the parameters were extracted and any assumptions made.'),
-});
-export type AdjustPipelineParametersOutput = z.infer<typeof AdjustPipelineParametersOutputSchema>;
+const MONTH_MAP: Record<string, number> = {
+  janeiro: 1, fevereiro: 2, março: 3, marco: 3, abril: 4,
+  maio: 5, junho: 6, julho: 7, agosto: 8,
+  setembro: 9, outubro: 10, novembro: 11, dezembro: 12,
+  jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6,
+  jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12,
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+};
 
-/**
- * Orchestrates the adjustment of pipeline parameters (year and month) based on a natural language prompt.
- * It utilizes a Genkit prompt to interpret the user's intent and provide the updated parameters.
- * @param input - The input object containing the natural language prompt and current default parameters.
- * @returns A Promise that resolves to the AdjustPipelineParametersOutput, containing the extracted year, month, and reasoning.
- */
 export async function adjustPipelineParameters(
   input: AdjustPipelineParametersInput
 ): Promise<AdjustPipelineParametersOutput> {
-  return aiParameterAssistantToolFlow(input);
-}
+  const prompt = input.naturalLanguagePrompt.toLowerCase();
+  let year = input.currentYear;
+  let month = input.currentMonth;
+  const reasons: string[] = [];
 
-// Define the Genkit prompt for parameter extraction
-const aiParameterAssistantToolPrompt = ai.definePrompt({
-  name: 'aiParameterAssistantToolPrompt',
-  input: { schema: AdjustPipelineParametersInputSchema },
-  output: { schema: AdjustPipelineParametersOutputSchema },
-  prompt: `You are an AI assistant designed to extract pipeline parameters (specifically month and year) from natural language prompts.
-If the user does not specify a year, use the 'currentYear' provided in the context.
-If the user does not specify a month, use the 'currentMonth' provided in the context.
-
-Be explicit about your reasoning, especially when using defaults or making assumptions.
-
-Context:
-  Current Default Year: {{{currentYear}}}
-  Current Default Month: {{{currentMonth}}}
-
-User Prompt: "{{{naturalLanguagePrompt}}}"
-
-Extract the year and month. Respond in JSON format according to the output schema.`,
-});
-
-// Define the Genkit flow that wraps the prompt execution
-const aiParameterAssistantToolFlow = ai.defineFlow(
-  {
-    name: 'aiParameterAssistantToolFlow',
-    inputSchema: AdjustPipelineParametersInputSchema,
-    outputSchema: AdjustPipelineParametersOutputSchema,
-  },
-  async (input) => {
-    const { output } = await aiParameterAssistantToolPrompt(input);
-    return output!;
+  // Extract year (4-digit number between 2000-2099)
+  const yearMatch = prompt.match(/\b(20\d{2})\b/);
+  if (yearMatch) {
+    year = parseInt(yearMatch[1]);
+    reasons.push(`Ano extraído: ${year}`);
+  } else {
+    reasons.push(`Ano não especificado, usando padrão: ${year}`);
   }
-);
+
+  // Extract month by name
+  let monthFound = false;
+  for (const [name, num] of Object.entries(MONTH_MAP)) {
+    if (prompt.includes(name)) {
+      month = num;
+      reasons.push(`Mês extraído: ${name} (${num})`);
+      monthFound = true;
+      break;
+    }
+  }
+
+  // Extract month by number pattern (e.g., "mês 3", "mes 03", "month 12")
+  if (!monthFound) {
+    const monthNumMatch = prompt.match(/m[eê]s\s*(\d{1,2})/i) || prompt.match(/(\d{1,2})\/\d{2,4}/);
+    if (monthNumMatch) {
+      const m = parseInt(monthNumMatch[1]);
+      if (m >= 1 && m <= 12) {
+        month = m;
+        reasons.push(`Mês extraído do número: ${m}`);
+        monthFound = true;
+      }
+    }
+  }
+
+  if (!monthFound) {
+    reasons.push(`Mês não especificado, usando padrão: ${month}`);
+  }
+
+  return {
+    year,
+    month,
+    reasoning: reasons.join('. ') + '.',
+  };
+}
