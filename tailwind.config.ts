@@ -4,17 +4,11 @@ import type {Config} from 'tailwindcss';
 export default {
   darkMode: ['class'],
   content: [
-    './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/components/**/*.{js,ts,jsx,tsx,mdx}',
-    './src/app/**/*.{js,ts,jsx,tsx,mdx}',
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {
-      fontFamily: {
-        body: ['var(--font-inter)', 'sans-serif'],
-        headline: ['var(--font-inter)', 'sans-serif'],
-        code: ['var(--font-code)', 'monospace'],
-      },
       colors: {
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',

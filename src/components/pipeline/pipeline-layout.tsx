@@ -1,6 +1,4 @@
-"use client"
-
-import * as React from "react"
+import { Outlet, Link, useLocation, useParams } from "react-router-dom"
 import { 
   SidebarProvider, 
   Sidebar, 
@@ -33,10 +31,7 @@ import {
   GitMerge,
   Search
 } from "lucide-react"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
 
-// Mover constantes para fora do componente evita re-criação desnecessária em cada render
 const NAV_GROUPS = [
   {
     label: "Indicadores",
@@ -62,8 +57,9 @@ const NAV_GROUPS = [
   }
 ]
 
-export function PipelineLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname()
+export function PipelineLayout() {
+  const { pathname } = useLocation()
+  const { pipelineId } = useParams<{ pipelineId: string }>()
 
   return (
     <SidebarProvider>
@@ -72,7 +68,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg" asChild>
-                <Link href="/">
+                <Link to="/">
                   <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
                     <Database className="size-4" />
                   </div>
@@ -90,7 +86,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton tooltip="Dashboard" isActive={pathname === '/'} asChild>
-                  <Link href="/">
+                  <Link to="/">
                     <LayoutDashboard className="size-4" />
                     <span className="text-xs sm:text-sm font-semibold">Dashboard</span>
                   </Link>
@@ -114,7 +110,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
                         isActive={pathname === `/pipeline/${p.id}`}
                         asChild
                       >
-                        <Link href={`/pipeline/${p.id}`}>
+                        <Link to={`/pipeline/${p.id}`}>
                           <Icon className="size-4" />
                           <span className="text-xs sm:text-sm">{p.name}</span>
                           <ChevronRight className="ml-auto size-3 opacity-50" />
@@ -151,7 +147,7 @@ export function PipelineLayout({ children }: { children: React.ReactNode }) {
         </header>
         <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-6 min-w-0 scroll-smooth">
           <div className="max-w-full overflow-hidden min-w-0">
-            {children}
+            <Outlet context={{ pipelineId }} />
           </div>
         </main>
       </SidebarInset>
