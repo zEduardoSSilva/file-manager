@@ -1,6 +1,7 @@
 import { useOutletContext } from 'react-router-dom';
 
 // Import all the pipeline view components
+import { ConsolidacaoEntregasPipelineView } from '@/components/pipeline/entregas-pipeline-view';
 import { CcoPipelineView } from '@/components/pipeline/cco-pipeline-view';
 import { ConsolidadorPipelineView } from '@/components/pipeline/consolidador-pipeline-view';
 import { CoordenadorPipelineView } from '@/components/pipeline/coordenador-pipeline-view';
@@ -16,6 +17,7 @@ import { VFleetPipelineView } from '@/components/pipeline/vfleet-pipeline-view';
 
 // Create a map to associate pipeline IDs with their components
 const pipelineViewMap: { [key: string]: React.ComponentType } = {
+  'consolidacao-entregas': ConsolidacaoEntregasPipelineView,
   cco: CcoPipelineView,
   consolidador: ConsolidadorPipelineView,
   coordenadores: CoordenadorPipelineView,
@@ -34,7 +36,7 @@ interface PipelineContext {
   pipelineId: string;
 }
 
-export default function PipelinePage() {
+export default function IndexPage() {
   const { pipelineId } = useOutletContext<PipelineContext>();
 
   // Find the component that corresponds to the pipelineId

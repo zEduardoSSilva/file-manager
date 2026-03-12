@@ -1,7 +1,6 @@
-
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import { fileURLToPath, URL } from 'node:url'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react-swc";
+import { fileURLToPath, URL } from 'node:url';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -9,12 +8,21 @@ export default defineConfig({
     react(),
   ],
   server: {
-    port: 9002
+    hmr: {
+      // This is necessary for HMR to work in a containerized/proxied environment
+      // like Google Cloud Workstations. It tells the HMR client to connect to the
+      // standard HTTPS port, which the proxy will then route correctly.
+      clientPort: 443,
+    },
   },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
+  },
+  
+  optimizeDeps: {
+    include: ['xlsx', '@tanstack/react-virtual'],
   },
   build: {
     rollupOptions: {
@@ -49,5 +57,6 @@ export default defineConfig({
         'node:zlib',
       ]
     }
-  }
+  },
+  logLevel: 'info',
 })

@@ -1,11 +1,9 @@
-"use client"
-
 import * as React from "react"
 import {
-  Play, Trash2, FileCode, Loader2, HelpCircle,
+  Play, Trash2, FileCode, Loader2, FileSpreadsheet, HelpCircle,
   Download, CheckCircle2, Circle, XCircle, AlertTriangle,
-  ChevronRight, Terminal, Info, Database,
-  PackageX, FileSpreadsheet, Users,
+  ChevronRight, Terminal, Info, Database, Building2, Calendar,
+  Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -16,7 +14,7 @@ import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { AIParamAssistant } from "../../pages/AI-Param-Assistant"
-import { executeDevolucoesPipeline } from "@/app/actions/devolucoes-pipeline"
+import { executeConsolidacaoEntregasPipeline, montarNomeAba } from "@/app/actions/entregas-pipeline"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { downloadMultipleSheets } from "@/lib/excel-utils"
@@ -27,31 +25,38 @@ type StageStatus = "idle" | "running" | "done" | "error" | "warn"
 interface Stage { id: string; label: string; description: string; status: StageStatus }
 interface LogEntry { time: string; message: string; type: "info" | "success" | "error" | "warn" | "step" }
 
-// ─── Arquivos necessários ─────────────────────────────────────────────────────
-const FILE_SLOTS = [
-  { id: "controle",    label: "Controle Logístico",      hint: "Consolidado_Entregas_V2_Geral.xlsx",  required: true  },
-  { id: "faturamento", label: "Faturamento",              hint: "Fat_Fechamento.xlsx",                 required: true  },
-  { id: "funcionarios",label: "Cadastro de Funcionários", hint: "Funcionario.xlsx",                    required: false },
-  { id: "motivos",     label: "Motivos do Sistema",       hint: "Motivos Sistema.xlsx",                required: false },
+// ─── Filiais ──────────────────────────────────────────────────────────────────
+const FILIAIS = [
+  { id: "cambe",        label: "CAMBE.xlsx",         regiao: "RK01" },
+  { id: "cascavel",     label: "CASCAVEL.xlsx",       regiao: "KP01" },
+  { id: "curitiba",     label: "CURITIBA.xlsx",       regiao: "RK03" },
+  { id: "campo-grande", label: "CAMPO GRANDE.xlsx",   regiao: "BV01" },
+  { id: "dourados",     label: "DOURADOS.xlsx",       regiao: "BV02" },
 ]
 
-// ─── Etapas ───────────────────────────────────────────────────────────────────
-const INITIAL_STAGES: Stage[] = [
-  { id: "load",    label: "Carregar arquivos",          description: "Controle logístico · faturamento · funcionários",     status: "idle" },
-  { id: "filter",  label: "Filtrar por ano/mês",        description: "Stream — somente registros do período",               status: "idle" },
-  { id: "names",   label: "Normalizar nomes",           description: "Fuzzy match contra cadastro de funcionários",         status: "idle" },
-  { id: "explode", label: "Explodir viagens",           description: "Colaborador × viagem (VIAGEM pode ter múltiplos IDs)", status: "idle" },
-  { id: "fat",     label: "Agregar faturamento",        description: "Por viagem · excluindo motivos do sistema",           status: "idle" },
-  { id: "merge",   label: "Merge + Percentuais",        description: "Colaborador × faturamento · % devolvido",             status: "idle" },
-  { id: "export",  label: "Exportar / Salvar Firebase", description: "Resumo por colaborador + Detalhamento",               status: "idle" },
+// ─── Etapas (dia específico) ──────────────────────────────────────────────────
+const STAGES_DIA: Stage[] = [
+  { id: "load",   label: "Carregar arquivos",          description: "Lê os arquivos de cada filial selecionada",      status: "idle" },
+  { id: "sheet",  label: "Localizar aba",              description: "Busca a aba DD.MM.YYYY em cada arquivo",         status: "idle" },
+  { id: "parse",  label: "Processar registros",        description: "Extrai tabelas · PLACA fallback · TEMPO HH:MM",  status: "idle" },
+  { id: "accum",  label: "Gerar Acumulado",            description: "Consolida filiais · remove CHÃO",                status: "idle" },
+  { id: "export", label: "Exportar / Salvar Firebase", description: "Abas por filial + Acumulado",                    status: "idle" },
+]
+
+// ─── Etapas (mês completo) ────────────────────────────────────────────────────
+const STAGES_MES: Stage[] = [
+  { id: "load",   label: "Carregar arquivo",           description: "Lê um arquivo por vez",                          status: "idle" },
+  { id: "scan",   label: "Varrer abas do mês",         description: "Filtra abas DD.MM.YYYY do mês/ano selecionado",  status: "idle" },
+  { id: "parse",  label: "Processar registros",        description: "Extrai tabelas de cada aba encontrada",          status: "idle" },
+  { id: "accum",  label: "Gerar Acumulado",            description: "Consolida todos os dias · remove CHÃO",          status: "idle" },
+  { id: "export", label: "Exportar / Salvar Firebase", description: "Abas por filial + Acumulado",                    status: "idle" },
 ]
 
 const REGRAS = [
-  { condition: "FATURAMENTO_DEV > 0",   result: "Identificada como devolução",          variant: "warn"    as const },
-  { condition: "Motivo do sistema",      result: "Excluída — não culpa do motorista",    variant: "info"    as const },
-  { condition: "Sem Motivos Sistema.xlsx", result: "Todas dev. desconsideradas (padrão)", variant: "info"  as const },
-  { condition: "Zeros à esquerda VIAGEM", result: "Normalizados antes do merge",         variant: "info"   as const },
-  { condition: "Colaborador com fat. 0", result: "Incluído no detalhamento",             variant: "warn"   as const },
+  { condition: "Registros CHÃO",   result: "Removidos apenas no Acumulado",    variant: "warn"    as const },
+  { condition: "PLACA vazia",      result: "Substituída por PLACA SISTEMA",     variant: "info"    as const },
+  { condition: "TEMPO",            result: "Convertido para HH:MM",             variant: "info"    as const },
+  { condition: "Abas geradas",     result: "Uma por filial + Acumulado",        variant: "success" as const },
 ]
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
@@ -85,20 +90,30 @@ const logPrefix: Record<LogEntry["type"], string> = {
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────────
-export function DevolucoesPipelineView() {
+export function ConsolidacaoEntregasPipelineView() {
   const [year, setYear]   = React.useState(new Date().getFullYear())
   const [month, setMonth] = React.useState(new Date().getMonth() + 1)
-  const [files, setFiles] = React.useState<Record<string, File | null>>({})
+  // day = 0 → mês completo; day > 0 → dia específico
+  const [day, setDay]     = React.useState<number>(new Date().getDate())
+
+  const [files, setFiles]     = React.useState<Record<string, File | null>>({})
   const [isExecuting, setIsExecuting] = React.useState(false)
   const [progress, setProgress]       = React.useState(0)
-  const [stages, setStages]           = React.useState<Stage[]>(INITIAL_STAGES)
+  const [stages, setStages]           = React.useState<Stage[]>(STAGES_DIA)
   const [logs, setLogs]               = React.useState<LogEntry[]>([])
   const [lastResult, setLastResult]   = React.useState<PipelineResult | null>(null)
   const [stats, setStats]             = React.useState<{
-    colaboradores: number; viagens: number; fatTotal: number; fatDev: number
+    filiaisOk: number; total: number; acumulado: number
   } | null>(null)
   const logEndRef = React.useRef<HTMLDivElement>(null)
   const { toast } = useToast()
+
+  const modoMesCompleto = day === 0
+
+  // Atualiza etapas quando modo muda
+  React.useEffect(() => {
+    setStages((modoMesCompleto ? STAGES_MES : STAGES_DIA).map(s => ({ ...s, status: "idle" })))
+  }, [modoMesCompleto])
 
   React.useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -111,100 +126,99 @@ export function DevolucoesPipelineView() {
     setStages(prev => prev.map(s => s.id === id ? { ...s, status } : s))
 
   const resetAll = () => {
-    setStages(INITIAL_STAGES.map(s => ({ ...s, status: "idle" })))
+    setStages((modoMesCompleto ? STAGES_MES : STAGES_DIA).map(s => ({ ...s, status: "idle" })))
     setProgress(0); setStats(null)
   }
 
-  const handleFile = (id: string, file: File | null) =>
+  const canRun = FILIAIS.some(f => files[f.id])
+
+  const handleFileChange = (id: string, file: File | null) =>
     setFiles(prev => ({ ...prev, [id]: file }))
 
-  const canRun = !!(files["controle"] && files["faturamento"])
+  // Preview do nome da aba que será lida
+  const abaPreview = day > 0 ? montarNomeAba(day, month, year) : null
 
   const runPipeline = async (downloadOnly = false) => {
     if (!canRun) return
     setIsExecuting(true); setLogs([]); resetAll()
 
     try {
-      addLog(`Devoluções — ${String(month).padStart(2,"0")}/${year}`, "step")
+      const selecionados = FILIAIS.filter(f => files[f.id])
+      const modoLabel    = day > 0 ? `aba ${montarNomeAba(day, month, year)}` : `mês ${String(month).padStart(2,"0")}/${year} completo`
+
+      addLog(`Consolidação de Entregas — ${modoLabel}`, "step")
+      addLog(`${selecionados.length} filial(is): ${selecionados.map(f => f.regiao).join(" · ")}`)
+
+      if (modoMesCompleto) {
+        addLog("⚠️  Modo mês completo — processamento pode ser demorado.", "warn")
+      }
 
       // Etapa 1
-      setStage("load", "running"); setProgress(8)
-      FILE_SLOTS.forEach(slot => {
-        const f = files[slot.id]
-        if (f) addLog(`• [${slot.label}] ${f.name}`)
-        else if (!slot.required) addLog(`• [${slot.label}] não informado — usando padrão`, "warn")
-      })
-      setStage("load", "done"); setProgress(15)
+      setStage("load", "running"); setProgress(10)
+      await new Promise(r => setTimeout(r, 150))
+      selecionados.forEach(f => addLog(`• [${f.regiao}] ${f.label}`))
+      setStage("load", "done"); setProgress(20)
 
       // FormData
       const formData = new FormData()
       formData.append("year", String(year))
       formData.append("month", String(month))
-      // Ordem de detecção: controle primeiro, depois os demais
-      const ordem = ["controle", "faturamento", "funcionarios", "motivos"] as const
-      for (const id of ordem) {
-        const f = files[id]
-        if (f) {
-          formData.append("files", f)
-          formData.append("fileNames", f.name)
+      formData.append("day", String(day)) // 0 = mês completo
+      for (const filial of FILIAIS) {
+        if (files[filial.id]) {
+          formData.append("files", files[filial.id]!)
+          formData.append("fileNames", files[filial.id]!.name)
         }
       }
 
-      // Etapa 2
-      addLog(`Filtrando controle para ${month}/${year}...`, "step")
-      setStage("filter", "running"); setProgress(25)
-      const response = await executeDevolucoesPipeline(formData)
+      // Etapa 2 (sheet/scan)
+      const stage2id = modoMesCompleto ? "scan" : "sheet"
+      addLog(day > 0
+        ? `Localizando aba "${abaPreview}" em cada arquivo...`
+        : "Varrendo todas as abas DD.MM.YYYY do mês...", "step")
+      setStage(stage2id, "running"); setProgress(35)
+
+      const response = await executeConsolidacaoEntregasPipeline(formData)
       if (!response.success) throw new Error(response.error)
-      setStage("filter", "done"); setProgress(38)
-      addLog("Registros do período extraídos.", "success")
+      setStage(stage2id, "done"); setProgress(52)
+      addLog("Abas localizadas e lidas.", "success")
 
       // Etapa 3
-      addLog("Normalizando nomes via fuzzy match...", "step")
-      setStage("names", "running"); setProgress(48)
+      addLog("Processando registros...", "step")
+      setStage("parse", "running"); setProgress(65)
       await new Promise(r => setTimeout(r, 100))
-      setStage("names", "done"); setProgress(56)
-      addLog("Nomes normalizados.", "success")
+      setStage("parse", "done"); setProgress(78)
+      addLog("Registros extraídos e padronizados.", "success")
 
       // Etapa 4
-      addLog("Explodindo viagens por colaborador...", "step")
-      setStage("explode", "running"); setProgress(63)
+      addLog("Gerando aba Acumulado — removendo registros CHÃO...", "step")
+      setStage("accum", "running"); setProgress(88)
       await new Promise(r => setTimeout(r, 100))
-      setStage("explode", "done"); setProgress(70)
+      setStage("accum", "done"); setProgress(95)
 
       // Etapa 5
-      addLog("Agregando faturamento por viagem (excluindo motivos sistema)...", "step")
-      setStage("fat", "running"); setProgress(78)
-      await new Promise(r => setTimeout(r, 100))
-      setStage("fat", "done"); setProgress(85)
-
-      // Etapa 6
-      addLog("Calculando percentuais de devolução...", "step")
-      setStage("merge", "running"); setProgress(92)
-      await new Promise(r => setTimeout(r, 100))
-      setStage("merge", "done")
-
-      // Etapa 7
       setStage("export", "running"); setProgress(97)
       const result = response.result
       setLastResult(result)
 
-      // Extrai stats do summary
-      const m = (result.summary ?? "").match(/(\d+) colaboradores · (\d+) viagens · R\$ ([\d,.]+) fat\. · R\$ ([\d,.]+) devolvido/)
-      if (m) {
+      const sumMatch = (result.summary ?? "").match(/(\d+) filiais · (\d+) registros · (\d+)/)
+      if (sumMatch) {
         setStats({
-          colaboradores: parseInt(m[1]),
-          viagens:       parseInt(m[2]),
-          fatTotal:      parseFloat(m[3].replace(",",".")),
-          fatDev:        parseFloat(m[4].replace(",",".")),
+          filiaisOk: parseInt(sumMatch[1]),
+          total:     parseInt(sumMatch[2]),
+          acumulado: parseInt(sumMatch[3]),
         })
       }
 
       if (downloadOnly && result.extraSheets) {
+        const fileName = day > 0
+          ? `Entregas_${String(day).padStart(2,"0")}-${String(month).padStart(2,"0")}-${year}`
+          : `Entregas_${String(month).padStart(2,"0")}-${year}_MesCompleto`
         downloadMultipleSheets(
           result.extraSheets.map((s: any) => ({ data: s.data, name: s.name })),
-          `Devolucoes_${String(month).padStart(2,"0")}_${year}`
+          fileName
         )
-        addLog("Excel com 2 abas baixado.", "success")
+        addLog("Excel baixado.", "success")
       } else {
         addLog("Dados sincronizados com Firebase.", "success")
       }
@@ -232,21 +246,22 @@ export function DevolucoesPipelineView() {
       {/* Alert */}
       <Alert className="bg-primary/5 border-primary/20">
         <div className="flex items-center gap-2">
-          <PackageX className="size-4 text-primary" />
-          <AlertTitle className="mb-0">Consolidador de Controle Logístico + Devoluções</AlertTitle>
+          <Building2 className="size-4 text-primary" />
+          <AlertTitle className="mb-0">Consolidação de Entregas</AlertTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Cruza o controle de entregas com o faturamento, filtra devoluções por motivo do sistema, e gera percentuais de devolução por colaborador.</p>
+                <p>Lê a aba correspondente à data nos arquivos de cada filial. As abas seguem o padrão <strong>DD.MM.YYYY</strong>.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
         <AlertDescription className="text-xs mt-2">
-          Gera <strong>2 abas</strong>: Resumo por Colaborador · Detalhamento (colaborador × viagem × faturamento).
+          Com dia preenchido → lê apenas a aba daquele dia.
+          Com dia <strong>em branco / zero</strong> → lê todas as abas do mês (mais lento).
         </AlertDescription>
       </Alert>
 
@@ -257,89 +272,131 @@ export function DevolucoesPipelineView() {
           <Card className="shadow-sm border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <PackageX className="size-5 text-primary" />
-                Configuração da Análise
+                <Building2 className="size-5 text-primary" />
+                Configuração da Consolidação
               </CardTitle>
-              <CardDescription>Período e arquivos de controle, faturamento e cadastros.</CardDescription>
+              <CardDescription>Selecione o período e os arquivos de cada filial.</CardDescription>
             </CardHeader>
 
             <CardContent className="space-y-5">
               {/* Período */}
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-2">
                   <Label>Ano</Label>
-                  <Input type="number" value={year} onChange={e => setYear(parseInt(e.target.value))} />
+                  <Input type="number" value={year}
+                    onChange={e => setYear(parseInt(e.target.value))} />
                 </div>
                 <div className="space-y-2">
                   <Label>Mês</Label>
-                  <Input type="number" min={1} max={12} value={month} onChange={e => setMonth(parseInt(e.target.value))} />
+                  <Input type="number" min={1} max={12} value={month}
+                    onChange={e => setMonth(parseInt(e.target.value))} />
+                </div>
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    Dia
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="size-3 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Deixe <strong>0</strong> ou em branco para processar o mês inteiro.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </Label>
+                  <Input
+                    type="number" min={0} max={31}
+                    value={day === 0 ? "" : day}
+                    placeholder="0 = mês todo"
+                    onChange={e => {
+                      const v = parseInt(e.target.value)
+                      setDay(isNaN(v) || v < 0 ? 0 : Math.min(v, 31))
+                    }}
+                  />
                 </div>
               </div>
 
-              <AIParamAssistant onParamsUpdate={(m, y) => { setMonth(m); setYear(y) }} currentMonth={month} currentYear={year} />
+              {/* Preview da aba / aviso de mês completo */}
+              {modoMesCompleto ? (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                  <Clock className="size-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-amber-700">
+                    <span className="font-semibold">Modo mês completo</span> — todas as abas
+                    {" "}<span className="font-mono">DD.{String(month).padStart(2,"0")}.{year}</span>{" "}
+                    serão processadas. Pode levar alguns minutos por arquivo.
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+                  <Calendar className="size-3.5 text-primary shrink-0" />
+                  <span className="text-[11px] text-primary">
+                    Aba alvo:{" "}
+                    <span className="font-mono font-bold">{abaPreview}</span>
+                  </span>
+                </div>
+              )}
 
-              {/* Arquivos */}
+              <AIParamAssistant
+                onParamsUpdate={(m, y) => { setMonth(m); setYear(y) }}
+                currentMonth={month} currentYear={year}
+              />
+
+              {/* Filiais */}
               <div className="space-y-2">
                 <Label className="text-sm font-semibold text-primary">
-                  Arquivos de Entrada ({Object.values(files).filter(Boolean).length}/{FILE_SLOTS.length})
+                  Arquivos de Controle ({FILIAIS.filter(f => files[f.id]).length}/{FILIAIS.length} selecionados)
                 </Label>
                 <div className="space-y-1.5 rounded-xl border border-border/60 p-2 bg-muted/5">
-                  {FILE_SLOTS.map(slot => {
-                    const hasFile = !!files[slot.id]
+                  {FILIAIS.map(filial => {
+                    const hasFile = !!files[filial.id]
                     return (
-                      <div key={slot.id} className={cn(
+                      <div key={filial.id} className={cn(
                         "flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors",
-                        hasFile
-                          ? "bg-emerald-50 border-emerald-200"
-                          : slot.required
-                            ? "bg-background border-border/40 hover:bg-muted/10"
-                            : "bg-muted/5 border-dashed border-border/30 hover:bg-muted/10"
+                        hasFile ? "bg-emerald-50 border-emerald-200" : "bg-background border-border/40 hover:bg-muted/10"
                       )}>
-                        <FileSpreadsheet className={cn(
-                          "size-4 shrink-0",
-                          hasFile ? "text-emerald-600" : slot.required ? "text-primary/50" : "text-muted-foreground/40"
-                        )} />
+                        <FileSpreadsheet className={cn("size-4 shrink-0", hasFile ? "text-emerald-600" : "text-primary/50")} />
 
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-semibold">{slot.label}</span>
-                            {!slot.required && (
-                              <span className="text-[9px] text-muted-foreground border border-border/40 rounded px-1 py-0 leading-tight">opcional</span>
-                            )}
+                          <div className="flex items-center gap-2">
+                            <span className={cn(
+                              "text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0",
+                              hasFile ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
+                            )}>
+                              {filial.regiao}
+                            </span>
+                            <span className="text-xs font-semibold truncate">
+                              CONTROLE DE DISTRIBUIÇÃO — {filial.label}
+                            </span>
                           </div>
                           {hasFile
-                            ? <span className="text-[11px] text-emerald-600 font-medium truncate block mt-0.5">{files[slot.id]?.name}</span>
-                            : <span className="text-[11px] text-muted-foreground italic mt-0.5 block">{slot.hint}</span>}
+                            ? <span className="text-[11px] text-emerald-600 font-medium truncate block mt-0.5">{files[filial.id]?.name}</span>
+                            : <span className="text-[11px] text-muted-foreground italic mt-0.5 block">Nenhum arquivo selecionado</span>}
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
                           {hasFile && (
                             <Button variant="ghost" size="icon" className="size-6"
-                              onClick={() => handleFile(slot.id, null)}>
+                              onClick={() => handleFileChange(filial.id, null)}>
                               <Trash2 className="size-3 text-destructive/70" />
                             </Button>
                           )}
                           <Button
                             variant="outline" size="sm" className="h-6 text-[10px] px-2"
-                            onClick={() => document.getElementById(`devolucoes-file-${slot.id}`)?.click()}
+                            onClick={() => document.getElementById(`file-ent-${filial.id}`)?.click()}
                           >
                             {hasFile ? "Trocar" : "Selecionar"}
                           </Button>
                         </div>
                         <input
-                          id={`devolucoes-file-${slot.id}`} type="file" className="hidden"
+                          id={`file-ent-${filial.id}`} type="file" className="hidden"
                           accept=".xlsx,.xls"
-                          onChange={e => handleFile(slot.id, e.target.files?.[0] ?? null)}
+                          onChange={e => handleFileChange(filial.id, e.target.files?.[0] || null)}
                         />
                       </div>
                     )
                   })}
                 </div>
-                {!canRun && (
-                  <p className="text-[11px] text-amber-600 font-medium flex items-center gap-1">
-                    <AlertTriangle className="size-3" /> Controle Logístico e Faturamento são obrigatórios.
-                  </p>
-                )}
               </div>
 
               {/* Progresso */}
@@ -354,7 +411,11 @@ export function DevolucoesPipelineView() {
                   <Progress value={progress} className={cn("h-2", hasError && "[&>div]:bg-destructive")} />
                   <div className="flex justify-between text-[9px] text-muted-foreground">
                     <span>{doneCount}/{stages.length} etapas</span>
-                    <span>{isExecuting ? (stages.find(s => s.status === "running")?.label ?? "...") : (progress === 100 ? "Pipeline finalizado" : "")}</span>
+                    <span>
+                      {isExecuting
+                        ? (stages.find(s => s.status === "running")?.label ?? "...")
+                        : progress === 100 ? "Pipeline finalizado" : ""}
+                    </span>
                   </div>
                 </div>
               )}
@@ -377,7 +438,7 @@ export function DevolucoesPipelineView() {
               >
                 {isExecuting
                   ? <><Loader2 className="mr-1.5 size-3.5 animate-spin" /> Processando...</>
-                  : <><Play className="mr-1.5 size-3.5 fill-current" /> Iniciar Análise</>}
+                  : <><Play className="mr-1.5 size-3.5 fill-current" /> Iniciar Consolidação</>}
               </Button>
             </CardFooter>
           </Card>
@@ -389,7 +450,9 @@ export function DevolucoesPipelineView() {
           {/* Etapas */}
           <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
             <div className="px-4 py-2.5 border-b bg-muted/10">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Etapas de Execução</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                Etapas — {modoMesCompleto ? "Mês Completo" : "Dia Específico"}
+              </span>
             </div>
             <div className="p-3 space-y-2">
               {stages.map((stage, idx) => (
@@ -397,7 +460,7 @@ export function DevolucoesPipelineView() {
                   <div className="flex flex-col items-center pt-0.5">
                     <StageIcon status={stage.status} />
                     {idx < stages.length - 1 && (
-                      <div className={cn("w-px mt-1 min-h-[12px]", stage.status === "done" ? "bg-emerald-300" : "bg-border/60")} />
+                      <div className={cn("w-px mt-1 min-h-[14px]", stage.status === "done" ? "bg-emerald-300" : "bg-border/60")} />
                     )}
                   </div>
                   <div className={cn("flex-1 px-2.5 py-1.5 rounded-lg border text-xs transition-all", stageBg[stage.status])}>
@@ -413,15 +476,15 @@ export function DevolucoesPipelineView() {
           {stats && (
             <div className="grid grid-cols-2 gap-2">
               {[
-                { label: "Colaboradores",  value: stats.colaboradores,                    icon: Users,     highlight: false },
-                { label: "Viagens",        value: stats.viagens.toLocaleString("pt-BR"),  icon: Database,  highlight: false },
-                { label: "Faturamento",    value: `R$ ${stats.fatTotal.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`, icon: Database, highlight: true },
-                { label: "Devolvido",      value: `R$ ${stats.fatDev.toLocaleString("pt-BR",  { minimumFractionDigits: 2 })}`, icon: PackageX, highlight: true },
+                { label: "Filiais",         value: `${stats.filiaisOk}/5`,                               icon: Building2,    highlight: false },
+                { label: "Registros",       value: stats.total.toLocaleString("pt-BR"),                  icon: Database,     highlight: false },
+                { label: "Linhas Acumulado",value: stats.acumulado.toLocaleString("pt-BR"),              icon: CheckCircle2, highlight: true  },
               ].map(stat => {
                 const Icon = stat.icon
                 return (
                   <div key={stat.label} className={cn(
                     "rounded-xl border px-3 py-2.5 flex items-center gap-2 shadow-sm",
+                    stat.label === "Linhas Acumulado" && "col-span-2",
                     stat.highlight ? "bg-primary/5 border-primary/20" : "bg-card border-border/60"
                   )}>
                     <div className={cn("size-7 rounded-lg flex items-center justify-center shrink-0",
@@ -429,7 +492,7 @@ export function DevolucoesPipelineView() {
                       <Icon className={cn("size-3.5", stat.highlight ? "text-primary" : "text-muted-foreground")} />
                     </div>
                     <div className="min-w-0">
-                      <p className={cn("text-sm font-bold leading-tight truncate", stat.highlight ? "text-primary" : "text-foreground")}>
+                      <p className={cn("text-sm font-bold leading-tight", stat.highlight ? "text-primary" : "text-foreground")}>
                         {stat.value}
                       </p>
                       <p className="text-[10px] text-muted-foreground leading-tight">{stat.label}</p>
@@ -476,7 +539,7 @@ export function DevolucoesPipelineView() {
             <ScrollArea className="h-[220px] bg-slate-950">
               <div className="p-3 font-mono text-[10px] leading-relaxed space-y-0.5">
                 {logs.length === 0
-                  ? <span className="text-slate-500 italic">Aguardando arquivos...</span>
+                  ? <span className="text-slate-500 italic">Aguardando execução...</span>
                   : logs.map((log, i) => (
                     <div key={i} className={cn("flex gap-1.5", logColor[log.type])}>
                       <span className="text-slate-600 shrink-0">{log.time}</span>

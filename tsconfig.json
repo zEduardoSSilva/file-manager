@@ -1,31 +1,24 @@
 {
   "compilerOptions": {
     "allowJs": true,
-    "esModuleInterop": true,
-    "isolatedModules": true,
-    "jsx": "react-jsx",
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "noEmit": true,
+    "noImplicitAny": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
     "paths": {
       "@/*": [
         "./src/*"
       ]
     },
-    "resolveJsonModule": true,
     "skipLibCheck": true,
-    "strict": true,
-    "target": "ESNext"
+    "strictNullChecks": false
   },
-  "exclude": [
-    "node_modules"
-  ],
-  "include": [
-    "src"
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.app.json"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    }
   ]
 }

@@ -1,11 +1,3 @@
 {
-    "IDX.aI.showChatInEditorTab": false,
-    "IDX.agenticWorkspace": true,
-    "IDX.aI.enableAi": true,
-    "IDX.aI.enableInlineSuggestions": true,
-    "IDX.aI.enableChat": true,
-    "google.gemini.enable": true,
-    "google.ai.enabled": true,
-    "IDX.aI.enableCodebaseIndexing": true,
-    "IDX.aI.enableInlineCompletion": true
+    "IDX.agenticWorkspace": true
 }

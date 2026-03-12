@@ -1,14 +1,14 @@
 import { Routes, Route } from 'react-router-dom'
-import { PipelineLayout } from '@/components/pipeline/pipeline-layout'
-import DashboardPage from '@/pages/DashboardPage'
-import PipelinePage from '@/pages/PipelinePage'
+import { PipelineLayout } from '@/pages/Layout'
+import HomePage from '@/pages/HomePage'
+import IndexPage from '@/pages/Index'
 
 export default function App() {
   return (
     <Routes>
       <Route element={<PipelineLayout />}>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/pipeline/:pipelineId" element={<PipelinePage />} />
+        <Route path="/" element={<HomePage />} />
+        <Route path="/pipeline/:pipelineId" element={<IndexPage />} />
       </Route>
     </Routes>
   )

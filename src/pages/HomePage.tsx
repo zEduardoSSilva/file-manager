@@ -4,6 +4,7 @@ import {
   BarChart3, 
   Database, 
   Truck, 
+  FileSpreadsheet,
   FileCheck,
   Zap,
   Clock,
@@ -18,6 +19,11 @@ import {
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
+
+// Adicione esse array junto com INDICATORS e TASKS
+const ROUTINES = [
+  { id: 'consolidacao-entregas', name: 'Consolidação de Entregas', desc: 'Controle por Filial', icon: FileSpreadsheet, color: 'bg-teal-100 text-teal-600' },
+]
 
 const INDICATORS = [
   { id: 'vfleet', name: 'vFleet Pilot', desc: 'Telemetria e Alertas', icon: Truck, color: 'bg-primary/10 text-primary' },
@@ -37,7 +43,7 @@ const TASKS = [
   { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', desc: 'Matching de Status', icon: GitMerge, color: 'bg-blue-50 text-blue-500' },
 ]
 
-export default function DashboardPage() {
+export default function HomePage() {
   return (
     <div className="space-y-4 sm:space-y-6 max-w-full min-w-0 overflow-hidden animate-in fade-in duration-500">
       <div className="px-1">
@@ -90,8 +96,45 @@ export default function DashboardPage() {
       </div>
 
       <div className="space-y-6">
+        {/* Rotinas */}
+        <Card className="flex flex-col shadow-sm border-muted/40 overflow-hidden min-w-0">
+          <CardHeader className="p-4 sm:p-6 bg-muted/5 border-b">
+            <CardTitle className="text-base sm:text-lg text-primary">Rotinas</CardTitle>
+            <CardDescription className="text-[10px] sm:text-sm">Processamentos recorrentes e consolidações periódicas.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 pt-4 sm:p-6 sm:pt-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {ROUTINES.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <Button
+                    key={link.id}
+                    variant="outline"
+                    className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 hover:border-primary/20 transition-all border-muted/60 group"
+                    asChild
+                  >
+                    <Link to={`/pipeline/${link.id}`}>
+                      <div className="flex items-center gap-3 w-full min-w-0">
+                        <div className={`size-8 sm:size-10 shrink-0 rounded-lg ${link.color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
+                          <Icon className="size-4 sm:size-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-[12px] sm:text-sm leading-tight group-hover:text-primary transition-colors">{link.name}</p>
+                          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5 truncate">{link.desc}</p>
+                        </div>
+                        <ArrowUpRight className="size-3 shrink-0 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </Link>
+                  </Button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Indicadores */}
         <Card className="flex flex-col shadow-sm border-muted/40 overflow-hidden min-w-0">
+
           <CardHeader className="p-4 sm:p-6 bg-muted/5 border-b">
             <CardTitle className="text-base sm:text-lg text-primary">Indicadores de Performance</CardTitle>
             <CardDescription className="text-[10px] sm:text-sm">Fluxos analíticos e consolidação de resultados.</CardDescription>
@@ -161,6 +204,7 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
+
       </div>
     </div>
   )

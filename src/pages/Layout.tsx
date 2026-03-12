@@ -23,6 +23,7 @@ import {
   Zap,
   Clock,
   FileStack,
+  FileSpreadsheet,
   Building2,
   TrendingUp,
   PackageX,
@@ -31,8 +32,15 @@ import {
   GitMerge,
   Search
 } from "lucide-react"
+import { ModeToggle } from "@/components/mode-toggle"
 
 const NAV_GROUPS = [
+  {
+    label: "Rotina",
+    items: [
+      { id: 'consolidacao-entregas', name: 'Entregas', icon: FileSpreadsheet },
+    ]
+  },
   {
     label: "Indicadores",
     items: [
@@ -140,10 +148,13 @@ export function PipelineLayout() {
           </SidebarMenu>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset className="min-w-0 flex-1 flex flex-col overflow-hidden bg-[#F4F4FB]">
-        <header className="flex h-14 shrink-0 items-center gap-2 px-4 border-b bg-white/80 backdrop-blur-sm sticky top-0 z-30">
+      <SidebarInset className="min-w-0 flex-1 flex flex-col overflow-hidden bg-background">
+        <header className="flex h-14 shrink-0 items-center gap-2 px-4 border-b bg-background/80 backdrop-blur-sm sticky top-0 z-30">
           <SidebarTrigger className="-ml-1" />
           <h1 className="text-sm sm:text-base font-bold text-primary truncate">File Manager</h1>
+          <div className="ml-auto">
+            <ModeToggle />
+          </div>
         </header>
         <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-6 min-w-0 scroll-smooth">
           <div className="max-w-full overflow-hidden min-w-0">

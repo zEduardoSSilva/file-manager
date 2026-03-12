@@ -2,245 +2,288 @@
 
 import * as React from "react"
 import {
-  Upload,
-  Play,
-  Trash2,
-  FileCode,
-  Files,
-  Loader2,
-  Clock,
-  Download,
-  Calendar as CalendarIcon,
-  X,
-  Info,
-  HelpCircle
+  Play, Trash2, FileCode, Loader2, HelpCircle,
+  Download, CheckCircle2, Circle, XCircle, AlertTriangle,
+  ChevronRight, Terminal, Info, Database,
+  Clock, Calendar as CalendarIcon, X, Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { AIParamAssistant } from "./ai-param-assistant"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Progress } from "@/components/ui/progress"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Calendar } from "@/components/ui/calendar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AIParamAssistant } from "../../pages/AI-Param-Assistant"
 import { executePontoPipeline } from "@/app/actions/ponto-pipeline"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
-import { Progress } from "@/components/ui/progress"
 import { downloadMultipleSheets } from "@/lib/excel-utils"
-import { Calendar } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { format } from "date-fns"
 import { ptBR } from "date-fns/locale"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 
-// Componente específico para visualizar os resultados do Ponto
-function PontoResultViewer({ result }: { result: PipelineResult }) {
-  const { resumoMensal } = result;
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+type StageStatus = "idle" | "running" | "done" | "error" | "warn"
+interface Stage { id: string; label: string; description: string; status: StageStatus }
+interface LogEntry { time: string; message: string; type: "info" | "success" | "error" | "warn" | "step" }
 
-  if (!resumoMensal || resumoMensal.length === 0) {
-    return (
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Resultado da Execução</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground">Nenhum dado processado para exibir.</p>
-        </CardContent>
-      </Card>
-    )
-  }
+// ─── Etapas ───────────────────────────────────────────────────────────────────
+const INITIAL_STAGES: Stage[] = [
+  { id: "load",   label: "Carregar CSVs de ponto",     description: "Lê os arquivos de Motoristas e Ajudantes",              status: "idle" },
+  { id: "parse",  label: "Parsear marcações",           description: "Extrai Entrada · Saída · Almoço · Retorno por dia",      status: "idle" },
+  { id: "dedup",  label: "Remover duplicatas",          description: "Prioriza o registro mais completo por ID+Data",          status: "idle" },
+  { id: "mot",    label: "Conformidade Motoristas",     description: "Marcações + 5 critérios → R$ 3,20/dia",                 status: "idle" },
+  { id: "aju",    label: "Conformidade Ajudantes",      description: "Marcações + 5 critérios → R$ 4,80/dia",                 status: "idle" },
+  { id: "abs",    label: "Análise de Absenteísmo",      description: "Presença física + Atestados/Férias → incentivo",        status: "idle" },
+  { id: "export", label: "Exportar / Salvar Firebase",  description: "11 abas: ponto bruto · detalhe · consolidado · abs",   status: "idle" },
+]
 
-  return (
-    <Card className="mt-6 animate-in fade-in duration-500">
-      <CardHeader>
-        <CardTitle>Resumo Mensal de Ponto</CardTitle>
-        <CardDescription>
-          {`Análise consolidada de ${resumoMensal.length} funcionários.`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ScrollArea className="h-[400px] border rounded-md">
-          <Table>
-            <TableHeader className="sticky top-0 bg-muted/95 backdrop-blur-sm">
-              <TableRow>
-                <TableHead>Funcionário</TableHead>
-                <TableHead className="text-center">Dias Trab.</TableHead>
-                <TableHead className="text-center">H. Trab.</TableHead>
-                <TableHead className="text-center">H. Extras</TableHead>
-                <TableHead className="text-center">Absenteísmo</TableHead>
-                <TableHead className="text-right">Banco de Horas</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {resumoMensal.map((funcionario: any, index: number) => (
-                <TableRow key={index}>
-                  <TableCell className="font-medium">{funcionario.nome}</TableCell>
-                  <TableCell className="text-center">{funcionario.diasTrabalhados}</TableCell>
-                  <TableCell className="text-center">{funcionario.totalHorasTrabalhadas}</TableCell>
-                  <TableCell className="text-center font-semibold text-green-600">{funcionario.totalHorasExtras}</TableCell>
-                  <TableCell className="text-center font-semibold text-red-600">{funcionario.totalAbsenteismo}</TableCell>
-                  <TableCell className="text-right font-mono">{funcionario.bancoDeHorasFinal}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </CardContent>
-    </Card>
-  )
+const REGRAS = [
+  { condition: "Motorista — Marcações (4/4)", result: "R$ 1,60 GARANTIDO",         variant: "success" as const },
+  { condition: "Motorista — 5 Critérios OK",  result: "R$ 1,60 TUDO OU NADA",      variant: "danger"  as const },
+  { condition: "Ajudante — Marcações (4/4)",  result: "R$ 2,40 GARANTIDO",         variant: "success" as const },
+  { condition: "Ajudante — 5 Critérios OK",   result: "R$ 2,40 TUDO OU NADA",      variant: "danger"  as const },
+  { condition: "Presença 100%",               result: "Incentivo R$ 50,00",         variant: "success" as const },
+  { condition: "Presença ≥ 90%",              result: "Incentivo R$ 40,00",         variant: "success" as const },
+  { condition: "Presença ≥ 75%",              result: "Incentivo R$ 25,00",         variant: "warn"    as const },
+  { condition: "Presença < 75%",              result: "Incentivo R$ 0,00",          variant: "danger"  as const },
+  { condition: "Atestados / Férias",          result: "Contam como presença",       variant: "info"    as const },
+]
+
+const CRITERIOS = [
+  "Jornada — não exceder carga padrão + 2h",
+  "Hora Extra — máximo 2h de HE",
+  "Almoço — mínimo 1h de intervalo",
+  "Intrajornada — nenhum período > 6h seguidas",
+  "Interjornada — mínimo 11h de descanso",
+]
+
+// ─── Sub-componentes ──────────────────────────────────────────────────────────
+function StageIcon({ status }: { status: StageStatus }) {
+  if (status === "running") return <Loader2 className="size-4 animate-spin text-primary shrink-0" />
+  if (status === "done")    return <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+  if (status === "error")   return <XCircle className="size-4 text-destructive shrink-0" />
+  if (status === "warn")    return <AlertTriangle className="size-4 text-amber-500 shrink-0" />
+  return <Circle className="size-4 text-muted-foreground/30 shrink-0" />
+}
+const stageBg: Record<StageStatus, string> = {
+  idle: "bg-muted/20 border-border/40", running: "bg-primary/5 border-primary/30",
+  done: "bg-emerald-50 border-emerald-200", error: "bg-red-50 border-red-200", warn: "bg-amber-50 border-amber-200",
+}
+const stageLbl: Record<StageStatus, string> = {
+  idle: "text-muted-foreground", running: "text-primary font-semibold",
+  done: "text-emerald-700 font-medium", error: "text-red-700 font-semibold", warn: "text-amber-700 font-medium",
+}
+const ruleColor = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  danger:  "border-red-200 bg-red-50 text-red-700",
+  warn:    "border-amber-200 bg-amber-50 text-amber-700",
+  info:    "border-blue-200 bg-blue-50 text-blue-700",
+}
+const logColor: Record<LogEntry["type"], string> = {
+  info: "text-slate-400", success: "text-emerald-400",
+  error: "text-red-400 font-semibold", warn: "text-amber-400", step: "text-primary font-semibold",
+}
+const logPrefix: Record<LogEntry["type"], string> = {
+  info: "   ", success: "✅ ", error: "❌ ", warn: "⚠️  ", step: "▶  ",
 }
 
+function fileBadge(name: string) {
+  const n = name.toLowerCase()
+  if (/ajudante/i.test(n))    return { label: "Ajudante",    cls: "bg-violet-100 text-violet-700 border-violet-200" }
+  if (/motorista/i.test(n))   return { label: "Motorista",   cls: "bg-sky-100 text-sky-700 border-sky-200" }
+  return                               { label: "Ponto",      cls: "bg-slate-100 text-slate-600 border-slate-200" }
+}
 
+// ─── Componente principal ─────────────────────────────────────────────────────
 export function PontoPipelineView() {
-  const [year, setYear] = React.useState(new Date().getFullYear())
-  const [month, setMonth] = React.useState(new Date().getMonth() + 1)
-  const [files, setFiles] = React.useState<File[]>([])
+  const [year, setYear]           = React.useState(new Date().getFullYear())
+  const [month, setMonth]         = React.useState(new Date().getMonth() + 1)
+  const [files, setFiles]         = React.useState<File[]>([])
   const [excludedDates, setExcludedDates] = React.useState<Date[]>([])
   const [includeSundays, setIncludeSundays] = React.useState(false)
   const [isExecuting, setIsExecuting] = React.useState(false)
-  const [progress, setProgress] = React.useState(0)
-  const [logs, setLogs] = React.useState<string[]>([])
+  const [progress, setProgress]   = React.useState(0)
+  const [stages, setStages]       = React.useState<Stage[]>(INITIAL_STAGES)
+  const [logs, setLogs]           = React.useState<LogEntry[]>([])
   const [lastResult, setLastResult] = React.useState<PipelineResult | null>(null)
+  const [stats, setStats]         = React.useState<{
+    motoristas: number; ajudantes: number; bonifPonto: number; bonifAbs: number
+  } | null>(null)
+  const logEndRef = React.useRef<HTMLDivElement>(null)
   const { toast } = useToast()
 
-  const addLog = (msg: string, type: 'info' | 'error' | 'success' | 'warn' = 'info') => {
-    const timestamp = new Date().toLocaleTimeString()
-    let prefix = ""
-    if (type === 'error') prefix = "❌ [ERRO] "
-    if (type === 'success') prefix = "✅ [OK] "
-    if (type === 'warn') prefix = "⚠️ [AVISO] "
-    setLogs(prev => [...prev, `[${timestamp}] ${prefix}${msg}`])
+  React.useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [logs])
+
+  const addLog = (message: string, type: LogEntry["type"] = "info") =>
+    setLogs(prev => [...prev, { time: new Date().toLocaleTimeString("pt-BR"), message, type }])
+
+  const setStage = (id: string, status: StageStatus) =>
+    setStages(prev => prev.map(s => s.id === id ? { ...s, status } : s))
+
+  const resetAll = () => {
+    setStages(INITIAL_STAGES.map(s => ({ ...s, status: "idle" })))
+    setProgress(0); setStats(null)
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const newFiles = Array.from(e.target.files)
-      setFiles(prev => [...prev, ...newFiles])
-    }
+    if (e.target.files) setFiles(prev => [...prev, ...Array.from(e.target.files!)])
   }
+  const removeFile = (idx: number) => setFiles(prev => prev.filter((_, i) => i !== idx))
+  const removeDate = (d: Date) => setExcludedDates(prev => prev.filter(x => x.getTime() !== d.getTime()))
 
   const runPipeline = async (downloadOnly = false) => {
-    if (files.length === 0) return;
-    setIsExecuting(true)
-    setProgress(5)
-    setLogs([])
-    addLog(`Iniciando Pipeline Absenteísmo...`)
+    if (!files.length) return
+    setIsExecuting(true); setLogs([]); resetAll()
 
     try {
-      addLog("Identificando arquivos anexados...", "info")
-      addLog(`Arquivos: ${files.map(f => f.name).join(', ')}`, "info")
-      addLog(`Período: ${String(month).padStart(2, '0')}/${year}`, "info")
+      addLog(`Ponto — ${String(month).padStart(2,"0")}/${year}`, "step")
+      addLog(`${files.length} arquivo(s) · ${excludedDates.length} feriado(s) excluído(s)`)
+      addLog(`Domingos: ${includeSundays ? "Considerados" : "Ignorados"}`)
 
-      if (excludedDates.length > 0) {
-        addLog(`Aplicando ${excludedDates.length} feriados/exclusões globais...`, "warn")
-      }
-      addLog(`Configuração: Domingos como dias úteis? ${includeSundays ? 'SIM' : 'NÃO'}`, "info")
+      // Etapa 1
+      setStage("load", "running"); setProgress(8)
+      files.forEach(f => {
+        const b = fileBadge(f.name)
+        addLog(`• [${b.label}] ${f.name}`)
+      })
+      setStage("load", "done"); setProgress(15)
 
-      await new Promise(r => setTimeout(r, 400))
-      setProgress(20)
-
-      addLog("Analisando Jornada, HE, Almoço e Descanso Interjornada...", "info")
-      addLog("Calculando bônus e absenteísmo...", "info")
-
-      setProgress(50)
+      // Monta FormData
       const formData = new FormData()
-      formData.append('year', year.toString())
-      formData.append('month', month.toString())
-      formData.append('includeSundays', includeSundays.toString())
+      formData.append("year", String(year))
+      formData.append("month", String(month))
+      formData.append("includeSundays", String(includeSundays))
+      formData.append("excludedDates", JSON.stringify(excludedDates.map(d => format(d, "dd/MM/yyyy"))))
+      files.forEach(f => {
+        formData.append("files", f)
+        formData.append("fileNames", f.name)
+      })
 
-      const formattedExcluded = excludedDates.map(d => format(d, 'dd/MM/yyyy'))
-      formData.append('excludedDates', JSON.stringify(formattedExcluded))
-
-      files.forEach(f => formData.append('files', f))
-
-      addLog("Enviando dados ao servidor...", "info")
-
+      // Etapa 2
+      addLog("Parseando marcações por colaborador/dia...", "step")
+      setStage("parse", "running"); setProgress(25)
       const response = await executePontoPipeline(formData)
+      if (!response.success) throw new Error(response.error)
+      setStage("parse", "done"); setProgress(35)
+      addLog("Marcações extraídas.", "success")
 
-      addLog(`Resposta recebida. Status: ${response?.success ? 'SUCESSO' : 'FALHA'}`, response?.success ? 'info' : 'warn')
+      // Etapa 3
+      addLog("Removendo duplicatas (prioriza registro mais completo)...", "step")
+      setStage("dedup", "running"); setProgress(45)
+      await new Promise(r => setTimeout(r, 100))
+      setStage("dedup", "done"); setProgress(52)
+      addLog("Deduplicação concluída.", "success")
 
-      if (!response?.success) {
-        throw new Error(response?.error || 'Ocorreu um erro desconhecido no servidor.');
-      }
+      // Etapas 4 e 5
+      addLog("Analisando conformidade de ponto — Motoristas...", "step")
+      setStage("mot", "running"); setProgress(62)
+      await new Promise(r => setTimeout(r, 100))
+      setStage("mot", "done")
 
-      const result = response.result;
+      addLog("Analisando conformidade de ponto — Ajudantes...", "step")
+      setStage("aju", "running"); setProgress(72)
+      await new Promise(r => setTimeout(r, 100))
+      setStage("aju", "done")
+      addLog("5 critérios avaliados.", "success")
+
+      // Etapa 6
+      addLog("Calculando absenteísmo (presença física + justificadas)...", "step")
+      setStage("abs", "running"); setProgress(84)
+      await new Promise(r => setTimeout(r, 100))
+      setStage("abs", "done"); setProgress(93)
+      addLog("Incentivo de presença calculado.", "success")
+
+      // Etapa 7
+      setStage("export", "running"); setProgress(97)
+      const result = response.result
       setLastResult(result)
-      setProgress(100)
 
-      addLog(result.summary || "Processamento concluído.", "success")
+      // Extrai stats do summary
+      const m = (result.summary ?? "").match(/(\d+) motoristas · (\d+) ajudantes · R\$ ([\d,.]+) ponto · R\$ ([\d,.]+) absenteísmo/)
+      if (m) {
+        setStats({
+          motoristas: parseInt(m[1]),
+          ajudantes:  parseInt(m[2]),
+          bonifPonto: parseFloat(m[3].replace(",",".")),
+          bonifAbs:   parseFloat(m[4].replace(",",".")),
+        })
+      }
 
-
-      if (downloadOnly) {
-        addLog("Gerando Excel Consolidado...", "success")
-        downloadMultipleSheets([
-          { data: result.resumoMensal || [], name: 'Resumo_Mensal' },
-          { data: result.data || [], name: 'Dados_Brutos' }
-        ], `Ponto_Consolidado_${month}_${year}`)
+      if (downloadOnly && result.extraSheets) {
+        downloadMultipleSheets(
+          result.extraSheets.map((s: any) => ({ data: s.data, name: s.name })),
+          `Ponto_${String(month).padStart(2,"0")}_${year}`
+        )
+        addLog("Excel com 11 abas baixado.", "success")
       } else {
-        addLog("Sincronização com o Firebase concluída.", "success")
+        addLog("Dados sincronizados com Firebase.", "success")
       }
 
-      toast({
-        title: downloadOnly ? "Arquivo Pronto" : "Concluído",
-        description: downloadOnly ? "Excel analítico baixado." : result.summary || "Dados de Absenteísmo salvos."
-      });
+      setStage("export", "done"); setProgress(100)
+      addLog(result.summary ?? "Pipeline concluído.", "success")
+      toast({ title: downloadOnly ? "Excel pronto" : "Pipeline concluído", description: result.summary })
 
-    } catch (error: any) {
-      const msg = error?.message || String(error)
-      addLog(`FALHA GERAL: ${msg}`, "error")
-
-      if (msg.toLowerCase().includes('unexpected') || msg.toLowerCase().includes('fetch')) {
-        addLog("Dica: O servidor pode estar offline ou retornou um erro interno (500). Verifique os logs.", "warn")
-      }
-
+    } catch (err: any) {
+      addLog(`FALHA: ${err.message}`, "error")
+      setStages(prev => prev.map(s => s.status === "running" ? { ...s, status: "error" } : s))
       setProgress(0)
+      toast({ variant: "destructive", title: "Erro no pipeline", description: err.message })
     } finally {
       setIsExecuting(false)
     }
   }
 
-  const removeDate = (dateToRemove: Date) => {
-    setExcludedDates(prev => prev.filter(d => d.getTime() !== dateToRemove.getTime()))
-  }
+  const doneCount = stages.filter(s => s.status === "done" || s.status === "warn").length
+  const hasError  = stages.some(s => s.status === "error")
 
   return (
     <div className="space-y-6">
-      <Alert className="bg-indigo-50 border-indigo-200">
+
+      {/* Alert */}
+      <Alert className="bg-primary/5 border-primary/20">
         <div className="flex items-center gap-2">
-          <Info className="size-4 text-indigo-600" />
-          <AlertTitle className="mb-0 text-indigo-900">Gestão de Absenteísmo</AlertTitle>
+          <Clock className="size-4 text-primary" />
+          <AlertTitle className="mb-0">Ponto + Absenteísmo</AlertTitle>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Anexe os arquivos de ponto. O sistema consolidará a jornada diária e calculará o incentivo de absenteísmo proporcional.</p>
+                <p>Analisa os CSVs de ponto de Motoristas e Ajudantes. Avalia 5 critérios de conformidade e calcula incentivo de absenteísmo por faixa de presença.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
-        <AlertDescription className="text-sm mt-2 text-indigo-800">
-          Esta análise cruza as marcações de ponto com as regras de jornada para gerar um resumo mensal por funcionário.
+        <AlertDescription className="text-xs mt-2">
+          Gera <strong>11 abas</strong>: ponto bruto · sem marcação · detalhe diário · consolidado · absenteísmo (Motoristas e Ajudantes).
         </AlertDescription>
       </Alert>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* ── Coluna principal ── */}
         <div className="lg:col-span-2 space-y-6">
           <Card className="shadow-sm border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Clock className="size-5 text-indigo-600" />
+                <Clock className="size-5 text-primary" />
                 Configuração de Ponto
               </CardTitle>
-              <CardDescription>
-                Consolidação de Jornada e Absenteísmo
-              </CardDescription>
+              <CardDescription>Período · arquivos CSV · feriados e configurações de jornada.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
+
+            <CardContent className="space-y-5">
+              {/* Período */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Ano</Label>
@@ -252,163 +295,278 @@ export function PontoPipelineView() {
                 </div>
               </div>
 
-              <AIParamAssistant onParamsUpdate={(m, y) => { setMonth(m); setYear(y); }} currentMonth={month} currentYear={year} />
+              <AIParamAssistant onParamsUpdate={(m, y) => { setMonth(m); setYear(y) }} currentMonth={month} currentYear={year} />
 
-              <div className="flex items-center space-x-2 p-3 rounded-lg border bg-muted/5">
+              {/* Domingos */}
+              <div className="flex items-start gap-3 p-3 rounded-lg border bg-muted/5">
                 <Checkbox
                   id="include-sundays"
                   checked={includeSundays}
-                  onCheckedChange={(checked) => setIncludeSundays(!!checked)}
+                  onCheckedChange={c => setIncludeSundays(!!c)}
+                  className="mt-0.5"
                 />
-                <div className="grid gap-1.5 leading-none">
-                  <label
-                    htmlFor="include-sundays"
-                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                  >
-                    Considerar Domingos como dia útil
+                <div>
+                  <label htmlFor="include-sundays" className="text-sm font-medium cursor-pointer">
+                    Considerar domingos como dia útil
                   </label>
-                  <p className="text-xs text-muted-foreground">
-                    Por padrão, domingos são ignorados no cálculo da base de dias trabalhados.
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Por padrão, domingos são excluídos da base de cálculo de presença.
                   </p>
                 </div>
               </div>
 
-              <div className="space-y-3">
+              {/* Feriados */}
+              <div className="space-y-2">
                 <Label className="text-sm font-semibold flex items-center gap-2">
-                  <CalendarIcon className="size-4 text-primary" />
-                  Gestão de Feriados e Abonos
+                  <CalendarIcon className="size-4 text-primary" /> Feriados / Datas Excluídas
                 </Label>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {excludedDates.length === 0 ? (
-                    <span className="text-xs text-muted-foreground italic">Nenhum feriado selecionado.</span>
-                  ) : (
-                    excludedDates.sort((a, b) => a.getTime() - b.getTime()).map((date, i) => (
-                      <Badge key={i} variant="secondary" className="flex items-center gap-1 pr-1">
-                        {format(date, 'dd/MM/yyyy')}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-4 p-0 h-4 w-4 rounded-full hover:bg-destructive hover:text-white"
-                          onClick={() => removeDate(date)}
-                        >
+                <div className="flex flex-wrap gap-1.5 min-h-[28px]">
+                  {excludedDates.length === 0
+                    ? <span className="text-xs text-muted-foreground italic">Nenhum feriado selecionado.</span>
+                    : excludedDates.sort((a, b) => a.getTime() - b.getTime()).map((d, i) => (
+                      <Badge key={i} variant="secondary" className="flex items-center gap-1 pr-1 text-xs">
+                        {format(d, "dd/MM/yyyy")}
+                        <button onClick={() => removeDate(d)} className="size-3.5 rounded-full hover:bg-destructive hover:text-white flex items-center justify-center transition-colors">
                           <X className="size-2" />
-                        </Button>
+                        </button>
                       </Badge>
                     ))
-                  )}
+                  }
                 </div>
                 <Popover>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="w-full sm:w-auto">
-                      <CalendarIcon className="mr-2 size-4" /> Selecionar Datas
+                    <Button variant="outline" size="sm" className="h-7 text-xs">
+                      <CalendarIcon className="mr-1.5 size-3" /> Selecionar datas
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
-                      mode="multiple"
-                      selected={excludedDates}
-                      onSelect={(dates) => setExcludedDates(dates || [])}
-                      locale={ptBR}
-                      initialFocus
+                      mode="multiple" selected={excludedDates}
+                      onSelect={dates => setExcludedDates(dates ?? [])}
+                      locale={ptBR} initialFocus
                     />
                   </PopoverContent>
                 </Popover>
               </div>
 
-              <div className="space-y-4 pt-2">
+              {/* Arquivos */}
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold">Relatório Analítico de Ponto ({files.length})</Label>
-                  <Button variant="outline" size="sm" onClick={() => document.getElementById('file-upload')?.click()}>
-                    <Upload className="mr-2 size-4" /> Selecionar Lote
+                  <Label className="text-sm font-semibold text-primary">
+                    Arquivos CSV de Ponto ({files.length})
+                  </Label>
+                  <Button variant="outline" size="sm" className="h-7 text-xs"
+                    onClick={() => document.getElementById("ponto-file-input")?.click()}>
+                    Adicionar arquivos
                   </Button>
-                  <input id="file-upload" type="file" multiple className="hidden" onChange={handleFileChange} />
+                  <input
+                    id="ponto-file-input" type="file" multiple className="hidden"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={handleFileChange}
+                  />
                 </div>
 
-                <div className="border rounded-lg bg-muted/10 min-h-[120px]">
-                  {files.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                      <Files className="size-10 mb-2 opacity-20" />
-                      <p className="text-sm text-muted-foreground italic">Arraste ou selecione o arquivo</p>
-                    </div>
-                  ) : (
-                    <ScrollArea className="h-[150px] p-4">
-                      <div className="space-y-2">
-                        {files.map((file, idx) => (
-                          <div key={idx} className="flex items-center justify-between bg-white p-2 px-3 rounded-md border text-sm">
-                            <span className="truncate max-w-[240px] font-medium">{file.name}</span>
-                            <Button variant="ghost" size="icon" className="size-8" onClick={() => setFiles(files.filter((_, i) => i !== idx))}>
-                              <Trash2 className="size-4 text-destructive/70" />
-                            </Button>
-                          </div>
-                        ))}
+                <div className={cn(
+                  "rounded-xl border border-border/60 overflow-hidden",
+                  files.length === 0 && "border-dashed"
+                )}>
+                  {files.length === 0
+                    ? (
+                      <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                        <Clock className="size-8 mb-2 opacity-20" />
+                        <p className="text-xs italic">Nenhum arquivo selecionado</p>
+                        <p className="text-[10px] text-muted-foreground/70 mt-1">Arquivos: Ponto_Original_*-*.csv</p>
                       </div>
-                    </ScrollArea>
-                  )}
+                    ) : (
+                      <ScrollArea className="max-h-[180px]">
+                        <div className="p-2 space-y-1.5">
+                          {files.map((file, idx) => {
+                            const b = fileBadge(file.name)
+                            return (
+                              <div key={idx} className="flex items-center gap-2 px-2.5 py-2 rounded-lg border bg-background hover:bg-muted/10 transition-colors">
+                                <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0", b.cls)}>
+                                  {b.label}
+                                </span>
+                                <span className="text-xs truncate flex-1 font-medium">{file.name}</span>
+                                <Button variant="ghost" size="icon" className="size-6 shrink-0"
+                                  onClick={() => removeFile(idx)}>
+                                  <Trash2 className="size-3 text-destructive/70" />
+                                </Button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </ScrollArea>
+                    )
+                  }
                 </div>
               </div>
 
-              {isExecuting && (
-                <div className="space-y-2 pt-2">
-                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider text-indigo-600">
-                    <span>Sincronizando com Firebase</span>
-                    <span>{progress}%</span>
+              {/* Progresso */}
+              {(isExecuting || progress > 0) && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                      {hasError ? "Erro na execução" : progress === 100 ? "Concluído" : "Processando..."}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-muted-foreground">{progress}%</span>
                   </div>
-                  <Progress value={progress} className="h-1.5" />
+                  <Progress value={progress} className={cn("h-2", hasError && "[&>div]:bg-destructive")} />
+                  <div className="flex justify-between text-[9px] text-muted-foreground">
+                    <span>{doneCount}/{stages.length} etapas</span>
+                    <span>{isExecuting ? (stages.find(s => s.status === "running")?.label ?? "...") : (progress === 100 ? "Pipeline finalizado" : "")}</span>
+                  </div>
                 </div>
               )}
             </CardContent>
-            <CardFooter className="bg-muted/5 border-t pt-6 flex flex-col sm:flex-row gap-3">
+
+            <CardFooter className="bg-muted/5 border-t pt-4 pb-4 flex gap-2">
               <Button
-                variant="outline"
-                className="flex-1 border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+                variant="outline" size="sm"
+                className="flex-1 h-9 text-xs font-semibold border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400 transition-all"
                 onClick={() => runPipeline(true)}
-                disabled={isExecuting || files.length === 0}
+                disabled={isExecuting || !files.length}
               >
-                <Download className="mr-2 size-4" /> Exportar Excel
+                <Download className="mr-1.5 size-3.5" /> Exportar Excel
               </Button>
               <Button
-                className="flex-[2] h-12 text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-md"
+                size="sm"
+                className="flex-1 h-9 text-xs font-semibold shadow-sm transition-all"
                 onClick={() => runPipeline(false)}
-                disabled={isExecuting || files.length === 0}
+                disabled={isExecuting || !files.length}
               >
-                {isExecuting ? <><Loader2 className="mr-2 animate-spin" /> Sincronizando...</> : <><Play className="mr-2 fill-current" /> Salvar</>}
+                {isExecuting
+                  ? <><Loader2 className="mr-1.5 size-3.5 animate-spin" /> Processando...</>
+                  : <><Play className="mr-1.5 size-3.5 fill-current" /> Iniciar Pipeline</>}
               </Button>
             </CardFooter>
           </Card>
         </div>
 
-        <div className="space-y-6">
-          <Card className="h-full flex flex-col border border-border/60 bg-white rounded-lg overflow-hidden shadow-sm">
-            <div className="p-3 border-b bg-muted/20 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-                <FileCode className="size-3" /> Console de Execução
-              </span>
+        {/* ── Coluna lateral ── */}
+        <div className="space-y-4">
+
+          {/* Etapas */}
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+            <div className="px-4 py-2.5 border-b bg-muted/10">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Etapas de Execução</span>
             </div>
-            <ScrollArea className="flex-1 p-4 font-code text-[11px] leading-relaxed bg-slate-50">
-              {logs.length === 0 ? (
-                <div className="text-muted-foreground italic space-y-2">
-                  <p>Aguardando relatórios de Ponto.</p>
+            <div className="p-3 space-y-2">
+              {stages.map((stage, idx) => (
+                <div key={stage.id} className="flex items-start gap-2">
+                  <div className="flex flex-col items-center pt-0.5">
+                    <StageIcon status={stage.status} />
+                    {idx < stages.length - 1 && (
+                      <div className={cn("w-px mt-1 min-h-[12px]", stage.status === "done" ? "bg-emerald-300" : "bg-border/60")} />
+                    )}
+                  </div>
+                  <div className={cn("flex-1 px-2.5 py-1.5 rounded-lg border text-xs transition-all", stageBg[stage.status])}>
+                    <p className={cn("leading-tight", stageLbl[stage.status])}>{stage.label}</p>
+                    <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">{stage.description}</p>
+                  </div>
                 </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {logs.map((log, i) => (
-                    <div key={i} className={`
-                      ${log.includes('[ERRO]') ? 'text-destructive font-semibold' :
-                        log.includes('[OK]') ? 'text-green-600' :
-                        log.includes('[AVISO]') ? 'text-amber-600' :
-                        'text-slate-500'}`
-                    }>
-                      {log}
+              ))}
+            </div>
+          </div>
+
+          {/* Stats */}
+          {stats && (
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: "Motoristas",      value: stats.motoristas,                    icon: Users,    highlight: false },
+                { label: "Ajudantes",       value: stats.ajudantes,                     icon: Users,    highlight: false },
+                { label: "Bônus Ponto",     value: `R$ ${stats.bonifPonto.toFixed(2)}`, icon: Database, highlight: true  },
+                { label: "Incentivo Abs.",  value: `R$ ${stats.bonifAbs.toFixed(2)}`,   icon: Database, highlight: true  },
+              ].map(stat => {
+                const Icon = stat.icon
+                return (
+                  <div key={stat.label} className={cn(
+                    "rounded-xl border px-3 py-2.5 flex items-center gap-2 shadow-sm",
+                    stat.highlight ? "bg-primary/5 border-primary/20" : "bg-card border-border/60"
+                  )}>
+                    <div className={cn("size-7 rounded-lg flex items-center justify-center shrink-0",
+                      stat.highlight ? "bg-primary/10" : "bg-muted/30")}>
+                      <Icon className={cn("size-3.5", stat.highlight ? "text-primary" : "text-muted-foreground")} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className={cn("text-sm font-bold leading-tight", stat.highlight ? "text-primary" : "text-foreground")}>
+                        {stat.value}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground leading-tight">{stat.label}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* 5 Critérios */}
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+            <div className="px-4 py-2.5 border-b bg-muted/10 flex items-center gap-2">
+              <Info className="size-3 text-muted-foreground" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">5 Critérios de Conformidade</span>
+            </div>
+            <div className="p-3 space-y-1">
+              {CRITERIOS.map((c, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                  <span className="font-mono text-primary/60 shrink-0">{i + 1}.</span>
+                  <span>{c}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Regras */}
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+            <div className="px-4 py-2.5 border-b bg-muted/10 flex items-center gap-2">
+              <Info className="size-3 text-muted-foreground" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Regras de Bonificação</span>
+            </div>
+            <div className="p-3 space-y-1.5">
+              {REGRAS.map((rule, idx) => (
+                <div key={idx} className={cn("flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px]", ruleColor[rule.variant])}>
+                  <ChevronRight className="size-3 mt-0.5 shrink-0 opacity-60" />
+                  <div>
+                    <span className="font-semibold">{rule.condition}</span>
+                    <span className="mx-1 opacity-50">→</span>
+                    <span>{rule.result}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Console */}
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+            <div className="px-4 py-2.5 border-b bg-muted/10 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Terminal className="size-3 text-muted-foreground" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Console</span>
+              </div>
+              {logs.length > 0 && (
+                <button onClick={() => setLogs([])} className="text-[9px] text-muted-foreground hover:text-foreground transition-colors">
+                  limpar
+                </button>
+              )}
+            </div>
+            <ScrollArea className="h-[220px] bg-slate-950">
+              <div className="p-3 font-mono text-[10px] leading-relaxed space-y-0.5">
+                {logs.length === 0
+                  ? <span className="text-slate-500 italic">Aguardando arquivos de ponto...</span>
+                  : logs.map((log, i) => (
+                    <div key={i} className={cn("flex gap-1.5", logColor[log.type])}>
+                      <span className="text-slate-600 shrink-0">{log.time}</span>
+                      <span className="shrink-0">{logPrefix[log.type]}</span>
+                      <span className="break-all">{log.message}</span>
                     </div>
                   ))}
-                </div>
-              )}
+                <div ref={logEndRef} />
+              </div>
             </ScrollArea>
-          </Card>
+          </div>
+
         </div>
       </div>
-
-      {lastResult && !isExecuting && <PontoResultViewer result={lastResult} />}
     </div>
   )
 }
