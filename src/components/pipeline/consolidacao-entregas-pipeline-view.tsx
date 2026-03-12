@@ -1,14 +1,14 @@
-"use client"
-
 import * as React from "react"
 import { Play, Trash2, FileCode, Loader2, FileSpreadsheet, HelpCircle, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { DatePicker } from "@/components/ui/date-picker"
+import { AIParamAssistant } from "./ai-param-assistant"
 import { executeConsolidacaoEntregasPipeline } from "@/app/actions/consolidacao-entregas-pipeline"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
@@ -23,7 +23,8 @@ const FILIAIS = [
 ];
 
 export function ConsolidacaoEntregasPipelineView() {
-  const [date, setDate] = React.useState<Date | undefined>(new Date());
+  const [year, setYear] = React.useState(new Date().getFullYear())
+  const [month, setMonth] = React.useState(new Date().getMonth() + 1)
   const [files, setFiles] = React.useState<Record<string, File | null>>({});
   const [isExecuting, setIsExecuting] = React.useState(false);
   const [progress, setProgress] = React.useState(0);
@@ -37,7 +38,7 @@ export function ConsolidacaoEntregasPipelineView() {
     setLogs(prev => [...prev, `[${ts}] ${prefix}${msg}`]);
   };
 
-  const canRun = date && FILIAIS.every(f => files[f.id]);
+  const canRun = FILIAIS.some(f => files[f.id]);
 
   const handleFileChange = (id: string, file: File | null) => {
     setFiles(prev => ({ ...prev, [id]: file }));
@@ -53,14 +54,15 @@ export function ConsolidacaoEntregasPipelineView() {
 
     try {
       const formData = new FormData();
-      formData.append('date', date.toISOString());
+      formData.append('year', String(year));
+      formData.append('month', String(month));
       for (const filial of FILIAIS) {
         if (files[filial.id]) {
-          formData.append(filial.id, files[filial.id]!);
+          formData.append('files', files[filial.id]!);
         }
       }
 
-      setProgress(20); addLog('Enviando arquivos para o servidor...');
+      setProgress(20); addLog('Processando arquivos...');
       const response = await executeConsolidacaoEntregasPipeline(formData);
 
       if (!response.success) {
@@ -70,7 +72,7 @@ export function ConsolidacaoEntregasPipelineView() {
       setProgress(100);
       setLastResult(response.result);
       addLog('Consolidação concluída com sucesso!', 'success');
-      addLog(`Arquivo de resumo gerado: ${response.result.summary}`, 'success');
+      addLog(response.result.summary || '', 'success');
       
       toast({ title: 'Consolidação Concluída', description: response.result.summary });
 
@@ -85,11 +87,7 @@ export function ConsolidacaoEntregasPipelineView() {
 
   const downloadResult = () => {
     if (!lastResult || !lastResult.data) return;
-
-    const sheets = Object.entries(lastResult.data).map(([name, data]) => ({ name, data }));
-    const fileName = lastResult.summary || `Consolidado_Entregas_${new Date().toLocaleDateString('pt-BR')}`;
-
-    downloadMultipleSheets(sheets, fileName);
+    downloadMultipleSheets([{ data: lastResult.data, name: 'Consolidado' }], `Consolidado_Entregas_${month}_${year}`);
   }
 
   return (
@@ -104,7 +102,7 @@ export function ConsolidacaoEntregasPipelineView() {
                 <HelpCircle className="size-4 text-muted-foreground cursor-help" />
               </TooltipTrigger>
               <TooltipContent className="max-w-xs">
-                <p>Consolida os arquivos de controle de entregas de cada filial, gerando um resumo diário em Excel com abas por filial e um acumulado.</p>
+                <p>Consolida os arquivos de controle de entregas de cada filial, gerando um resumo em Excel.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -117,19 +115,27 @@ export function ConsolidacaoEntregasPipelineView() {
           <Card>
             <CardHeader>
               <CardTitle>Configuração da Análise</CardTitle>
-              <CardDescription>Selecione a data e os arquivos de controle de cada filial.</CardDescription>
+              <CardDescription>Selecione o período e os arquivos de controle de cada filial.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Data de Processamento</Label>
-                <DatePicker date={date} setDate={setDate} />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Ano</Label>
+                  <Input type="number" value={year} onChange={e => setYear(parseInt(e.target.value))} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Mês</Label>
+                  <Input type="number" min={1} max={12} value={month} onChange={e => setMonth(parseInt(e.target.value))} />
+                </div>
               </div>
+
+              <AIParamAssistant onParamsUpdate={(m, y) => { setMonth(m); setYear(y); }} currentMonth={month} currentYear={year} />
 
               <div className="space-y-2">
                 <Label>Arquivos de Controle</Label>
                 <div className="space-y-2 rounded-lg border p-2">
                   {FILIAIS.map(filial => (
-                     <div key={filial.id} className="flex items-center gap-3 p-2.5 rounded-lg border bg-white hover:bg-muted/10 transition-colors">
+                     <div key={filial.id} className="flex items-center gap-3 p-2.5 rounded-lg border bg-background hover:bg-muted/10 transition-colors">
                       <FileSpreadsheet className="size-3.5 shrink-0 text-primary" />
                       <div className="flex-1 min-w-0">
                         <span className="text-xs font-semibold truncate">{filial.label}</span>
@@ -138,9 +144,9 @@ export function ConsolidacaoEntregasPipelineView() {
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         {files[filial.id] && <Button variant="ghost" size="icon" className="size-6" onClick={() => handleFileChange(filial.id, null)}><Trash2 className="size-3 text-destructive" /></Button>}
-                        <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => document.getElementById(filial.id)?.click()}>{files[filial.id] ? 'Trocar' : 'Selecionar'}</Button>
+                        <Button variant="outline" size="sm" className="h-6 text-[10px] px-2" onClick={() => document.getElementById(`file-${filial.id}`)?.click()}>{files[filial.id] ? 'Trocar' : 'Selecionar'}</Button>
                       </div>
-                      <input id={filial.id} type="file" className="hidden" accept=".xlsx,.xls" onChange={e => handleFileChange(filial.id, e.target.files?.[0] || null)} />
+                      <input id={`file-${filial.id}`} type="file" className="hidden" accept=".xlsx,.xls" onChange={e => handleFileChange(filial.id, e.target.files?.[0] || null)} />
                     </div>
                   ))}
                 </div>
@@ -160,7 +166,7 @@ export function ConsolidacaoEntregasPipelineView() {
               <CardHeader className="p-3 border-b bg-muted/20">
                   <CardTitle className="text-sm flex items-center gap-2"><FileCode className="size-4"/> Console</CardTitle>
               </CardHeader>
-              <ScrollArea className="bg-slate-50 flex-1 p-3 font-mono text-[10px]">
+              <ScrollArea className="bg-muted/5 flex-1 p-3 font-mono text-[10px]">
                 {logs.length === 0 ? <span className="text-muted-foreground italic">Aguardando execução...</span> : logs.map((log, i) => <div key={i}>{log}</div>)}
               </ScrollArea>
           </Card>
@@ -173,7 +179,7 @@ export function ConsolidacaoEntregasPipelineView() {
               <CardContent>
                   <Button onClick={downloadResult} className="w-full">
                       <Download className="mr-2" />
-                      Baixar {lastResult.summary}
+                      Baixar Consolidado
                   </Button>
               </CardContent>
             </Card>
