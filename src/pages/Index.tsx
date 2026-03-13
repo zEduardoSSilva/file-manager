@@ -14,22 +14,30 @@ import { RetornoPedidosPipelineView } from '@/components/pipeline/retorno-pedido
 import { RetornoPedidosUlPipelineView } from '@/components/pipeline/retorno-pedidos-ul-pipeline-view';
 import { RoadshowPipelineView } from '@/components/pipeline/roadshow-pipeline-view';
 import { VFleetPipelineView } from '@/components/pipeline/vfleet-pipeline-view';
+import { FuncionariosPipelineView } from '@/components/pipeline/funcionarios-pipeline-view';
+import { VeiculosPipelineView } from '@/components/pipeline/veiculos-pipeline-view';
+import { FaturamentoPipelineView } from '@/components/pipeline/faturamento-pipeline-view';
+import { MotivosDevPipelineView } from '@/components/pipeline/motivos-dev-pipeline-view';
 
 // Create a map to associate pipeline IDs with their components
 const pipelineViewMap: { [key: string]: React.ComponentType } = {
   'consolidacao-entregas': ConsolidacaoEntregasPipelineView,
-  cco: CcoPipelineView,
-  consolidador: ConsolidadorPipelineView,
-  coordenadores: CoordenadorPipelineView,
-  devolucoes: DevolucoesPipelineView,
-  faturista: FaturistaPipelineView,
+  'cco': CcoPipelineView,
+  'consolidador': ConsolidadorPipelineView,
+  'coordenadores': CoordenadorPipelineView,
+  'devolucoes': DevolucoesPipelineView,
+  'faturista': FaturistaPipelineView,
   'mercanete-roadshow': MercaneteRoadshowPipelineView,
-  performaxxi: PerformaxxiPipelineView,
-  ponto: PontoPipelineView,
+  'performaxxi': PerformaxxiPipelineView,
+  'ponto': PontoPipelineView,
   'retorno-pedidos': RetornoPedidosPipelineView,
   'retorno-pedidos-ul': RetornoPedidosUlPipelineView,
-  roadshow: RoadshowPipelineView,
-  vfleet: VFleetPipelineView,
+  'roadshow': RoadshowPipelineView,
+  'vfleet': VFleetPipelineView,
+  'funcionarios': FuncionariosPipelineView,
+  'veiculos': VeiculosPipelineView,
+  'faturamento': FaturamentoPipelineView,
+  'motivos-dev': MotivosDevPipelineView,
 };
 
 interface PipelineContext {

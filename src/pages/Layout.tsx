@@ -32,7 +32,8 @@ import {
   GitMerge,
   Search,
   LayoutGrid,
-  Wrench // Ícone para Cadastros
+  Wrench,
+  FileX
 } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
 
@@ -40,15 +41,17 @@ const NAV_GROUPS = [
   {
     label: "VISUAIS",
     items: [
-      // Revertendo para o caminho original para evitar quebras
       { id: 'entregas-analitica', name: 'Visão Analítica', icon: LayoutGrid, path: "/visuais/entregas-analitica" },
       { id: 'entregas-acumulada', name: 'Visão Acumulada', icon: LayoutGrid, path: "/visuais/entregas-acumulada" },
     ]
   },
   {
-    label: "GERENCIAR",
+    label: "CADASTROS",
     items: [
-      { id: 'cadastros-gerais', name: 'Cadastros Gerais', icon: Wrench, path: "/cadastros" },
+      { id: 'funcionarios', name: 'Funcionarios', icon: User, path: '/pipeline/funcionarios' },
+      { id: 'veiculos', name: 'Veiculos', icon: Truck, path: '/pipeline/veiculos' },
+      { id: 'faturamento', name: 'Faturamento', icon: BadgePercent, path: '/pipeline/faturamento' },
+      { id: 'motivos-dev', name: 'Motivos Dev.', icon: FileX, path: '/pipeline/motivos-dev' },
     ]
   },
   {

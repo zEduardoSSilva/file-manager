@@ -1,8 +1,8 @@
 "use server"
 
-import { processAndSave, PipelineArgs, ProcessorOutput, PipelineResponse } from "./pipeline-utils"
+import { processAndSave, PipelineArgs, ProcessorOutput, PipelineResponse } from "./actions-utils"
 import {
-  getFirestore, collection, query, where, getDocs,
+  getFirestore, collection, query, where, getDocs, orderBy, limit,
 } from "firebase/firestore"
 import { initializeApp, getApps, getApp } from "firebase/app"
 
@@ -27,7 +27,7 @@ const MAPA_FILIAL_REGIAO: Record<string, string> = {
 }
 
 function removeAcentos(txt: string): string {
-  return txt.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
+  return txt.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase()
 }
 
 function formatarTempo(valor: any): string {
@@ -37,7 +37,7 @@ function formatarTempo(valor: any): string {
     const totalMin = Math.round(num * 24 * 60)
     return `${String(Math.floor(totalMin / 60)).padStart(2, "0")}:${String(totalMin % 60).padStart(2, "0")}`
   }
-  const str = String(valor).trim()
+  const str   = String(valor).trim()
   const match = str.match(/^(\d+):(\d{2})(?::\d{2})?$/)
   if (match) return `${match[1].padStart(2, "0")}:${match[2]}`
   return str
@@ -66,34 +66,56 @@ function findCol(colsKeys: string[], ...patterns: RegExp[]): string | undefined 
 }
 
 function dedupKey(row: any): string {
-  const viagem  = String(row["VIAGENS"]      ?? "").trim()
-  const data = String(row["DATA DE ENTREGA"] ?? "").trim()
+  const viagem = String(row["VIAGENS"]        ?? "").trim()
+  const data   = String(row["DATA DE ENTREGA"] ?? "").trim()
   return `${viagem}|${data}`
 }
 
-async function buscarDadosExistentes(year: number, month: number): Promise<{ keys: Set<string>; rows: any[] }> {
+// ─── buscarDadosExistentes ────────────────────────────────────────────────────
+// ✅ CORRIGIDO: lê a subcoleção items/ em vez do campo data[] do doc principal.
+//    O campo data[] não existe mais no documento principal — ele ficaria > 1 MB.
+// ─────────────────────────────────────────────────────────────────────────────
+async function buscarDadosExistentes(
+  year: number,
+  month: number,
+): Promise<{ keys: Set<string>; rows: any[]; mainDocId: string | null }> {
   try {
+    // 1. Encontra o documento principal mais recente para este mês/ano
     const q = query(
       collection(db, "pipeline_results"),
       where("pipelineType", "==", "consolidacao-entregas"),
       where("year",  "==", year),
       where("month", "==", month),
+      orderBy("timestamp", "desc"),
+      limit(1),
     )
     const snap = await getDocs(q)
-    if (snap.empty) return { keys: new Set(), rows: [] }
+    if (snap.empty) {
+      console.log(`[buscarDadosExistentes] Nenhum resultado para ${month}/${year}.`)
+      return { keys: new Set(), rows: [], mainDocId: null }
+    }
 
-    const sorted = snap.docs.sort(
-      (a, b) => (b.data().timestamp ?? 0) - (a.data().timestamp ?? 0)
+    const mainDocId = snap.docs[0].id
+    console.log(`[buscarDadosExistentes] Doc principal: ${mainDocId}`)
+
+    // 2. ✅ Lê os itens da subcoleção (sem limite de tamanho)
+    const itemsSnap = await getDocs(
+      collection(db, "pipeline_results", mainDocId, "items")
     )
-    const rows: any[] = sorted[0].data().data ?? []
+    const rows = itemsSnap.docs.map(d => d.data())
+    console.log(`[buscarDadosExistentes] ${rows.length} itens carregados da subcoleção.`)
+
+    // 3. Constrói o Set de chaves para deduplicação
     const keys = new Set<string>()
     for (const row of rows) {
       const k = dedupKey(row)
       if (k !== "|") keys.add(k)
     }
-    return { keys, rows }
-  } catch {
-    return { keys: new Set(), rows: [] }
+
+    return { keys, rows, mainDocId }
+  } catch (err: any) {
+    console.error("[buscarDadosExistentes] Erro:", err.message)
+    return { keys: new Set(), rows: [], mainDocId: null }
   }
 }
 
@@ -102,7 +124,6 @@ function processarRows(rows: any[], filialNome: string, dataEntrega: string): an
   if (!rows || rows.length === 0) return []
 
   const headerCols: string[] = (rows as any).__colNames__ ?? []
-
   const dataColsSet = new Set<string>(headerCols.filter(c => !c.startsWith("__")))
   for (const row of rows) {
     for (const key of Object.keys(row)) {
@@ -111,41 +132,33 @@ function processarRows(rows: any[], filialNome: string, dataEntrega: string): an
   }
   const colsKeys = [...dataColsSet]
 
-  // ── Mapeamento de colunas ──────────────────────────────────────────────────
-  const colData        = findCol(colsKeys, /^DATA$/)
-  const colMotorista   = findCol(colsKeys, /^MOTORISTA$/)
-  const colAjudante1   = findCol(colsKeys, /^AJUDANTE$/)
-  const colAjudante2   = findCol(colsKeys, /^AJUDANTE_2$/)
-  const colPlaca       = findCol(colsKeys, /^PLACA$/)
-  const colPlacaSis    = findCol(colsKeys, /PLACA.?SISTEMA/)
-  const colEntregas    = findCol(colsKeys, /^ENTREGAS$/)
-  const colPeso        = findCol(colsKeys, /^PESO$/)
-  const colTempo       = findCol(colsKeys, /^TEMPO$/)
-  const colKm          = findCol(colsKeys, /^KM$/)
-  const colViagens     = findCol(colsKeys, /VIAGEN/, /LIQUIDA/, /^ID$/)
-  const colObs         = findCol(colsKeys, /OBSERVA/)
-  const colChapa       = findCol(colsKeys, /^CHAPA$/)
-  const colFrete       = findCol(colsKeys, /^FRETE$/)
-  const colDescarga    = findCol(colsKeys, /DESCARGA/)
-  const colHospedagem  = findCol(colsKeys, /HOSPED/)
-  const colDiaria      = findCol(colsKeys, /^DIARIA$/, /^DIÁRIA$/)
-  const colExtra       = findCol(colsKeys, /^EXTRA$/)
-  const colSaida       = findCol(colsKeys, /^SA[IÍ]DA$/)
-  const colModelo      = findCol(colsKeys, /^MODELO$/)
-  const colOcp         = findCol(colsKeys, /^OCP$/)
-  const colValor       = findCol(colsKeys, /^VALOR$/)
-  const colStatus      = findCol(colsKeys, /^STATUS$/)
-  const colContrato    = findCol(colsKeys, /^CONTRATO$/)
-  const colPerforma    = findCol(colsKeys, /PERFORMAXXI/)
-  const colEntDev      = findCol(colsKeys, /ENTREGAS.?DEV/)
-  const colValorDev    = findCol(colsKeys, /VALOR.?DEV/)
-
-  console.log(
-    `[processarRows] ${filialNome}`,
-    `| DATA="${colData}" MOT="${colMotorista}"`,
-    `| AJ1="${colAjudante1}" AJ2="${colAjudante2}"`,
-    `| PLACA="${colPlaca}" VIAG="${colViagens}"`
-  )
+  const colData       = findCol(colsKeys, /^DATA$/)
+  const colMotorista  = findCol(colsKeys, /^MOTORISTA$/)
+  const colAjudante1  = findCol(colsKeys, /^AJUDANTE$/)
+  const colAjudante2  = findCol(colsKeys, /^AJUDANTE_2$/)
+  const colPlaca      = findCol(colsKeys, /^PLACA$/)
+  const colPlacaSis   = findCol(colsKeys, /PLACA.?SISTEMA/)
+  const colEntregas   = findCol(colsKeys, /^ENTREGAS$/)
+  const colPeso       = findCol(colsKeys, /^PESO$/)
+  const colTempo      = findCol(colsKeys, /^TEMPO$/)
+  const colKm         = findCol(colsKeys, /^KM$/)
+  const colViagens    = findCol(colsKeys, /VIAGEN/, /LIQUIDA/, /^ID$/)
+  const colObs        = findCol(colsKeys, /OBSERVA/)
+  const colChapa      = findCol(colsKeys, /^CHAPA$/)
+  const colFrete      = findCol(colsKeys, /^FRETE$/)
+  const colDescarga   = findCol(colsKeys, /DESCARGA/)
+  const colHospedagem = findCol(colsKeys, /HOSPED/)
+  const colDiaria     = findCol(colsKeys, /^DIARIA$/, /^DIÁRIA$/)
+  const colExtra      = findCol(colsKeys, /^EXTRA$/)
+  const colSaida      = findCol(colsKeys, /^SA[IÍ]DA$/)
+  const colModelo     = findCol(colsKeys, /^MODELO$/)
+  const colOcp        = findCol(colsKeys, /^OCP$/)
+  const colValor      = findCol(colsKeys, /^VALOR$/)
+  const colStatus     = findCol(colsKeys, /^STATUS$/)
+  const colContrato   = findCol(colsKeys, /^CONTRATO$/)
+  const colPerforma   = findCol(colsKeys, /PERFORMAXXI/)
+  const colEntDev     = findCol(colsKeys, /ENTREGAS.?DEV/)
+  const colValorDev   = findCol(colsKeys, /VALOR.?DEV/)
 
   const resultado: any[] = []
 
@@ -200,13 +213,13 @@ function processarRows(rows: any[], filialNome: string, dataEntrega: string): an
     })
   }
 
-  console.log(`[processarRows] ${filialNome} → ${resultado.length} registros (${rows.length} linhas)`)
   return resultado
 }
 
+// ─── Processor principal ──────────────────────────────────────────────────────
 async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<ProcessorOutput> {
   const { year, month, files, formData } = args
-  const day = parseInt(formData?.get("day") as string ?? "0") || 0
+  const day    = parseInt(formData?.get("day") as string ?? "0") || 0
   const abaAlvo = day > 0 ? montarNomeAba(day, month, year) : ""
   if (abaAlvo) formData.set("sheetName", abaAlvo)
 
@@ -214,6 +227,7 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
   const fileNames: string[] = (formData.getAll("fileNames") as string[]) ?? []
   if (!sheetsData.length) throw new Error("Nenhum arquivo ou aba encontrada.")
 
+  // ✅ buscarDadosExistentes agora lê subcoleção items/ corretamente
   const { keys: existentes, rows: rowsExistentes } = await buscarDadosExistentes(year, month)
 
   const filialData: Record<string, any[]> = {}
@@ -258,7 +272,7 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
     const k = dedupKey(row)
     if (k !== "|" && existentes.has(k)) {
       duplicadas.push({
-        viagens:    String(row["VIAGENS"]      ?? "—"),
+        viagens:   String(row["VIAGENS"]        ?? "—"),
         data:      String(row["DATA DE ENTREGA"] ?? "—"),
         motorista: String(row["MOTORISTA"]       ?? "—"),
         filial:    String(row["FILIAL"]          ?? "—"),
@@ -268,6 +282,7 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
     }
   }
 
+  // ── Acumulado final ───────────────────────────────────────────────────────
   const acumuladoFinal = [...rowsExistentes, ...novosRegistros]
 
   const acumuladoSemChao = acumuladoFinal.filter(row => {
@@ -275,8 +290,9 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
     return rota !== "CHAO"
   })
 
-  const duplicadasKeys = new Set(duplicadas.map(d => `${d.viagem}|${d.data}`))
+  // ── extraSheets para download Excel (NÃO vai ao Firestore) ───────────────
   const filialDataFiltrada: Record<string, any[]> = {}
+  const duplicadasKeys = new Set(duplicadas.map(d => `${d.viagens}|${d.data}`))
 
   for (const [filial, rows] of Object.entries(filialData)) {
     filialDataFiltrada[filial] = rows.filter(r => !duplicadasKeys.has(dedupKey(r)))
@@ -288,13 +304,15 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
   }
 
   const filiaisOk = Object.values(filialDataFiltrada).filter(r => r.length > 0).length
-  const diasLabel = day > 0 ? `dia ${String(day).padStart(2, "0")}` : `${diasProcessados.size} dias`
-  const dupInfo   = duplicadas.length > 0 ? ` · ${duplicadas.length} duplicada(s) ignorada(s)` : ""
+  const diasLabel  = day > 0 ? `dia ${String(day).padStart(2, "0")}` : `${diasProcessados.size} dias`
+  const dupInfo    = duplicadas.length > 0 ? ` · ${duplicadas.length} duplicada(s) ignorada(s)` : ""
 
   return {
+    // ✅ data = acumulado completo → vai para subcoleção items/ (sem limite de tamanho)
     data: acumuladoFinal,
     summary: `Consolidação ${String(month).padStart(2, "0")}/${year} (${diasLabel}): ${filiaisOk} filiais · ${totalRegistros} registros novos · ${acumuladoFinal.length} no acumulado${dupInfo}`,
     duplicadas,
+    // ✅ extraSheets = para download Excel → nunca vai ao Firestore (separado em processAndSave)
     extraSheets: [
       ...Object.entries(filialDataFiltrada).map(([filial, rows]) => ({
         name: filial.slice(0, 31),

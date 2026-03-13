@@ -1,14 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Permite que seu servidor (e qualquer cliente) leia e escreva
-    // APENAS na coleção "pipeline_results".
-    match /pipeline_results/{resultId} {
+
+    match /docs_entregas/{docId} {
       allow read, write: if true;
     }
-
-    // Para todas as outras coleções não especificadas, o acesso é negado.
-    // Isso é um padrão de segurança importante para evitar acesso não intencional.
+    match /docs_funcionarios/{docId} {
+      allow read, write: if true;
+    }
+    match /docs_veiculos/{docId} {
+      allow read, write: if true;
+    }
+    match /docs_faturamento/{docId} {
+      allow read, write: if true;
+    }
+    match /docs_mot_devolucao/{docId} {
+      allow read, write: if true;
+    }
+    match /pipeline_results/{docId=**} {
+      allow read, write: if true;
+    }
     match /{document=**} {
       allow read, write: if false;
     }

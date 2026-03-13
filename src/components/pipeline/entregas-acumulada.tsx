@@ -1,8 +1,7 @@
 import * as React from "react"
 import {
   RefreshCw, Loader2, ChevronDown, ChevronUp,
-  Search, Database, FileStack, CalendarDays,
-  Building2, Hash, FileDown, Columns3, Undo2,
+  Search, Database, FileDown, Columns3, Undo2,
   Check, X, Layers,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -66,7 +65,6 @@ interface RawRow {
 }
 
 interface AccumulatedRow {
-  // Chave de agrupamento
   "DATA DE ENTREGA": string
   "FILIAL": string
   "REGIÃO": string
@@ -75,22 +73,15 @@ interface AccumulatedRow {
   "AJUDANTE 2": string
   "PLACA": string
   "PLACA SISTEMA": string
-
-  // Campos acumulados
+  "TIPO CARGA": string
   "ENTREGAS": number
   "PESO": number
   "KM": number
   "KM_MAX": number
   "TEMPO_MINUTOS": number
   "TEMPO": string
-
   "VIAGENS": string
-
   "ROTA": string
-
-  "TIPO CARGA": string
-
-  // Financeiro acumulado
   "VALOR": number
   "FRETE": number
   "DESCARGA PALET": number
@@ -98,22 +89,20 @@ interface AccumulatedRow {
   "DIARIA": number
   "EXTRA": number
   "CHAPA": number
-
   "__cargas": number
   "__linhasOriginais": RawRow[]
 }
 
-// ─── Colunas padrão do grid acumulado ────────────────────────────────────────
+// ─── Colunas padrão ───────────────────────────────────────────────────────────
 const INITIAL_GRID_COLS = [
   "DATA DE ENTREGA", "TIPO CARGA", "FILIAL", "REGIÃO",
   "ROTA", "MOTORISTA", "AJUDANTE", "AJUDANTE 2",
   "PLACA", "PLACA SISTEMA",
   "ENTREGAS", "PESO", "TEMPO", "KM",
-  "VIAGENS",
-  "VALOR", "FRETE",
+  "VIAGENS", "VALOR", "FRETE",
 ]
 
-// ─── Classificar tipo de carga (replica lógica Python) ───────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function classificarTipoCarga(observacao: any): string {
   if (observacao == null || observacao === "") return "Carga A"
   const obs = String(observacao).toUpperCase().trim()
@@ -124,47 +113,38 @@ function classificarTipoCarga(observacao: any): string {
   return "Carga A"
 }
 
-// ─── Converte HH:MM → minutos ─────────────────────────────────────────────────
 function tempoParaMinutos(tempo: any): number {
   if (!tempo) return 0
   const s = String(tempo).trim()
-  // Formato HH:MM ou HH:MM:SS
   const m = s.match(/^(\d+):(\d{2})/)
   if (m) return parseInt(m[1]) * 60 + parseInt(m[2])
-  // Fração de dia (Excel serial)
   const n = parseFloat(s)
   if (!isNaN(n) && n > 0 && n < 1) return Math.round(n * 24 * 60)
   return 0
 }
 
-// ─── Converte minutos → HH:MM ─────────────────────────────────────────────────
-function minutosParaTempo(minutos: number): string {
-  if (!minutos) return ""
-  const h = Math.floor(minutos / 60)
-  const m = minutos % 60
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+function minutosParaTempo(min: number): string {
+  if (!min) return ""
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`
 }
 
-// ─── Extrai número de data "DD/MM/YYYY" ou "DD.MM.YYYY" ──────────────────────
 function extractDay(dateStr: any): number | null {
   if (!dateStr) return null
   const m = String(dateStr).trim().match(/^(\d{1,2})[\/\.]/)
   return m ? parseInt(m[1]) : null
 }
 
-// ─── Soma numérica segura ─────────────────────────────────────────────────────
 function numVal(v: any): number {
   const n = parseFloat(String(v ?? "").replace(",", "."))
   return isNaN(n) ? 0 : n
 }
 
-// ─── Formata número ou vazio ──────────────────────────────────────────────────
 function fmtNum(v: number, decimais = 2): string {
   if (!v) return ""
   return v.toLocaleString("pt-BR", { minimumFractionDigits: decimais, maximumFractionDigits: decimais })
 }
 
-// ─── Acumula linhas brutas → linhas agrupadas ─────────────────────────────────
+// ─── Acumulação ───────────────────────────────────────────────────────────────
 function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
   const grupos = new Map<string, AccumulatedRow>()
 
@@ -172,13 +152,13 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
     const data      = String(row["DATA DE ENTREGA"] ?? "").trim()
     const motorista = String(row["MOTORISTA"] ?? "").trim()
     const placa     = String(row["PLACA"] ?? row["PLACA SISTEMA"] ?? "").trim()
-
     if (!data || !motorista) continue
 
-    const chave = `${data}||${motorista}||${placa}`
-    const tipoCarga  = classificarTipoCarga(row["OBSERVAÇÃO"])
+    const tipoCarga = classificarTipoCarga(row["OBSERVAÇÃO"])
+    const chave     = `${data}||${motorista}||${placa}||${tipoCarga}`
+
     const viagem = String(row["VIAGENS"] ?? "").trim()
-    const rota       = String(row["ROTA"]       ?? "").trim()
+    const rota   = String(row["ROTA"]    ?? "").trim()
 
     if (!grupos.has(chave)) {
       grupos.set(chave, {
@@ -190,40 +170,22 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
         "AJUDANTE 2":      String(row["AJUDANTE 2"]    ?? ""),
         "PLACA":           String(row["PLACA"]         ?? ""),
         "PLACA SISTEMA":   String(row["PLACA SISTEMA"] ?? ""),
-        "ENTREGAS":        0,
-        "PESO":            0,
-        "KM":              0,
-        "KM_MAX":          0,
-        "TEMPO_MINUTOS":   0,
-        "TEMPO":           "",
-        "VIAGENS":      viagem,
-        "ROTA":            rota,
         "TIPO CARGA":      tipoCarga,
-        "VALOR":           0,
-        "FRETE":           0,
-        "DESCARGA PALET":  0,
-        "HOSPEDAGEM":      0,
-        "DIARIA":          0,
-        "EXTRA":           0,
-        "CHAPA":           0,
-        "__cargas":        1,
+        "ENTREGAS": 0, "PESO": 0, "KM": 0, "KM_MAX": 0, "TEMPO_MINUTOS": 0, "TEMPO": "",
+        "VIAGENS": viagem, "ROTA": rota,
+        "VALOR": 0, "FRETE": 0, "DESCARGA PALET": 0,
+        "HOSPEDAGEM": 0, "DIARIA": 0, "EXTRA": 0, "CHAPA": 0,
+        "__cargas": 1,
         "__linhasOriginais": [row],
       })
     } else {
       const g = grupos.get(chave)!
-
       const viagens = g["VIAGENS"].split(" / ").filter(Boolean)
       if (viagem && !viagens.includes(viagem)) viagens.push(viagem)
       g["VIAGENS"] = viagens.join(" / ")
-
       const rotas = g["ROTA"].split(" / ").filter(Boolean)
       if (rota && !rotas.includes(rota)) rotas.push(rota)
       g["ROTA"] = rotas.join(" / ")
-
-      const tipos = g["TIPO CARGA"].split(" / ").filter(Boolean)
-      if (!tipos.includes(tipoCarga)) tipos.push(tipoCarga)
-      g["TIPO CARGA"] = tipos.join(" / ")
-
       g["__cargas"]++
       g["__linhasOriginais"].push(row)
     }
@@ -231,8 +193,6 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
     const g = grupos.get(chave)!
     g["ENTREGAS"]       += numVal(row["ENTREGAS"])
     g["PESO"]           += numVal(row["PESO"])
-    const kmRow = numVal(row["KM"])
-    if (kmRow > g["KM_MAX"]) g["KM_MAX"] = kmRow
     g["TEMPO_MINUTOS"]  += tempoParaMinutos(row["TEMPO"])
     g["VALOR"]          += numVal(row["VALOR"])
     g["FRETE"]          += numVal(row["FRETE"])
@@ -241,22 +201,24 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
     g["DIARIA"]         += numVal(row["DIARIA"])
     g["EXTRA"]          += numVal(row["EXTRA"])
     g["CHAPA"]          += numVal(row["CHAPA"])
+    const km = numVal(row["KM"])
+    if (km > g["KM_MAX"]) g["KM_MAX"] = km
   }
 
-  const result = [...grupos.values()]
-  for (const g of result) {
-    const minutosDivididos = g["__cargas"] > 0
+  for (const g of grupos.values()) {
+    const minDiv = g["__cargas"] > 0
       ? Math.round(g["TEMPO_MINUTOS"] / g["__cargas"])
       : g["TEMPO_MINUTOS"]
-    g["TEMPO"] = minutosParaTempo(minutosDivididos)
+    g["TEMPO"] = minutosParaTempo(minDiv)
     g["KM"]    = Math.round(g["KM_MAX"] * 1.2 * 100) / 100
   }
 
-  return result
+  return [...grupos.values()]
 }
 
+// ─── Célula ───────────────────────────────────────────────────────────────────
 function cellVal(row: AccumulatedRow, col: string) {
-  const v = row[col as keyof AccumulatedRow]
+  const v = (row as any)[col]
 
   if (col === "TIPO CARGA") {
     const partes = String(v ?? "").split(" / ").filter(Boolean)
@@ -280,77 +242,61 @@ function cellVal(row: AccumulatedRow, col: string) {
   if (col === "VIAGENS") {
     const partes = String(v ?? "").split(" / ").filter(Boolean)
     if (!partes.length) return <span className="text-muted-foreground/40 text-[10px]">—</span>
-    return (
-      <span className="font-mono text-[10px] text-foreground/80">
-        {partes.join(" / ")}
-      </span>
-    )
+    return <span className="font-mono text-[10px] text-foreground/80">{partes.join(" / ")}</span>
   }
 
-  if (["ENTREGAS", "PESO", "KM", "VALOR", "FRETE", "DESCARGA PALET", "HOSPEDAGEM", "DIARIA", "EXTRA", "CHAPA"].includes(col)) {
+  if (["ENTREGAS","PESO","KM","VALOR","FRETE","DESCARGA PALET","HOSPEDAGEM","DIARIA","EXTRA","CHAPA"].includes(col)) {
     const n = numVal(v)
     if (!n) return <span className="text-muted-foreground/40 text-[10px]">—</span>
-    const decimais = ["ENTREGAS"].includes(col) ? 0 : 2
-    return <span className="tabular-nums">{fmtNum(n, decimais)}</span>
+    return <span className="tabular-nums">{fmtNum(n, col === "ENTREGAS" ? 0 : 2)}</span>
   }
 
-  if (v == null || v === "" || v === 0) {
+  if (v == null || v === "" || v === 0)
     return <span className="text-muted-foreground/40 text-[10px]">—</span>
-  }
 
   return <span>{String(v)}</span>
 }
 
+// ─── Dialog: detalhe de cargas ────────────────────────────────────────────────
 function DetalheCargas({ row, open, onClose }: {
   row: AccumulatedRow | null; open: boolean; onClose: () => void
 }) {
   if (!row) return null
-  const linhas = row.__linhasOriginais
-
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
       <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col gap-0 p-0">
         <DialogHeader className="px-6 pt-5 pb-4 border-b shrink-0">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Layers className="size-4 text-primary" />
-            Detalhe de cargas — {row["MOTORISTA"]}
+            Detalhe — {row["MOTORISTA"]}
             <Badge variant="outline" className="ml-1 text-[10px]">{row["DATA DE ENTREGA"]}</Badge>
+            <Badge className={cn("ml-1 text-[10px]",
+              row["TIPO CARGA"] === "Carga A" ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
+              row["TIPO CARGA"] === "Carga B" ? "bg-blue-100 text-blue-700 border-blue-200" :
+              row["TIPO CARGA"] === "Carga C" ? "bg-amber-100 text-amber-700 border-amber-200" :
+              row["TIPO CARGA"] === "Carga D" ? "bg-orange-100 text-orange-700 border-orange-200" :
+                                                "bg-red-100 text-red-700 border-red-200"
+            )}>{row["TIPO CARGA"]}</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
-            {linhas.length} carga{linhas.length > 1 ? "s" : ""} agrupada{linhas.length > 1 ? "s" : ""} nesta linha acumulada.
+            {row.__linhasOriginais.length} rota{row.__linhasOriginais.length > 1 ? "s" : ""} agrupada{row.__linhasOriginais.length > 1 ? "s" : ""} nesta linha.
           </DialogDescription>
         </DialogHeader>
-
         <div className="overflow-auto flex-1">
           <table className="w-full text-[11px]">
             <thead>
               <tr className="bg-muted/30 border-b sticky top-0">
-                {["Carga", "Rota", "VIAGENS", "Tipo Carga", "Entregas", "Peso", "Tempo", "KM", "Observação"].map(h => (
+                {["#", "Rota", "Viagens", "Entregas", "Peso", "Tempo", "KM", "Observação"].map(h => (
                   <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {linhas.map((linha, i) => (
+              {row.__linhasOriginais.map((linha, i) => (
                 <tr key={i} className={cn("border-b", i % 2 === 0 ? "bg-background" : "bg-muted/5")}>
                   <td className="px-3 py-2 font-semibold text-primary">{i + 1}</td>
                   <td className="px-3 py-2">{linha["ROTA"] ?? "—"}</td>
                   <td className="px-3 py-2 font-mono">{linha["VIAGENS"] ?? "—"}</td>
-                  <td className="px-3 py-2">
-                    {(() => {
-                      const t = classificarTipoCarga(linha["OBSERVAÇÃO"])
-                      return (
-                        <span className={cn(
-                          "text-[10px] px-1.5 py-0.5 rounded font-medium",
-                          t === "Carga A" ? "bg-emerald-100 text-emerald-700" :
-                          t === "Carga B" ? "bg-blue-100 text-blue-700" :
-                          t === "Carga C" ? "bg-amber-100 text-amber-700" :
-                          t === "Carga D" ? "bg-orange-100 text-orange-700" :
-                                            "bg-red-100 text-red-700"
-                        )}>{t}</span>
-                      )
-                    })()}
-                  </td>
                   <td className="px-3 py-2 tabular-nums">{numVal(linha["ENTREGAS"]) || "—"}</td>
                   <td className="px-3 py-2 tabular-nums">{fmtNum(numVal(linha["PESO"])) || "—"}</td>
                   <td className="px-3 py-2 font-mono">{linha["TEMPO"] ?? "—"}</td>
@@ -361,17 +307,16 @@ function DetalheCargas({ row, open, onClose }: {
             </tbody>
             <tfoot>
               <tr className="border-t-2 bg-muted/20 font-semibold">
-                <td className="px-3 py-2 text-muted-foreground" colSpan={4}>Total</td>
+                <td className="px-3 py-2 text-muted-foreground" colSpan={3}>Total</td>
                 <td className="px-3 py-2 tabular-nums">{row["ENTREGAS"]}</td>
                 <td className="px-3 py-2 tabular-nums">{fmtNum(row["PESO"])}</td>
-                <td className="px-3 py-2 font-mono">{row["TEMPO"]}</td>
-                <td className="px-3 py-2 tabular-nums">{fmtNum(row["KM"])}</td>
+                <td className="px-3 py-2 font-mono">{row["TEMPO"]} <span className="text-muted-foreground font-normal">(÷{row.__cargas})</span></td>
+                <td className="px-3 py-2 tabular-nums">{fmtNum(row["KM"])} <span className="text-muted-foreground font-normal">(+20%)</span></td>
                 <td />
               </tr>
             </tfoot>
           </table>
         </div>
-
         <div className="px-6 py-3 border-t shrink-0 flex justify-end">
           <DialogClose asChild>
             <Button variant="outline" size="sm" className="gap-1.5"><X className="size-3.5" /> Fechar</Button>
@@ -382,8 +327,9 @@ function DetalheCargas({ row, open, onClose }: {
   )
 }
 
+// ─── Dialog: gerenciar colunas ────────────────────────────────────────────────
 function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
-  open: boolean; onClose: () => void; cols: string[]; setCols: (cols: string[]) => void
+  open: boolean; onClose: () => void; cols: string[]; setCols: (c: string[]) => void
 }) {
   const move = (idx: number, dir: "up" | "down") => {
     const n = [...cols]; const [item] = n.splice(idx, 1)
@@ -425,7 +371,7 @@ function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// ── Página Principal ─────────────────────────────────────────────────────────
+// ── Página Principal
 // ════════════════════════════════════════════════════════════════════════════
 export function VisaoAcumuladaPage() {
   const { toast } = useToast()
@@ -446,9 +392,10 @@ export function VisaoAcumuladaPage() {
   const [sortCol, setSortCol] = React.useState<string | null>(null)
   const [sortAsc, setSortAsc] = React.useState(true)
 
-  const [detalheRow, setDetalheRow] = React.useState<AccumulatedRow | null>(null)
+  const [detalheRow,           setDetalheRow]           = React.useState<AccumulatedRow | null>(null)
   const [showGerenciarColunas, setShowGerenciarColunas] = React.useState(false)
 
+  // ─── ✅ Fetch: sempre lê da subcoleção items/ ────────────────────────────
   const fetchData = React.useCallback(async () => {
     setLoading(true)
     try {
@@ -459,12 +406,33 @@ export function VisaoAcumuladaPage() {
         where("month", "==", filterMonth),
       )
       const snap = await getDocs(q)
-      if (snap.empty) { setRawRows([]); toast({ description: "Nenhum resultado para este período." }); return }
+      if (snap.empty) {
+        setRawRows([])
+        toast({ description: "Nenhum resultado para este período." })
+        return
+      }
 
-      const sorted = snap.docs.sort((a, b) => (b.data().timestamp ?? 0) - (a.data().timestamp ?? 0))
-      const data: RawRow[] = sorted[0].data().data ?? []
+      // Pega o documento mais recente
+      const sorted  = snap.docs.sort((a, b) => (b.data().timestamp ?? 0) - (a.data().timestamp ?? 0))
+      const mainDoc = sorted[0]
+
+      // ✅ Lê SEMPRE da subcoleção items/ — sem fallback para campo data[]
+      const itemsSnap = await getDocs(collection(db, "pipeline_results", mainDoc.id, "items"))
+
+      if (itemsSnap.empty) {
+        toast({
+          variant: "destructive",
+          title: "Documento sem dados na subcoleção",
+          description: `ID: ${mainDoc.id} — Re-processe o período.`,
+        })
+        setRawRows([])
+        return
+      }
+
+      const data: RawRow[] = itemsSnap.docs.map(d => d.data() as RawRow)
       setRawRows(data)
-      toast({ description: `${data.length} registros brutos carregados.` })
+      toast({ description: `${data.length} registros carregados.` })
+
     } catch (e: any) {
       toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message })
       setRawRows([])
@@ -480,30 +448,27 @@ export function VisaoAcumuladaPage() {
   const regioes = React.useMemo(() =>
     [...new Set(rawRows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rawRows])
 
+  // ─── Pipeline: filtra → acumula → ordena ────────────────────────────────
   const acumulado = React.useMemo(() => {
     let r = rawRows
-
-    if (filterDay > 0) r = r.filter(row => extractDay(row["DATA DE ENTREGA"]) === filterDay)
+    if (filterDay > 0)          r = r.filter(row => extractDay(row["DATA DE ENTREGA"]) === filterDay)
     if (filterFilial !== "all") r = r.filter(row => row["FILIAL"] === filterFilial)
     if (filterRegiao !== "all") r = r.filter(row => row["REGIÃO"] === filterRegiao)
-    if (hideRotaChao) r = r.filter(row => String(row["ROTA"] ?? "").toUpperCase().trim() !== "CHÃO")
+    if (hideRotaChao)           r = r.filter(row => String(row["ROTA"] ?? "").toUpperCase().trim() !== "CHÃO")
     if (search) {
       const s = search.toLowerCase()
-      r = r.filter(row =>
-        Object.values(row).some(v => String(v ?? "").toLowerCase().includes(s))
-      )
+      r = r.filter(row => Object.values(row).some(v => String(v ?? "").toLowerCase().includes(s)))
     }
-
     let acc = acumularLinhas(r)
-
     if (sortCol) {
       acc = [...acc].sort((a, b) => {
         const av = String((a as any)[sortCol] ?? "")
         const bv = String((b as any)[sortCol] ?? "")
-        return sortAsc ? av.localeCompare(bv, "pt-BR", { numeric: true }) : bv.localeCompare(av, "pt-BR", { numeric: true })
+        return sortAsc
+          ? av.localeCompare(bv, "pt-BR", { numeric: true })
+          : bv.localeCompare(av, "pt-BR", { numeric: true })
       })
     }
-
     return acc
   }, [rawRows, filterDay, filterFilial, filterRegiao, hideRotaChao, search, sortCol, sortAsc])
 
@@ -524,44 +489,35 @@ export function VisaoAcumuladaPage() {
   const exportXlsx = React.useCallback(() => {
     const data = acumulado.map(row => {
       const obj: Record<string, any> = {}
-      gridCols.forEach(col => {
-        obj[col] = (row as any)[col]
-      })
+      gridCols.forEach(col => { obj[col] = (row as any)[col] })
       return obj
     })
-    exportExcel(data, `Visão Acumulada - ${String(filterMonth).padStart(2,"0")}-${filterYear}.xlsx`)
+    exportExcel(data, `Visão Acumulada - ${String(filterMonth).padStart(2, "0")}-${filterYear}.xlsx`)
   }, [acumulado, gridCols, filterMonth, filterYear])
 
   return (
     <div className="space-y-4">
-
-      {/* ── Filtros ── */}
       <Card className="shadow-sm border-border/60">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Layers className="size-4 text-primary" />
-                Visão Acumulada — Entregas por Motorista/Dia
+                Visão Acumulada — Entregas
               </CardTitle>
-              <CardDescription className="mt-0.5">
-                Agrupa todas as cargas do mesmo motorista e veículo no mesmo dia.
-                Viagens e rotas são concatenadas. Totais somados.
-              </CardDescription>
+              <CardDescription className="mt-0.5">Agrupamento de Rotas</CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8"
                 onClick={() => setShowGerenciarColunas(true)}>
-                <Columns3 className="size-3.5 text-muted-foreground" /> Colunas
+                <Columns3 className="size-3.5 text-muted-foreground" /> Gerenciar Colunas
               </Button>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8"
-                onClick={exportXlsx}>
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={exportXlsx}>
                 <FileDown className="size-3.5 text-muted-foreground" /> Exportar Excel
               </Button>
             </div>
           </div>
         </CardHeader>
-
         <CardContent className="space-y-3">
           <div className="flex flex-wrap gap-3 items-end">
             <div className="space-y-1">
@@ -628,15 +584,12 @@ export function VisaoAcumuladaPage() {
             </Button>
           </div>
 
-          {/* Badges de resumo */}
           {acumulado.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap pt-1">
               <Badge variant="outline" className="text-[10px]">
-                {acumulado.length} motorista{acumulado.length > 1 ? "s" : ""}/dia
+                {acumulado.length} linha{acumulado.length > 1 ? "s" : ""} acumulada{acumulado.length > 1 ? "s" : ""}
               </Badge>
-              <Badge variant="outline" className="text-[10px]">
-                {rawRows.length} registros brutos → {acumulado.length} acumulados
-              </Badge>
+              <Badge variant="outline" className="text-[10px]">{rawRows.length} registros brutos</Badge>
               <Badge className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
                 {totais.entregas.toLocaleString("pt-BR")} entregas
               </Badge>
@@ -673,16 +626,13 @@ export function VisaoAcumuladaPage() {
           <table className="w-full text-[11px]">
             <thead>
               <tr className="bg-muted/30 border-b">
-                {/* Coluna de cargas */}
                 <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap w-16">
-                  Cargas
+                  CARGAS
                 </th>
                 {gridCols.map(col => (
-                  <th
-                    key={col}
+                  <th key={col}
                     className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
-                    onClick={() => toggleSort(col)}
-                  >
+                    onClick={() => toggleSort(col)}>
                     <span className="flex items-center justify-center gap-1">
                       {col}
                       {sortCol === col
@@ -695,29 +645,21 @@ export function VisaoAcumuladaPage() {
             </thead>
             <tbody>
               {acumulado.map((row, i) => {
-                const temMultiplasCarga = row.__cargas > 1
+                const multiRota = row.__cargas > 1
                 return (
-                  <tr
-                    key={i}
-                    className={cn(
-                      "border-b transition-colors",
-                      temMultiplasCarga
-                        ? "bg-amber-50/40 hover:bg-amber-50/80"
-                        : i % 2 === 0
-                          ? "bg-background hover:bg-muted/10"
-                          : "bg-muted/5 hover:bg-muted/10"
-                    )}
-                  >
-                    {/* Badge de cargas — clicável para ver detalhe */}
+                  <tr key={i} className={cn(
+                    "border-b transition-colors",
+                    multiRota
+                      ? "bg-amber-50/40 hover:bg-amber-50/80"
+                      : i % 2 === 0
+                        ? "bg-background hover:bg-muted/10"
+                        : "bg-muted/5 hover:bg-muted/10"
+                  )}>
                     <td className="px-3 py-2 text-center">
-                      {temMultiplasCarga ? (
+                      {multiRota ? (
                         <button
                           onClick={() => setDetalheRow(row)}
-                          className={cn(
-                            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold",
-                            "bg-amber-100 text-amber-700 border border-amber-200",
-                            "hover:bg-amber-200 transition-colors cursor-pointer"
-                          )}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200 transition-colors"
                         >
                           <Layers className="size-2.5" />
                           {row.__cargas}
@@ -726,16 +668,12 @@ export function VisaoAcumuladaPage() {
                         <span className="text-[10px] text-muted-foreground/50">1</span>
                       )}
                     </td>
-
                     {gridCols.map(col => (
-                      <td
-                        key={col}
-                        className={cn("px-3 py-2 whitespace-nowrap text-center", {
-                          "min-w-[200px]": col === "MOTORISTA",
-                          "min-w-[160px]": col === "AJUDANTE" || col === "AJUDANTE 2",
-                          "min-w-[180px]": col === "VIAGENS" || col === "ROTA",
-                        })}
-                      >
+                      <td key={col} className={cn("px-3 py-2 whitespace-nowrap text-center", {
+                        "min-w-[200px]": col === "MOTORISTA",
+                        "min-w-[160px]": col === "AJUDANTE" || col === "AJUDANTE 2",
+                        "min-w-[180px]": col === "VIAGENS" || col === "ROTA",
+                      })}>
                         {cellVal(row, col)}
                       </td>
                     ))}
@@ -743,25 +681,19 @@ export function VisaoAcumuladaPage() {
                 )
               })}
             </tbody>
-
-            {/* Rodapé com totais */}
             <tfoot>
               <tr className="border-t-2 border-border bg-muted/20 font-semibold">
-                <td className="px-3 py-2.5 text-[11px] text-muted-foreground text-center" colSpan={1}>
-                  Total
-                </td>
+                <td className="px-3 py-2.5 text-[11px] text-muted-foreground text-center">Total</td>
                 {gridCols.map(col => {
                   let content: React.ReactNode = null
-                  if (col === "ENTREGAS")    content = <span className="tabular-nums">{totais.entregas.toLocaleString("pt-BR")}</span>
-                  else if (col === "PESO")   content = <span className="tabular-nums">{fmtNum(totais.peso)}</span>
-                  else if (col === "KM")     content = <span className="tabular-nums">{fmtNum(totais.km)}</span>
-                  else if (col === "TEMPO")  content = <span className="font-mono">{totais.tempo}</span>
-                  else if (col === "VALOR")  content = <span className="tabular-nums">{fmtNum(totais.valor)}</span>
-                  else if (col === "FRETE")  content = <span className="tabular-nums">{fmtNum(totais.frete)}</span>
+                  if      (col === "ENTREGAS") content = <span className="tabular-nums">{totais.entregas.toLocaleString("pt-BR")}</span>
+                  else if (col === "PESO")     content = <span className="tabular-nums">{fmtNum(totais.peso)}</span>
+                  else if (col === "KM")       content = <span className="tabular-nums">{fmtNum(totais.km)}</span>
+                  else if (col === "TEMPO")    content = <span className="font-mono">{totais.tempo}</span>
+                  else if (col === "VALOR")    content = <span className="tabular-nums">{fmtNum(totais.valor)}</span>
+                  else if (col === "FRETE")    content = <span className="tabular-nums">{fmtNum(totais.frete)}</span>
                   return (
-                    <td key={col} className="px-3 py-2.5 text-center text-[11px]">
-                      {content}
-                    </td>
+                    <td key={col} className="px-3 py-2.5 text-center text-[11px]">{content}</td>
                   )
                 })}
               </tr>
@@ -770,18 +702,10 @@ export function VisaoAcumuladaPage() {
         </div>
       )}
 
-      {/* Dialog detalhe de cargas */}
-      <DetalheCargas
-        row={detalheRow}
-        open={!!detalheRow}
-        onClose={() => setDetalheRow(null)}
-      />
-
+      <DetalheCargas row={detalheRow} open={!!detalheRow} onClose={() => setDetalheRow(null)} />
       <GerenciarColunasDialog
-        open={showGerenciarColunas}
-        onClose={() => setShowGerenciarColunas(false)}
-        cols={gridCols}
-        setCols={setGridCols}
+        open={showGerenciarColunas} onClose={() => setShowGerenciarColunas(false)}
+        cols={gridCols} setCols={setGridCols}
       />
     </div>
   )

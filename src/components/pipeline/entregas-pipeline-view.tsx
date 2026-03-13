@@ -19,7 +19,7 @@ import {
   DialogFooter, DialogClose,
 } from "@/components/ui/dialog"
 import { AIParamAssistant } from "../../pages/AI-Param-Assistant"
-import { executeConsolidacaoEntregasPipeline, montarNomeAba } from "@/app/actions/entregas-pipeline"
+import { executeConsolidacaoEntregasPipeline, montarNomeAba } from "@/app/actions/import-entregas-action"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 import { cn } from "@/lib/utils"

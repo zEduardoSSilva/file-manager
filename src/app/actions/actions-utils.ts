@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { z, ZodSchema } from 'zod';
-import { PipelineResult, firebaseStore } from '@/lib/firebase';
+import { collection, doc, writeBatch, getDocs } from 'firebase/firestore';
+import { PipelineResult, db } from '@/lib/firebase';
 
 export interface PipelineResponse {
   success: boolean;
@@ -37,7 +38,6 @@ function parseSheetWithHeaderDetection(
     defval: undefined,
   });
 
-  // ── Encontra a primeira linha do cabeçalho ───────────────────────────────
   let firstHeaderIndex = -1;
   let headerRow: any[] = [];
 
@@ -55,12 +55,6 @@ function parseSheetWithHeaderDetection(
     return [];
   }
 
-  console.log(
-    `[pipeline-utils] Cabeçalho linha ${firstHeaderIndex}:`,
-    headerRow.map((v, i) => `[${i}]=${v ?? "∅"}`).join(" | ")
-  );
-
-  // ── Constrói nomes de coluna (resolve duplicatas: AJUDANTE → AJUDANTE_2) ─
   const colNames: string[] = [];
   const nameCounts: Record<string, number> = {};
   for (let i = 0; i < headerRow.length; i++) {
@@ -71,25 +65,11 @@ function parseSheetWithHeaderDetection(
     colNames.push(count === 0 ? name : `${name}_${count + 1}`);
   }
 
-  // ── Índice da coluna de categoria ─────────────────────────────────────────
-  // Estratégia: coluna imediatamente ANTES de "PLACA SISTEMA" no header.
-  // Isso é mais robusto que fixar índice 5 (coluna F).
-  // Ex: [..., "AJUDANTE", "AJUDANTE", "CURITIBA", "PLACA SISTEMA", ...]
-  //                                        ↑ esta é a coluna da categoria
   const placaSisIdx = colNames.findIndex(n =>
     n.toUpperCase().replace(/\s+/g, " ").includes("PLACA SISTEMA")
   );
-  // Coluna de categoria = imediatamente antes de PLACA SISTEMA
-  // Se não achar PLACA SISTEMA, usa fallback = índice 5
   const catColIndex = placaSisIdx > 0 ? placaSisIdx - 1 : 5;
 
-  console.log(
-    `[pipeline-utils] Coluna de categoria: índice ${catColIndex}` +
-    ` ("${colNames[catColIndex] ?? "?"}")` +
-    ` → antes de PLACA SISTEMA (índice ${placaSisIdx})`
-  );
-
-  // ── Lê dados linha a linha ────────────────────────────────────────────────
   const result: any[] = [];
   let currentRota = "";
 
@@ -97,20 +77,15 @@ function parseSheetWithHeaderDetection(
     const row = rawData[r];
     if (!row) continue;
 
-    // Detecta linhas de sub-cabeçalho:
-    // col B (idx 1) = "DATA" e col C (idx 2) = "MOTORISTA"
     const col1 = String(row[1] ?? "").trim().toUpperCase();
     const col2 = String(row[2] ?? "").trim().toUpperCase();
 
     if (col1 === "DATA" && col2 === "MOTORISTA") {
-      // Captura a categoria da coluna dinâmica (antes de PLACA SISTEMA)
       const rawCat = String(row[catColIndex] ?? "").trim();
       currentRota = rawCat || currentRota;
-      console.log(`[pipeline-utils] Sub-tabela: "${rawCat}" (linha ${r})`);
       continue;
     }
 
-    // Linha completamente vazia
     if (!row.length || row.every(v => v == null || v === "")) continue;
 
     const obj: Record<string, any> = {};
@@ -123,24 +98,11 @@ function parseSheetWithHeaderDetection(
 
     if (Object.keys(obj).length === 0) continue;
 
-    // Injeta categoria (ROTA da sub-tabela)
     obj.__rota__ = currentRota;
-
     result.push(obj);
   }
 
-  if (result.length > 0) {
-    const allCols = [...new Set(result.flatMap(r => Object.keys(r).filter(k => !k.startsWith("__"))))];
-    console.log(`[pipeline-utils] Aba "${sheetName}" — ${result.length} linhas. Colunas:`, allCols.join(", "));
-  } else {
-    console.warn(`[pipeline-utils] Aba "${sheetName}" — sem dados.`);
-  }
-
-  // ── Anexa colNames ao array para uso posterior em processarRows ───────────
-  // Isso garante que findCol() funcione mesmo quando todas as células de uma
-  // coluna estiverem vazias (ex: AJUDANTE sem nenhum valor no dia)
   Object.assign(result, { __colNames__: colNames });
-
   return result;
 }
 
@@ -168,61 +130,37 @@ class FileReader {
     const sheetName = this.formData.get('sheetName') as string | null;
     const allResults: any[][] = [];
 
-    console.log(`[pipeline-utils] ${files.length} arquivo(s).`);
-
     for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
-      const file = files[fileIdx];
-      const kb   = (file.size / 1024).toFixed(0);
-      console.log(`[pipeline-utils] Arquivo ${fileIdx + 1}/${files.length}: ${file.name} (${kb} KB)`);
-
+      const file   = files[fileIdx];
       const buffer = await file.arrayBuffer();
 
       if (sheetName) {
-        const workbook = XLSX.read(buffer, {
-          type:      'array',
-          cellDates: true,
-          sheets:    sheetName,
-        });
-
+        const workbook = XLSX.read(buffer, { type: 'array', cellDates: true, sheets: sheetName });
         if (!workbook.SheetNames.includes(sheetName)) {
           throw new Error(
             `A aba "${sheetName}" não foi encontrada em "${file.name}". ` +
             `Abas disponíveis: ${workbook.SheetNames.join(', ')}`
           );
         }
-
-        console.log(`[pipeline-utils] Lendo apenas "${sheetName}".`);
         const sheet = workbook.Sheets[sheetName];
         const rows  = parseSheetWithHeaderDetection(sheet, sheetName, file.name);
         if (rows.length > 0) {
-          Object.assign(rows, {
-            __sheetName: sheetName,
-            __fileIndex: fileIdx,
-            // preserva __colNames__ que veio do parser
-            __colNames__: (rows as any).__colNames__,
-          });
+          Object.assign(rows, { __sheetName: sheetName, __fileIndex: fileIdx, __colNames__: (rows as any).__colNames__ });
           allResults.push(rows);
         }
-
       } else {
         const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
-        console.log(`[pipeline-utils] Abas: ${workbook.SheetNames.join(', ')}`);
         for (const name of workbook.SheetNames) {
           const sheet = workbook.Sheets[name];
           const rows  = parseSheetWithHeaderDetection(sheet, name, file.name);
           if (rows.length > 0) {
-            Object.assign(rows, {
-              __sheetName:  name,
-              __fileIndex:  fileIdx,
-              __colNames__: (rows as any).__colNames__,
-            });
+            Object.assign(rows, { __sheetName: name, __fileIndex: fileIdx, __colNames__: (rows as any).__colNames__ });
             allResults.push(rows);
           }
         }
       }
     }
 
-    console.log(`[pipeline-utils] Concluído — ${allResults.length} aba(s) com dados.`);
     return allResults;
   }
 }
@@ -274,9 +212,17 @@ export async function processAndSave(
     const files           = new FileReader(formData);
     const processorResult = await processor({ year, month, files, formData });
     const sanitized       = sanitizeForFirestore(processorResult);
-    const { data, ...extras } = sanitized;
-    const savedResult = await saveToFirebase(pipelineType, year, month, data, extras);
-    return { success: true, result: savedResult };
+
+    // ✅ Separa os campos: data vai para subcoleção, extraSheets fica só em memória
+    const { data, extraSheets, ...metadataExtras } = sanitized;
+
+    const savedResult = await saveToFirebase(pipelineType, year, month, data, metadataExtras);
+
+    // ✅ extraSheets retorna para o cliente (para download Excel) mas NUNCA vai ao Firestore
+    return {
+      success: true,
+      result: { ...savedResult, data, extraSheets },
+    };
   } catch (error: any) {
     console.error(`[${pipelineType.toUpperCase()}] Erro:`, error);
     return { success: false, result: {} as PipelineResult, error: error.message };
@@ -284,6 +230,13 @@ export async function processAndSave(
 }
 
 // ─── saveToFirebase ───────────────────────────────────────────────────────────
+// Arquitetura:
+//   pipeline_results/{id}           → documento leve (metadados, ~1-5 KB)
+//   pipeline_results/{id}/items/    → subcoleção (1 doc por registro, ilimitado)
+//
+// O documento principal NUNCA contém arrays de dados.
+// Cada item da subcoleção fica ~200-800 bytes → sem risco de estouro.
+// ─────────────────────────────────────────────────────────────────────────────
 export async function saveToFirebase(
   type: string,
   year: number,
@@ -291,28 +244,66 @@ export async function saveToFirebase(
   data: any[],
   extras: Record<string, any> = {}
 ): Promise<PipelineResult> {
-  const { extraSheets, ...extrasParaFirestore } = extras;
 
-  const fullPayload: Omit<PipelineResult, 'id'> = {
+  // ── Documento principal: SOMENTE metadados ────────────────────────────────
+  // Nunca inclui arrays de dados — isso garante que nunca ultrapasse 1 MB.
+  const mainDocPayload = {
     pipelineType: type,
     timestamp:    Date.now(),
     year,
     month,
-    data,
-    summary: extrasParaFirestore.summary ?? "",
+    summary:      extras.summary   ?? "",
+    itemCount:    data.length,
+    // Metadados leves de deduplicação (contagem, não os dados)
+    duplicadasCount: Array.isArray(extras.duplicadas) ? extras.duplicadas.length : 0,
   };
 
-  try {
-    console.log("[FIREBASE] Salvando:", fullPayload.data?.length, "registros");
-    const saved = await firebaseStore.saveResult(type, fullPayload);
-    console.log("[FIREBASE] Salvo! ID:", saved.id);
-    return {
-      ...fullPayload,
-      id:          saved.id,
-      extraSheets: extraSheets,
-    } as unknown as PipelineResult;
-  } catch (error: any) {
-    console.error("[FIREBASE] Erro ao salvar:", error);
-    throw error;
+  // ── Subcoleção items: 1 documento por registro ────────────────────────────
+  const BATCH_LIMIT = 499; // Firestore permite 500 ops por batch; reservamos 1 para o doc principal
+  const mainCollectionRef = collection(db, 'pipeline_results');
+  const mainDocRef = doc(mainCollectionRef);
+  const mainDocId  = mainDocRef.id;
+
+  console.log(`[FIREBASE] Doc principal: ${mainDocId} | ${data.length} itens → subcoleção items/`);
+
+  const itemsRef  = collection(db, 'pipeline_results', mainDocId, 'items');
+  const allBatches: ReturnType<typeof writeBatch>[] = [];
+
+  // Primeiro batch inclui o documento principal
+  let currentBatch     = writeBatch(db);
+  let currentBatchSize = 0;
+
+  currentBatch.set(mainDocRef, mainDocPayload);
+  currentBatchSize++;
+  allBatches.push(currentBatch);
+
+  for (const item of data) {
+    if (currentBatchSize >= BATCH_LIMIT) {
+      currentBatch     = writeBatch(db);
+      currentBatchSize = 0;
+      allBatches.push(currentBatch);
+    }
+    currentBatch.set(doc(itemsRef), item);
+    currentBatchSize++;
   }
+
+  console.log(`[FIREBASE] ${allBatches.length} batch(es) — commitando em paralelo...`);
+  await Promise.all(allBatches.map(b => b.commit()));
+  console.log(`[FIREBASE] ✅ Salvo! ID: ${mainDocId}`);
+
+  return {
+    ...mainDocPayload,
+    id: mainDocId,
+    data: [], // data retorna vazio aqui — processAndSave injeta de volta para o cliente
+  } as unknown as PipelineResult;
+}
+
+// ─── loadItemsFromFirebase ────────────────────────────────────────────────────
+// Lê os dados da subcoleção items/ de um documento de pipeline.
+// Use isso no DataViewer e no buscarDadosExistentes.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function loadItemsFromFirebase(pipelineResultId: string): Promise<any[]> {
+  const itemsRef = collection(db, 'pipeline_results', pipelineResultId, 'items');
+  const snapshot = await getDocs(itemsRef);
+  return snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
 }

@@ -11,7 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
 import { DataViewer } from "../../pages/Data-Viewer"
-import { executeMercaneteRoadshowPipeline } from "@/app/actions/mercanete-roadshow-pipeline"
+import { executeMercaneteRoadshowPipeline } from "@/app/actions/import-mercanete-roadshow-actions"
 import { useToast } from "@/hooks/use-toast"
 import { PipelineResult } from "@/lib/firebase"
 

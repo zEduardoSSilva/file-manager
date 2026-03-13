@@ -15,32 +15,49 @@ import {
   MapPin,
   FileStack,
   GitMerge,
-  Search
+  Search,
+  User,
+  FileX,
+  LayoutGrid
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 
-// Adicione esse array junto com INDICATORS e TASKS
+// Definição das listas de links para a página inicial.
+// Todos os itens devem ter um `path` para navegação.
+
+const REGISTRATIONS = [
+    { id: 'funcionarios', name: 'Funcionários', desc: 'Cadastro de pessoal', icon: User, color: 'bg-blue-100 text-blue-600', path: '/pipeline/funcionarios' },
+    { id: 'veiculos', name: 'Veículos', desc: 'Gerenciamento de frota', icon: Truck, color: 'bg-green-100 text-green-600', path: '/pipeline/veiculos' },
+    { id: 'faturamento', name: 'Faturamento', desc: 'Lançamentos financeiros', icon: BadgePercent, color: 'bg-purple-100 text-purple-600', path: '/pipeline/faturamento' },
+    { id: 'motivos-dev', name: 'Motivos de Devolução', desc: 'Causas e logística', icon: FileX, color: 'bg-red-100 text-red-600', path: '/pipeline/motivos-dev' },
+]
+
+const VISUALS = [
+  { id: 'entregas-analitica', name: 'Visão Analítica', desc: 'Controle por Filial', icon: LayoutGrid, color: 'bg-cyan-100 text-cyan-600', path: '/visuais/entregas-analitica' },
+  { id: 'entregas-acumulada', name: 'Visão Acumulada', desc: 'Controle por Filial', icon: LayoutGrid, color: 'bg-cyan-100 text-cyan-600', path: '/visuais/entregas-acumulada' },
+]
+
 const ROUTINES = [
-  { id: 'consolidacao-entregas', name: 'Consolidação de Entregas', desc: 'Controle por Filial', icon: FileSpreadsheet, color: 'bg-teal-100 text-teal-600' },
+  { id: 'consolidacao-entregas', name: 'Analitico de Entregas', desc: 'Controle por Filial', icon: FileSpreadsheet, color: 'bg-teal-100 text-teal-600', path: '/pipeline/consolidacao-entregas' },
 ]
 
 const INDICATORS = [
-  { id: 'vfleet', name: 'vFleet Pilot', desc: 'Telemetria e Alertas', icon: Truck, color: 'bg-primary/10 text-primary' },
-  { id: 'performaxxi', name: 'Performaxxi', desc: 'Performance de Rotas', icon: Zap, color: 'bg-amber-100 text-amber-600' },
-  { id: 'ponto', name: 'Absenteísmo', desc: 'Jornada e Frequência', icon: Clock, color: 'bg-indigo-100 text-indigo-600' },
-  { id: 'faturista', name: 'Faturista', desc: 'Cintas e Liberação', icon: BadgePercent, color: 'bg-emerald-100 text-emerald-600' },
-  { id: 'roadshow', name: 'Roadshow', desc: 'Ocupação de Veículo', icon: MapPin, color: 'bg-orange-100 text-orange-600' },
-  { id: 'devolucoes', name: 'Devoluções', desc: 'Análise de Quebras', icon: PackageX, color: 'bg-rose-100 text-rose-600' },
-  { id: 'coordenadores', name: 'Coordenadores', desc: 'Modular 4 Estágios', icon: Building2, color: 'bg-violet-100 text-violet-600' },
-  { id: 'cco', name: 'CCO Empresa', desc: 'Consolidado p/ Filial', icon: TrendingUp, color: 'bg-blue-100 text-blue-600' },
-  { id: 'consolidador', name: 'Final', desc: 'Fechamento de Folha', icon: FileStack, color: 'bg-slate-100 text-slate-600' },
+  { id: 'vfleet', name: 'vFleet Pilot', desc: 'Telemetria e Alertas', icon: Truck, color: 'bg-primary/10 text-primary', path: '/pipeline/vfleet' },
+  { id: 'performaxxi', name: 'Performaxxi', desc: 'Performance de Rotas', icon: Zap, color: 'bg-amber-100 text-amber-600', path: '/pipeline/performaxxi' },
+  { id: 'ponto', name: 'Absenteísmo', desc: 'Jornada e Frequência', icon: Clock, color: 'bg-indigo-100 text-indigo-600', path: '/pipeline/ponto' },
+  { id: 'faturista', name: 'Faturista', desc: 'Cintas e Liberação', icon: BadgePercent, color: 'bg-emerald-100 text-emerald-600', path: '/pipeline/faturista' },
+  { id: 'roadshow', name: 'Roadshow', desc: 'Ocupação de Veículo', icon: MapPin, color: 'bg-orange-100 text-orange-600', path: '/pipeline/roadshow' },
+  { id: 'devolucoes', name: 'Devoluções', desc: 'Análise de Quebras', icon: PackageX, color: 'bg-rose-100 text-rose-600', path: '/pipeline/devolucoes' },
+  { id: 'coordenadores', name: 'Coordenadores', desc: 'Modular 4 Estágios', icon: Building2, color: 'bg-violet-100 text-violet-600', path: '/pipeline/coordenadores' },
+  { id: 'cco', name: 'CCO Empresa', desc: 'Consolidado p/ Filial', icon: TrendingUp, color: 'bg-blue-100 text-blue-600', path: '/pipeline/cco' },
+  { id: 'consolidador', name: 'Final', desc: 'Fechamento de Folha', icon: FileStack, color: 'bg-slate-100 text-slate-600', path: '/pipeline/consolidador' },
 ]
 
 const TASKS = [
-  { id: 'retorno-pedidos', name: 'Retorn. Pedidos TXT', desc: 'Processamento .txt', icon: Search, color: 'bg-slate-100 text-slate-600' },
-  { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL', desc: 'Processamento .ul', icon: MapPin, color: 'bg-amber-50 text-amber-600' },
-  { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', desc: 'Matching de Status', icon: GitMerge, color: 'bg-blue-50 text-blue-500' },
+  { id: 'retorno-pedidos', name: 'Retorn. Pedidos TXT', desc: 'Processamento .txt', icon: Search, color: 'bg-slate-100 text-slate-600', path: '/pipeline/retorno-pedidos' },
+  { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL', desc: 'Processamento .ul', icon: MapPin, color: 'bg-amber-50 text-amber-600', path: '/pipeline/retorno-pedidos-ul' },
+  { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', desc: 'Matching de Status', icon: GitMerge, color: 'bg-blue-50 text-blue-500', path: '/pipeline/mercanete-roadshow' },
 ]
 
 export default function HomePage() {
@@ -96,6 +113,79 @@ export default function HomePage() {
       </div>
 
       <div className="space-y-6">
+
+        {/* Visuais */}
+        <Card className="flex flex-col shadow-sm border-muted/40 overflow-hidden min-w-0">
+          <CardHeader className="p-4 sm:p-6 bg-muted/5 border-b">
+            <CardTitle className="text-base sm:text-lg text-primary">Visuais</CardTitle>
+            <CardDescription className="text-[10px] sm:text-sm">Dashboards analíticos e visões de dados.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 pt-4 sm:p-6 sm:pt-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {VISUALS.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <Button
+                    key={link.id}
+                    variant="outline"
+                    className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 hover:border-primary/20 transition-all border-muted/60 group"
+                    asChild
+                  >
+                    <Link to={link.path}>
+                      <div className="flex items-center gap-3 w-full min-w-0">
+                        <div className={`size-8 sm:size-10 shrink-0 rounded-lg ${link.color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
+                          <Icon className="size-4 sm:size-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-[12px] sm:text-sm leading-tight group-hover:text-primary transition-colors">{link.name}</p>
+                          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5 truncate">{link.desc}</p>
+                        </div>
+                        <ArrowUpRight className="size-3 shrink-0 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </Link>
+                  </Button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Cadastros */}
+        <Card className="flex flex-col shadow-sm border-muted/40 overflow-hidden min-w-0">
+          <CardHeader className="p-4 sm:p-6 bg-muted/5 border-b">
+            <CardTitle className="text-base sm:text-lg text-primary">Cadastros</CardTitle>
+            <CardDescription className="text-[10px] sm:text-sm">Gerencie os dados mestres do sistema.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-4 pt-4 sm:p-6 sm:pt-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {REGISTRATIONS.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <Button
+                    key={link.id}
+                    variant="outline"
+                    className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 hover:border-primary/20 transition-all border-muted/60 group"
+                    asChild
+                  >
+                    <Link to={link.path}>
+                      <div className="flex items-center gap-3 w-full min-w-0">
+                        <div className={`size-8 sm:size-10 shrink-0 rounded-lg ${link.color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
+                          <Icon className="size-4 sm:size-5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-[12px] sm:text-sm leading-tight group-hover:text-primary transition-colors">{link.name}</p>
+                          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5 truncate">{link.desc}</p>
+                        </div>
+                        <ArrowUpRight className="size-3 shrink-0 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </Link>
+                  </Button>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Rotinas */}
         <Card className="flex flex-col shadow-sm border-muted/40 overflow-hidden min-w-0">
           <CardHeader className="p-4 sm:p-6 bg-muted/5 border-b">
@@ -113,7 +203,7 @@ export default function HomePage() {
                     className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 hover:border-primary/20 transition-all border-muted/60 group"
                     asChild
                   >
-                    <Link to={`/pipeline/${link.id}`}>
+                    <Link to={link.path}>
                       <div className="flex items-center gap-3 w-full min-w-0">
                         <div className={`size-8 sm:size-10 shrink-0 rounded-lg ${link.color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
                           <Icon className="size-4 sm:size-5" />
@@ -150,7 +240,7 @@ export default function HomePage() {
                     className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 hover:border-primary/20 transition-all border-muted/60 group" 
                     asChild
                   >
-                    <Link to={`/pipeline/${link.id}`}>
+                    <Link to={link.path}>
                       <div className="flex items-center gap-3 w-full min-w-0">
                         <div className={`size-8 sm:size-10 shrink-0 rounded-lg ${link.color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
                           <Icon className="size-4 sm:size-5" />
@@ -186,7 +276,7 @@ export default function HomePage() {
                     className="w-full justify-start h-auto p-3 sm:p-4 text-left !whitespace-normal break-words hover:bg-primary/5 hover:border-primary/20 transition-all border-muted/60 group" 
                     asChild
                   >
-                    <Link to={`/pipeline/${link.id}`}>
+                    <Link to={link.path}>
                       <div className="flex items-center gap-3 w-full min-w-0">
                         <div className={`size-8 sm:size-10 shrink-0 rounded-lg ${link.color} flex items-center justify-center group-hover:scale-110 transition-transform`}>
                           <Icon className="size-4 sm:size-5" />

@@ -3,7 +3,7 @@ import {
   PipelineArgs,
   ProcessorOutput,
   PipelineResponse,
-} from './pipeline-utils';
+} from './actions-utils';
 
 // ─── Constantes financeiras ───────────────────────────────────────────────────
 const BONIFICACAO_DIARIA_TOTAL = 16.00;
