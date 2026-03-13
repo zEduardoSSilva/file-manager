@@ -31,29 +31,34 @@ import {
   MapPin,
   GitMerge,
   Search,
-  LayoutGrid // Corrigido e importado
+  LayoutGrid,
+  Wrench // Ícone para Cadastros
 } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
 
-// A página VisaoAnaliticaPage não é importada aqui, pois a rota decide qual componente renderizar.
-
 const NAV_GROUPS = [
   {
-    label: "Visuais", // Grupo correto
+    label: "VISUAIS",
     items: [
-      // O path foi corrigido para a rota independente.
-      // A propriedade 'component' foi removida pois não é utilizada aqui.
-    { id: 'visao-analitica',       name: 'Visão Analítica', icon: LayoutGrid,      path: "/visuais/visao-analitica" },
+      // Revertendo para o caminho original para evitar quebras
+      { id: 'entregas-analitica', name: 'Visão Analítica', icon: LayoutGrid, path: "/visuais/entregas-analitica" },
+      { id: 'entregas-acumulada', name: 'Visão Acumulada', icon: LayoutGrid, path: "/visuais/entregas-acumulada" },
     ]
   },
   {
-    label: "Rotina",
+    label: "GERENCIAR",
     items: [
-    { id: 'consolidacao-entregas', name: 'Entregas',        icon: FileSpreadsheet, path: '/pipeline/consolidacao-entregas' },
+      { id: 'cadastros-gerais', name: 'Cadastros Gerais', icon: Wrench, path: "/cadastros" },
     ]
   },
   {
-    label: "Indicadores",
+    label: "ROTINA",
+    items: [
+      { id: 'consolidacao-entregas', name: 'Entregas', icon: FileSpreadsheet, path: '/pipeline/consolidacao-entregas' },
+    ]
+  },
+  {
+    label: "INDICADORES",
     items: [
       { id: 'vfleet',        name: 'vFleet Pilot',   icon: Truck,          path: '/pipeline/vfleet' },
       { id: 'performaxxi',   name: 'Performaxxi',    icon: Zap,            path: '/pipeline/performaxxi' },
@@ -67,7 +72,7 @@ const NAV_GROUPS = [
     ]
   },
   {
-    label: "Tarefas",
+    label: "TAREFAS",
     items: [
       { id: 'retorno-pedidos',    name: 'Retorn. Pedidos TXT',    icon: Search,    path: '/pipeline/retorno-pedidos' },
       { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL',     icon: MapPin,    path: '/pipeline/retorno-pedidos-ul' },

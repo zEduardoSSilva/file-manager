@@ -29,7 +29,7 @@ const firebaseConfig = {
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
+export const db = getFirestore(app);
 
 // Initialize Firebase
 // const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;

@@ -2,22 +2,12 @@ import * as XLSX from 'xlsx';
 import { z, ZodSchema } from 'zod';
 import { PipelineResult, firebaseStore } from '@/lib/firebase';
 
-
-export interface SheetData {
-  rows: any[];
-  sheetName: string;
-  fileIndex: number;
-}
-
 export interface PipelineResponse {
   success: boolean;
   result: PipelineResult;
   error?: string;
 }
 
-/**
- * Converte número de série de data do Excel ou Date para string DD/MM/YYYY.
- */
 function toDateString(value: any): string | any {
   if (typeof value === 'number' && value > 10000 && value < 60000) {
     const date = XLSX.SSF.parse_date_code(value);
@@ -30,134 +20,209 @@ function toDateString(value: any): string | any {
   return value;
 }
 
-/**
- * Detecta o cabeçalho e extrai os dados de uma aba em formato JSON.
- */
-function parseSheetWithHeaderDetection(sheet: XLSX.WorkSheet, sheetName: string, fileName: string): any[] {
-  if (!sheet || !sheet["!ref"]) return []
+// ─── Parser principal ─────────────────────────────────────────────────────────
+function parseSheetWithHeaderDetection(
+  sheet: XLSX.WorkSheet,
+  sheetName: string,
+  fileName: string,
+): any[] {
+  if (!sheet || !sheet["!ref"]) {
+    console.warn(`[pipeline-utils] Aba "${sheetName}" vazia.`);
+    return [];
+  }
 
-  const rawData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: true })
+  const rawData: any[][] = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    blankrows: true,
+    defval: undefined,
+  });
 
-  // ← ADICIONE ESTE LOG
-  console.log(`[headerDetection] Primeiras 15 linhas brutas de "${sheetName}":`)
-  rawData.slice(0, 15).forEach((row, i) => {
-    console.log(`  linha ${i}:`, row)
-  })
+  // ── Encontra a primeira linha do cabeçalho ───────────────────────────────
+  let firstHeaderIndex = -1;
+  let headerRow: any[] = [];
 
-  let headerRowIndex = -1;
-  for (let i = 0; i < rawData.length; i++) {
-    const rowString = String(rawData[i]?.join("|") || "").toUpperCase();
-    if (rowString.includes("MOTORISTA") && (rowString.includes("PLACA") || rowString.includes("DATA"))) {
-      headerRowIndex = i;
+  for (let i = 0; i < Math.min(rawData.length, 30); i++) {
+    const rowStr = String(rawData[i]?.join("|") || "").toUpperCase();
+    if (rowStr.includes("MOTORISTA") && (rowStr.includes("PLACA") || rowStr.includes("DATA"))) {
+      firstHeaderIndex = i;
+      headerRow = rawData[i] ?? [];
       break;
     }
   }
 
-  if (headerRowIndex === -1) {
-    console.warn(`[pipeline-utils] Cabeçalho não encontrado na aba "${sheetName}".`);
+  if (firstHeaderIndex === -1) {
+    console.warn(`[pipeline-utils] Cabeçalho não encontrado em "${sheetName}".`);
     return [];
   }
 
-  const range = XLSX.utils.decode_range(sheet["!ref"]);
-  range.s.r = headerRowIndex;
-  const rows = XLSX.utils.sheet_to_json(sheet, { range: XLSX.utils.encode_range(range), raw: false });
-  console.log(`[pipeline-utils] Aba "${sheetName}" parseada — ${rows.length} linhas.`);
-  return rows;
+  console.log(
+    `[pipeline-utils] Cabeçalho linha ${firstHeaderIndex}:`,
+    headerRow.map((v, i) => `[${i}]=${v ?? "∅"}`).join(" | ")
+  );
+
+  // ── Constrói nomes de coluna (resolve duplicatas: AJUDANTE → AJUDANTE_2) ─
+  const colNames: string[] = [];
+  const nameCounts: Record<string, number> = {};
+  for (let i = 0; i < headerRow.length; i++) {
+    let name = headerRow[i] != null ? String(headerRow[i]).trim() : `__COL_${i}`;
+    if (!name) name = `__COL_${i}`;
+    const count = nameCounts[name] ?? 0;
+    nameCounts[name] = count + 1;
+    colNames.push(count === 0 ? name : `${name}_${count + 1}`);
+  }
+
+  // ── Índice da coluna de categoria ─────────────────────────────────────────
+  // Estratégia: coluna imediatamente ANTES de "PLACA SISTEMA" no header.
+  // Isso é mais robusto que fixar índice 5 (coluna F).
+  // Ex: [..., "AJUDANTE", "AJUDANTE", "CURITIBA", "PLACA SISTEMA", ...]
+  //                                        ↑ esta é a coluna da categoria
+  const placaSisIdx = colNames.findIndex(n =>
+    n.toUpperCase().replace(/\s+/g, " ").includes("PLACA SISTEMA")
+  );
+  // Coluna de categoria = imediatamente antes de PLACA SISTEMA
+  // Se não achar PLACA SISTEMA, usa fallback = índice 5
+  const catColIndex = placaSisIdx > 0 ? placaSisIdx - 1 : 5;
+
+  console.log(
+    `[pipeline-utils] Coluna de categoria: índice ${catColIndex}` +
+    ` ("${colNames[catColIndex] ?? "?"}")` +
+    ` → antes de PLACA SISTEMA (índice ${placaSisIdx})`
+  );
+
+  // ── Lê dados linha a linha ────────────────────────────────────────────────
+  const result: any[] = [];
+  let currentRota = "";
+
+  for (let r = firstHeaderIndex + 1; r < rawData.length; r++) {
+    const row = rawData[r];
+    if (!row) continue;
+
+    // Detecta linhas de sub-cabeçalho:
+    // col B (idx 1) = "DATA" e col C (idx 2) = "MOTORISTA"
+    const col1 = String(row[1] ?? "").trim().toUpperCase();
+    const col2 = String(row[2] ?? "").trim().toUpperCase();
+
+    if (col1 === "DATA" && col2 === "MOTORISTA") {
+      // Captura a categoria da coluna dinâmica (antes de PLACA SISTEMA)
+      const rawCat = String(row[catColIndex] ?? "").trim();
+      currentRota = rawCat || currentRota;
+      console.log(`[pipeline-utils] Sub-tabela: "${rawCat}" (linha ${r})`);
+      continue;
+    }
+
+    // Linha completamente vazia
+    if (!row.length || row.every(v => v == null || v === "")) continue;
+
+    const obj: Record<string, any> = {};
+    for (let c = 0; c < colNames.length; c++) {
+      const val = row[c];
+      if (val != null && val !== "") {
+        obj[colNames[c]] = val;
+      }
+    }
+
+    if (Object.keys(obj).length === 0) continue;
+
+    // Injeta categoria (ROTA da sub-tabela)
+    obj.__rota__ = currentRota;
+
+    result.push(obj);
+  }
+
+  if (result.length > 0) {
+    const allCols = [...new Set(result.flatMap(r => Object.keys(r).filter(k => !k.startsWith("__"))))];
+    console.log(`[pipeline-utils] Aba "${sheetName}" — ${result.length} linhas. Colunas:`, allCols.join(", "));
+  } else {
+    console.warn(`[pipeline-utils] Aba "${sheetName}" — sem dados.`);
+  }
+
+  // ── Anexa colNames ao array para uso posterior em processarRows ───────────
+  // Isso garante que findCol() funcione mesmo quando todas as células de uma
+  // coluna estiverem vazias (ex: AJUDANTE sem nenhum valor no dia)
+  Object.assign(result, { __colNames__: colNames });
+
+  return result;
 }
 
 // ─── FileReader ───────────────────────────────────────────────────────────────
 class FileReader {
   constructor(private formData: FormData) {}
 
-  private async readFile(file: File, sheetName?: string): Promise<any[]> {
-    const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
-
-    const targetSheetName = sheetName && workbook.SheetNames.includes(sheetName)
-      ? sheetName
-      : workbook.SheetNames[0];
-
-    if (!targetSheetName) throw new Error(`O arquivo ${file.name} não contém planilhas.`);
-
-    const sheet = workbook.Sheets[targetSheetName];
-    return parseSheetWithHeaderDetection(sheet, targetSheetName, file.name);
-  }
-
   async read(fieldName: string, schema?: ZodSchema<any>): Promise<any[]> {
     const file = this.formData.get(fieldName) as File | null;
     if (!file) return [];
-    const jsonData = await this.readFile(file);
+    const buffer = await file.arrayBuffer();
+    const wb     = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const sheet  = wb.Sheets[wb.SheetNames[0]];
+    const rows   = parseSheetWithHeaderDetection(sheet, wb.SheetNames[0], file.name);
     if (schema) {
-      const result = z.array(schema).safeParse(jsonData);
-      if (!result.success) {
-        console.error("Erro de validação Zod:", result.error.flatten().fieldErrors);
-        throw new Error(`Validação falhou para o arquivo ${file.name}.`);
-      }
+      const result = z.array(schema).safeParse(rows);
+      if (!result.success) throw new Error(`Validação falhou para ${file.name}.`);
       return result.data;
     }
-    return jsonData;
+    return rows;
   }
 
   async readAll(fieldName: string): Promise<any[][]> {
-    const files      = this.formData.getAll(fieldName) as File[];
-    const sheetName  = this.formData.get('sheetName') as string | null;
+    const files     = this.formData.getAll(fieldName) as File[];
+    const sheetName = this.formData.get('sheetName') as string | null;
     const allResults: any[][] = [];
 
-    console.log(`[pipeline-utils] ${files.length} arquivo(s) para processar.`);
+    console.log(`[pipeline-utils] ${files.length} arquivo(s).`);
 
     for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
       const file = files[fileIdx];
-      console.log(`[pipeline-utils] Arquivo ${fileIdx + 1}/${files.length}: ${file.name} (${(file.size / 1024).toFixed(0)} KB)`);
+      const kb   = (file.size / 1024).toFixed(0);
+      console.log(`[pipeline-utils] Arquivo ${fileIdx + 1}/${files.length}: ${file.name} (${kb} KB)`);
 
       const buffer = await file.arrayBuffer();
 
       if (sheetName) {
-        // ── Modo dia específico ──────────────────────────────────────────────
-        // Passa { sheets: sheetName } → XLSX só parseia a aba alvo,
-        // ignorando completamente as outras abas do mês.
-        // Em arquivos grandes (40+ MB) isso reduz o tempo em ~95%.
         const workbook = XLSX.read(buffer, {
           type:      'array',
           cellDates: true,
-          sheets:    sheetName,   // ← carrega APENAS esta aba
+          sheets:    sheetName,
         });
 
         if (!workbook.SheetNames.includes(sheetName)) {
-          throw new Error(`A aba "${sheetName}" não foi encontrada em "${file.name}".`);
+          throw new Error(
+            `A aba "${sheetName}" não foi encontrada em "${file.name}". ` +
+            `Abas disponíveis: ${workbook.SheetNames.join(', ')}`
+          );
         }
 
-        console.log(`[pipeline-utils] Lendo apenas a aba "${sheetName}".`);
+        console.log(`[pipeline-utils] Lendo apenas "${sheetName}".`);
         const sheet = workbook.Sheets[sheetName];
         const rows  = parseSheetWithHeaderDetection(sheet, sheetName, file.name);
-
         if (rows.length > 0) {
-          const tagged = Object.assign(rows, { __sheetName: sheetName, __fileIndex: fileIdx });
-          allResults.push(tagged);
+          Object.assign(rows, {
+            __sheetName: sheetName,
+            __fileIndex: fileIdx,
+            // preserva __colNames__ que veio do parser
+            __colNames__: (rows as any).__colNames__,
+          });
+          allResults.push(rows);
         }
 
       } else {
-        // ── Modo mês completo ────────────────────────────────────────────────
-        // Precisa carregar todas as abas — não tem como evitar.
-        // Mas pelo menos não carrega fórmulas desnecessárias.
-        const workbook = XLSX.read(buffer, {
-          type:      'array',
-          cellDates: true,
-        });
-
-        console.log(`[pipeline-utils] Abas encontradas: ${workbook.SheetNames.join(', ')}`);
-
+        const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+        console.log(`[pipeline-utils] Abas: ${workbook.SheetNames.join(', ')}`);
         for (const name of workbook.SheetNames) {
           const sheet = workbook.Sheets[name];
           const rows  = parseSheetWithHeaderDetection(sheet, name, file.name);
           if (rows.length > 0) {
-            const tagged = Object.assign(rows, { __sheetName: name, __fileIndex: fileIdx });
-            allResults.push(tagged);
+            Object.assign(rows, {
+              __sheetName:  name,
+              __fileIndex:  fileIdx,
+              __colNames__: (rows as any).__colNames__,
+            });
+            allResults.push(rows);
           }
         }
       }
     }
 
-    console.log(`[pipeline-utils] Processamento concluído — ${allResults.length} aba(s) com dados.`);
+    console.log(`[pipeline-utils] Concluído — ${allResults.length} aba(s) com dados.`);
     return allResults;
   }
 }
@@ -176,7 +241,7 @@ export interface ProcessorOutput {
   [key: string]: any;
 }
 
-// ─── Sanitização para Firestore ───────────────────────────────────────────────
+// ─── Sanitização ─────────────────────────────────────────────────────────────
 function sanitizeForFirestore(obj: any): any {
   if (obj === undefined || obj === null) return null;
   if (typeof obj === 'number' && (!isFinite(obj) || isNaN(obj))) return null;
@@ -206,17 +271,14 @@ export async function processAndSave(
     const month = Number(formData.get('month'));
     if (isNaN(year) || isNaN(month)) throw new Error('Ano e mês devem ser números válidos.');
 
-    const files         = new FileReader(formData);
-    const processorArgs: PipelineArgs = { year, month, files, formData };
-    const processorResult = await processor(processorArgs);
-    const sanitizedResult = sanitizeForFirestore(processorResult);
-
-    const { data, ...extras } = sanitizedResult;
+    const files           = new FileReader(formData);
+    const processorResult = await processor({ year, month, files, formData });
+    const sanitized       = sanitizeForFirestore(processorResult);
+    const { data, ...extras } = sanitized;
     const savedResult = await saveToFirebase(pipelineType, year, month, data, extras);
-
     return { success: true, result: savedResult };
   } catch (error: any) {
-    console.error(`[${pipelineType.toUpperCase()}] Erro no Pipeline:`, error);
+    console.error(`[${pipelineType.toUpperCase()}] Erro:`, error);
     return { success: false, result: {} as PipelineResult, error: error.message };
   }
 }
@@ -244,13 +306,11 @@ export async function saveToFirebase(
     console.log("[FIREBASE] Salvando:", fullPayload.data?.length, "registros");
     const saved = await firebaseStore.saveResult(type, fullPayload);
     console.log("[FIREBASE] Salvo! ID:", saved.id);
-
     return {
       ...fullPayload,
       id:          saved.id,
       extraSheets: extraSheets,
     } as unknown as PipelineResult;
-
   } catch (error: any) {
     console.error("[FIREBASE] Erro ao salvar:", error);
     throw error;

@@ -4,7 +4,7 @@ import { processAndSave, PipelineArgs, ProcessorOutput, PipelineResponse } from 
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 const COLS_NOMES = ["MOTORISTA", "AJUDANTE", "AJUDANTE_1"]
-const COL_VIAGEM = "VIAGEM"
+const COL_VIAGENS = "VIAGENS"
 const COL_REGIAO = "REGIÃO"
 const COL_DATA   = "DATA DE ENTREGA"
 
@@ -135,7 +135,7 @@ function extrairAnoMes(valor: any): { ano: number | null; mes: number | null } {
   return { ano: null, mes: null }
 }
 
-function explodeViagem(valor: any): string[] {
+function explodeViagens(valor: any): string[] {
   if (!valor) return []
   const txt = String(valor).trim()
   if (!txt || ["nan","none","(vazio)","vazio"].includes(txt.toLowerCase())) return []
@@ -165,7 +165,7 @@ function agregarFaturamentoPorViagem(
   const agg = new Map<string, { fat: number; fatDev: number; notas: Set<string>; notasDev: Set<string> }>()
 
   for (const row of rows) {
-    const key   = normKey(row["VIAGEM"] ?? row["viagem"] ?? "")
+    const key   = normKey(row["VIAGENS"] ?? row["viagens"] ?? "")
     if (!key) continue
 
     const fat    = parseFloat(row["FATURAMENTO"] ?? 0) || 0
@@ -266,7 +266,7 @@ async function devolucoesPipelineProcessor(args: PipelineArgs): Promise<Processo
   // ── Explode viagem: colaborador × viagem ─────────────────────────────
   const records: any[] = []
   for (const row of controle) {
-    const viagens = explodeViagem(row[COL_VIAGEM])
+    const viagens = explodeViagens(row[COL_VIAGENS])
     if (!viagens.length) continue
 
     for (const col of COLS_NOMES) {

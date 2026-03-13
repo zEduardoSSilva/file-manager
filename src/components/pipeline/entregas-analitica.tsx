@@ -2,7 +2,7 @@ import * as React from "react"
 import {
   RefreshCw, Loader2, Edit2, X, Check, ChevronDown, ChevronUp,
   Search, Database, Trash2, ServerCrash, FileStack, CalendarDays,
-  Building2, Hash,
+  Building2, Hash, FileDown, Columns3, ArrowUpDown, Undo2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,7 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
   DialogFooter, DialogClose,
 } from "@/components/ui/dialog"
 import {
@@ -25,6 +25,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
+import { exportExcel } from "@/lib/excel-utils"
 import {
   collection, query, where, getDocs,
   doc, updateDoc, deleteDoc, getFirestore,
@@ -43,21 +44,23 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp()
 const db  = getFirestore(app)
 
-const GRID_COLS = [
+// ─── Colunas do grid ─────────────────────────────────────────────────────────
+const INITIAL_GRID_COLS = [
   "DATA DE ENTREGA", "FILIAL", "REGIÃO", "ROTA",
-  "MOTORISTA", "AJUDANTE",
+  "MOTORISTA", "AJUDANTE", "AJUDANTE 2",
   "PLACA", "PLACA SISTEMA",
   "ENTREGAS", "PESO", "TEMPO", "KM",
-  "LIQUIDAÇÃO", "VALOR",
+  "VIAGENS", "VALOR",
   "STATUS", "OBSERVAÇÃO",
 ]
 
+// ─── Campos do modal de edição ────────────────────────────────────────────────
 const ALL_FIELDS = [
   "DATA DE ENTREGA", "DATA", "FILIAL", "REGIÃO", "ROTA",
-  "MOTORISTA", "AJUDANTE",
+  "MOTORISTA", "AJUDANTE", "AJUDANTE 2",
   "PLACA SISTEMA", "PLACA", "MODELO", "OCP",
   "ENTREGAS", "PESO", "TEMPO", "KM",
-  "LIQUIDAÇÃO", "OBSERVAÇÃO",
+  "VIAGENS", "OBSERVAÇÃO",
   "CHAPA", "FRETE", "DESCARGA PALET",
   "HOSPEDAGEM", "DIARIA", "EXTRA", "SAÍDA",
   "VALOR", "STATUS", "CONTRATO",
@@ -66,18 +69,24 @@ const ALL_FIELDS = [
 
 type Row = Record<string, any> & { __docId: string; __rowIdx: number }
 
-// Metadados de um documento Firebase
 interface FireDoc {
   id: string
   timestamp: number
   totalRows: number
-  // { "Curitiba": { "12/03/2026": 5, ... }, ... }
   porFilialDia: Record<string, Record<string, number>>
 }
 
-function cellVal(v: any) {
-  if (v == null || v === "") return <span className="text-muted-foreground/40 text-[10px]">—</span>
-  return <span>{String(v)}</span>
+function cellVal(v: any, col: string) {
+  if (v == null || v === "") return <span className="text-muted-foreground/40 text-[10px]">—</span>;
+
+  if (col === 'TEMPO' && typeof v === 'string' && v.includes('1899')) {
+    const timeMatch = v.match(/(\d{2}:\d{2}:\d{2})/);
+    if (timeMatch && timeMatch[1]) {
+      return <span>{timeMatch[1]}</span>;
+    }
+  }
+
+  return <span>{String(v)}</span>;
 }
 
 function extractDay(dateStr: any): number | null {
@@ -94,27 +103,74 @@ function fmtTs(ts: number): string {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// ── Painel Gerenciar Importações ─────────────────────────────────────────────
+// ── Gerenciar Colunas ──────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
+  open: boolean; onClose: () => void; cols: string[]; setCols: (cols: string[]) => void
+}) {
+  const move = (idx: number, dir: 'up' | 'down') => {
+    const newCols = [...cols];
+    const [item] = newCols.splice(idx, 1);
+    const newIdx = dir === 'up' ? idx - 1 : idx + 1;
+    newCols.splice(newIdx, 0, item);
+    setCols(newCols);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Columns3 className="size-4 text-primary" />
+            Gerenciar Colunas
+          </DialogTitle>
+          <DialogDescription>
+            Arraste as colunas para reordenar a visualização da tabela.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-2 space-y-2">
+          {cols.map((col, idx) => (
+            <div key={col} className="flex items-center gap-2 p-2 rounded-md bg-muted/30">
+              <span className="flex-1 text-sm font-medium">{col}</span>
+              <Button variant="ghost" size="icon" className="size-7" onClick={() => move(idx, 'up')} disabled={idx === 0}>
+                <ChevronUp className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="size-7" onClick={() => move(idx, 'down')} disabled={idx === cols.length - 1}>
+                <ChevronDown className="size-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+        <DialogFooter className="pt-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setCols(INITIAL_GRID_COLS)}>
+            <Undo2 className="size-3.5" /> Restaurar Padrão
+          </Button>
+          <DialogClose asChild>
+            <Button size="sm" className="gap-1.5"><Check className="size-3.5" /> Fechar</Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// ── Gerenciar Importações ────────────────────────────────────────────────────
 // ════════════════════════════════════════════════════════════════════════════
 function GerenciarImportacoesDialog({
-  open, onClose, filterYear, filterMonth,
-  onDeleted,
+  open, onClose, filterYear, filterMonth, onDeleted,
 }: {
-  open: boolean
-  onClose: () => void
-  filterYear: number
-  filterMonth: number
-  onDeleted: () => void   // avisa o grid para recarregar
+  open: boolean; onClose: () => void
+  filterYear: number; filterMonth: number; onDeleted: () => void
 }) {
   const { toast } = useToast()
+  const [docs,       setDocs]       = React.useState<FireDoc[]>([])
+  const [loading,    setLoading]    = React.useState(false)
+  const [filterDay,  setFilterDay]  = React.useState(0)
+  const [confirmDoc, setConfirmDoc] = React.useState<FireDoc | null>(null)
+  const [deleting,   setDeleting]   = React.useState(false)
 
-  const [docs,        setDocs]        = React.useState<FireDoc[]>([])
-  const [loading,     setLoading]     = React.useState(false)
-  const [filterDay,   setFilterDay]   = React.useState(0)      // 0 = todos
-  const [confirmDoc,  setConfirmDoc]  = React.useState<FireDoc | null>(null)
-  const [deleting,    setDeleting]    = React.useState(false)
-
-  // ── Carrega documentos do período ────────────────────────────────────────
   const loadDocs = React.useCallback(async () => {
     if (!open) return
     setLoading(true)
@@ -127,26 +183,17 @@ function GerenciarImportacoesDialog({
       )
       const snap = await getDocs(q)
       const result: FireDoc[] = snap.docs.map(d => {
-        const data = d.data()
+        const data   = d.data()
         const rows: any[] = data.data ?? []
-
-        // Agrupa por filial → dia → contagem
         const porFilialDia: Record<string, Record<string, number>> = {}
         for (const row of rows) {
           const filial = String(row["FILIAL"] ?? "—")
-          const data_  = String(row["DATA DE ENTREGA"] ?? "—")
+          const dt     = String(row["DATA DE ENTREGA"] ?? "—")
           if (!porFilialDia[filial]) porFilialDia[filial] = {}
-          porFilialDia[filial][data_] = (porFilialDia[filial][data_] ?? 0) + 1
+          porFilialDia[filial][dt] = (porFilialDia[filial][dt] ?? 0) + 1
         }
-
-        return {
-          id:         d.id,
-          timestamp:  data.timestamp ?? 0,
-          totalRows:  rows.length,
-          porFilialDia,
-        }
+        return { id: d.id, timestamp: data.timestamp ?? 0, totalRows: rows.length, porFilialDia }
       }).sort((a, b) => b.timestamp - a.timestamp)
-
       setDocs(result)
     } catch (e: any) {
       toast({ variant: "destructive", title: "Erro ao carregar documentos", description: e.message })
@@ -157,7 +204,6 @@ function GerenciarImportacoesDialog({
 
   React.useEffect(() => { loadDocs() }, [loadDocs])
 
-  // ── Excluir documento inteiro do Firebase ────────────────────────────────
   const deleteDoc_ = async (fireDoc: FireDoc) => {
     setDeleting(true)
     try {
@@ -173,33 +219,23 @@ function GerenciarImportacoesDialog({
     }
   }
 
-  // ── Dias disponíveis (para o filtro) ────────────────────────────────────
   const diasDisponiveis = React.useMemo(() => {
     const s = new Set<string>()
-    for (const d of docs) {
-      for (const diaMap of Object.values(d.porFilialDia)) {
-        for (const dia of Object.keys(diaMap)) s.add(dia)
-      }
-    }
+    for (const d of docs) for (const dm of Object.values(d.porFilialDia)) for (const dia of Object.keys(dm)) s.add(dia)
     return [...s].sort()
   }, [docs])
 
-  // ── Filtra os docs pela data selecionada ─────────────────────────────────
   const docsFiltrados = React.useMemo(() => {
     if (filterDay === 0) return docs
     const pad = String(filterDay).padStart(2, "0")
     return docs.map(d => {
       const porFilialDia: Record<string, Record<string, number>> = {}
-      for (const [filial, diaMap] of Object.entries(d.porFilialDia)) {
-        const filtered: Record<string, number> = {}
-        for (const [data, cnt] of Object.entries(diaMap)) {
-          if (data.startsWith(pad + "/")) filtered[data] = cnt
-        }
-        if (Object.keys(filtered).length > 0) porFilialDia[filial] = filtered
+      for (const [f, dm] of Object.entries(d.porFilialDia)) {
+        const filt: Record<string, number> = {}
+        for (const [dt, cnt] of Object.entries(dm)) if (dt.startsWith(pad + "/")) filt[dt] = cnt
+        if (Object.keys(filt).length) porFilialDia[f] = filt
       }
-      const totalRows = Object.values(porFilialDia).reduce(
-        (acc, dm) => acc + Object.values(dm).reduce((a, n) => a + n, 0), 0
-      )
+      const totalRows = Object.values(porFilialDia).reduce((a, dm) => a + Object.values(dm).reduce((b, n) => b + n, 0), 0)
       return { ...d, porFilialDia, totalRows }
     }).filter(d => d.totalRows > 0)
   }, [docs, filterDay])
@@ -207,33 +243,23 @@ function GerenciarImportacoesDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
-        <DialogContent className="max-w-2xl h-[85vh] flex flex-col gap-0 p-0">
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col gap-0 p-0">
           <DialogHeader className="px-5 pt-5 pb-3">
             <DialogTitle className="flex items-center gap-2 text-base">
               <FileStack className="size-4 text-primary" />
               Gerenciar Importações — Firebase
             </DialogTitle>
-            <p className="text-xs text-muted-foreground">
-              Todos os documentos salvos em{" "}
-              <span className="font-mono font-semibold text-foreground">pipeline_results</span>{" "}
+            <DialogDescription className="text-xs text-muted-foreground">
+              Documentos salvos em <span className="font-mono font-semibold text-foreground">pipeline_results</span>{" "}
               para {String(filterMonth).padStart(2,"0")}/{filterYear}.
-              Aqui você pode apagar documentos inteiros do banco.
-            </p>
+            </DialogDescription>
           </DialogHeader>
-
           <Separator />
-
-          {/* Filtro de dia */}
           <div className="px-5 py-3 flex items-end gap-3 bg-muted/5">
             <div className="space-y-1">
               <Label className="text-[10px] uppercase tracking-wider">Filtrar dia</Label>
-              <Select
-                value={String(filterDay)}
-                onValueChange={v => setFilterDay(parseInt(v))}
-              >
-                <SelectTrigger className="w-40 h-8 text-xs">
-                  <SelectValue placeholder="Todos os dias" />
-                </SelectTrigger>
+              <Select value={String(filterDay)} onValueChange={v => setFilterDay(parseInt(v))}>
+                <SelectTrigger className="w-40 h-8 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="0">Todos os dias</SelectItem>
                   {diasDisponiveis.map(dia => (
@@ -242,14 +268,11 @@ function GerenciarImportacoesDialog({
                 </SelectContent>
               </Select>
             </div>
-
             <div className="flex items-center gap-2 ml-auto">
-              <Badge variant="outline" className="text-[10px]">
-                {docs.length} documento{docs.length !== 1 ? "s" : ""} no banco
-              </Badge>
+              <Badge variant="outline" className="text-[10px]">{docs.length} documento(s)</Badge>
               {docs.length > 1 && (
-                <Badge className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
-                  {docs.length - 1} redundante{docs.length - 1 !== 1 ? "s" : ""}
+                <Badge className="text-[10px] bg-amber-500/10 text-amber-600 border-amber-200">
+                  {docs.length - 1} redundante(s)
                 </Badge>
               )}
               <Button variant="ghost" size="icon" className="size-7" onClick={loadDocs} disabled={loading}>
@@ -257,25 +280,19 @@ function GerenciarImportacoesDialog({
               </Button>
             </div>
           </div>
-
           <Separator />
-
-          {/* Lista de documentos */}
-          <ScrollArea className="flex-1 min-h-0 max-h-[420px] px-5 py-3">
+          <ScrollArea className="flex-1 px-5 py-3">
             {loading && (
               <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                <span className="text-sm">Carregando...</span>
+                <Loader2 className="size-4 animate-spin" /><span className="text-sm">Carregando...</span>
               </div>
             )}
-
             {!loading && docsFiltrados.length === 0 && (
               <div className="py-10 text-center">
                 <ServerCrash className="size-7 text-muted-foreground/30 mx-auto mb-2" />
                 <p className="text-sm text-muted-foreground">Nenhum documento encontrado.</p>
               </div>
             )}
-
             {!loading && docsFiltrados.length > 0 && (
               <div className="space-y-3">
                 {docsFiltrados.map((fireDoc, docIdx) => {
@@ -285,85 +302,56 @@ function GerenciarImportacoesDialog({
                       "rounded-xl border overflow-hidden shadow-sm",
                       isNewest ? "border-primary/30" : "border-border/60"
                     )}>
-                      {/* Cabeçalho do doc */}
-                      <div className={cn(
-                        "flex items-center gap-2 px-3 py-2.5",
-                        isNewest ? "bg-primary/5" : "bg-muted/10"
-                      )}>
+                      <div className={cn("flex items-center gap-2 px-3 py-2.5",
+                        isNewest ? "bg-primary/5" : "bg-muted/10")}>
                         <Database className={cn("size-3.5 shrink-0", isNewest ? "text-primary" : "text-muted-foreground")} />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-mono text-[10px] text-foreground/80 truncate">
-                              {fireDoc.id}
-                            </span>
-                            {isNewest && (
-                              <Badge className="text-[9px] h-4 px-1.5 bg-primary/10 text-primary border-primary/20">
-                                ativo
-                              </Badge>
-                            )}
+                            <span className="font-mono text-[10px] text-foreground/80 truncate">{fireDoc.id}</span>
+                            {isNewest && <Badge className="text-[9px] h-4 px-1.5 bg-primary/10 text-primary border-primary/20">ativo</Badge>}
                           </div>
                           <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[10px] text-muted-foreground">
-                              Importado em {fmtTs(fireDoc.timestamp)}
-                            </span>
+                            <span className="text-[10px] text-muted-foreground">Importado em {fmtTs(fireDoc.timestamp)}</span>
                             <span className="text-[10px] text-muted-foreground">·</span>
-                            <span className="text-[10px] font-semibold text-foreground">
-                              {fireDoc.totalRows} registro{fireDoc.totalRows !== 1 ? "s" : ""}
-                            </span>
+                            <span className="text-[10px] font-semibold text-foreground">{fireDoc.totalRows} registros</span>
                           </div>
                         </div>
                         <Button
                           variant="ghost" size="icon"
                           className="size-7 text-destructive/60 hover:text-destructive hover:bg-destructive/10 shrink-0"
                           onClick={() => setConfirmDoc(fireDoc)}
-                          title="Excluir documento inteiro do Firebase"
                         >
                           <Trash2 className="size-3.5" />
                         </Button>
                       </div>
-
-                      {/* Mini-tabela: filial × dia × contagem */}
                       <div className="border-t border-border/40">
                         <table className="w-full text-[10px]">
                           <thead>
                             <tr className="bg-muted/20">
                               <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground w-28">
-                                <span className="flex items-center gap-1">
-                                  <Building2 className="size-2.5" /> Filial
-                                </span>
+                                <span className="flex items-center gap-1"><Building2 className="size-2.5" /> Filial</span>
                               </th>
                               <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground">
-                                <span className="flex items-center gap-1">
-                                  <CalendarDays className="size-2.5" /> Data de Entrega
-                                </span>
+                                <span className="flex items-center gap-1"><CalendarDays className="size-2.5" /> Data de Entrega</span>
                               </th>
                               <th className="px-3 py-1.5 text-right font-semibold text-muted-foreground w-20">
-                                <span className="flex items-center justify-end gap-1">
-                                  <Hash className="size-2.5" /> Registros
-                                </span>
+                                <span className="flex items-center justify-end gap-1"><Hash className="size-2.5" /> Registros</span>
                               </th>
                             </tr>
                           </thead>
                           <tbody>
                             {Object.entries(fireDoc.porFilialDia).flatMap(([filial, diaMap], fi) =>
                               Object.entries(diaMap).map(([dia, cnt], di) => (
-                                <tr key={`${fi}-${di}`} className={cn(
-                                  "border-t border-border/20",
-                                  (fi + di) % 2 === 0 ? "bg-background" : "bg-muted/5"
-                                )}>
+                                <tr key={`${fi}-${di}`} className={cn("border-t border-border/20",
+                                  (fi + di) % 2 === 0 ? "bg-background" : "bg-muted/5")}>
                                   {di === 0 ? (
-                                    <td
-                                      className="px-3 py-1.5 font-semibold text-foreground/80"
-                                      rowSpan={Object.keys(diaMap).length}
-                                    >
+                                    <td className="px-3 py-1.5 font-semibold text-foreground/80" rowSpan={Object.keys(diaMap).length}>
                                       {filial}
                                     </td>
                                   ) : null}
                                   <td className="px-3 py-1.5 font-mono text-muted-foreground">{dia}</td>
                                   <td className="px-3 py-1.5 text-right">
-                                    <Badge variant="outline" className="text-[9px] h-4 px-1.5">
-                                      {cnt}
-                                    </Badge>
+                                    <Badge variant="outline" className="text-[9px] h-4 px-1.5">{cnt}</Badge>
                                   </td>
                                 </tr>
                               ))
@@ -377,7 +365,6 @@ function GerenciarImportacoesDialog({
               </div>
             )}
           </ScrollArea>
-
           <Separator />
           <div className="px-5 py-3">
             <DialogClose asChild>
@@ -389,27 +376,19 @@ function GerenciarImportacoesDialog({
         </DialogContent>
       </Dialog>
 
-      {/* Confirmar exclusão do documento inteiro */}
       <AlertDialog open={!!confirmDoc} onOpenChange={v => { if (!v) setConfirmDoc(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <Trash2 className="size-4 text-destructive" />
-              Excluir documento do Firebase?
+              <Trash2 className="size-4 text-destructive" /> Excluir documento do Firebase?
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
                 <p>
-                  Isso remove <strong>permanentemente</strong> o documento{" "}
-                  <span className="font-mono text-foreground bg-muted px-1 rounded">
-                    {confirmDoc?.id}
-                  </span>{" "}
-                  com <strong>{confirmDoc?.totalRows} registros</strong> do Firestore.
+                  Remove permanentemente <span className="font-mono text-foreground bg-muted px-1 rounded">{confirmDoc?.id}</span>{" "}
+                  com <strong>{confirmDoc?.totalRows} registros</strong>.
                 </p>
-                <p className="text-muted-foreground text-xs">
-                  Esta ação não pode ser desfeita. Se este for o documento ativo (mais recente),
-                  o grid ficará vazio até a próxima importação.
-                </p>
+                <p className="text-muted-foreground text-xs">Esta ação não pode ser desfeita.</p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -417,8 +396,7 @@ function GerenciarImportacoesDialog({
             <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => confirmDoc && deleteDoc_(confirmDoc)}
-              disabled={deleting}
+              onClick={() => confirmDoc && deleteDoc_(confirmDoc)} disabled={deleting}
             >
               {deleting && <Loader2 className="size-3.5 animate-spin mr-1.5" />}
               Excluir do Firebase
@@ -443,9 +421,11 @@ export function VisaoAnaliticaPage() {
   const [filterRegiao, setFilterRegiao] = React.useState("all")
   const [filterFilial, setFilterFilial] = React.useState("all")
   const [search,       setSearch]       = React.useState("")
+  const [hideRotaChao, setHideRotaChao] = React.useState(true)
 
   const [rows,    setRows]    = React.useState<Row[]>([])
   const [loading, setLoading] = React.useState(true)
+  const [gridCols, setGridCols] = React.useState(INITIAL_GRID_COLS);
 
   const [selected,      setSelected]      = React.useState<Set<number>>(new Set())
   const [confirmDelete, setConfirmDelete] = React.useState(false)
@@ -459,6 +439,7 @@ export function VisaoAnaliticaPage() {
   const [saving,    setSaving]    = React.useState(false)
 
   const [showGerenciar, setShowGerenciar] = React.useState(false)
+  const [showGerenciarColunas, setShowGerenciarColunas] = React.useState(false);
 
   // ─── Fetch ──────────────────────────────────────────────────────────────
   const fetchData = React.useCallback(async () => {
@@ -484,8 +465,7 @@ export function VisaoAnaliticaPage() {
       const rawRows: any[] = latestDoc.data().data ?? []
       if (rawRows.length === 0) {
         toast({ variant: "destructive", title: "Documento sem dados", description: "Re-processe o período." })
-        setRows([])
-        return
+        setRows([]); return
       }
       setRows(rawRows.map((r, idx) => ({ ...r, __docId: latestDoc.id, __rowIdx: idx })))
       toast({ description: `${rawRows.length} registros carregados.` })
@@ -501,45 +481,42 @@ export function VisaoAnaliticaPage() {
 
   const filiais = React.useMemo(() =>
     [...new Set(rows.map(r => r["FILIAL"]).filter(Boolean))].sort(), [rows])
-
   const regioes = React.useMemo(() =>
     [...new Set(rows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rows])
 
   const filtered = React.useMemo(() => {
-    let r = rows
-    if (filterDay > 0)          r = r.filter(row => extractDay(row["DATA DE ENTREGA"]) === filterDay)
-    if (filterFilial !== "all") r = r.filter(row => row["FILIAL"] === filterFilial)
-    if (filterRegiao !== "all") r = r.filter(row => row["REGIÃO"] === filterRegiao)
+    let r = rows;
+    if (filterDay > 0) r = r.filter(row => extractDay(row["DATA DE ENTREGA"]) === filterDay);
+    if (filterFilial !== "all") r = r.filter(row => row["FILIAL"] === filterFilial);
+    if (filterRegiao !== "all") r = r.filter(row => row["REGIÃO"] === filterRegiao);
+    if (hideRotaChao) {
+      r = r.filter(row => String(row['ROTA'] ?? '').toUpperCase().trim() !== 'CHÃO');
+    }
     if (search) {
-      const s = search.toLowerCase()
-      r = r.filter(row => GRID_COLS.some(col => String(row[col] ?? "").toLowerCase().includes(s)))
+      const s = search.toLowerCase();
+      r = r.filter(row => gridCols.some(col => String(row[col] ?? "").toLowerCase().includes(s)));
     }
     if (sortCol) {
       r = [...r].sort((a, b) => {
-        const av = String(a[sortCol] ?? "")
-        const bv = String(b[sortCol] ?? "")
-        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av)
-      })
+        const av = String(a[sortCol] ?? "");
+        const bv = String(b[sortCol] ?? "");
+        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
     }
-    return r
-  }, [rows, filterDay, filterFilial, filterRegiao, search, sortCol, sortAsc])
+    return r;
+  }, [rows, filterDay, filterFilial, filterRegiao, hideRotaChao, search, sortCol, sortAsc, gridCols]);
 
-  // Seleção
   const filteredIdxs = filtered.map(r => r.__rowIdx)
   const allSelected  = filteredIdxs.length > 0 && filteredIdxs.every(i => selected.has(i))
   const someSelected = filteredIdxs.some(i => selected.has(i)) && !allSelected
 
   const toggleAll = () => {
-    if (allSelected) {
-      setSelected(prev => { const n = new Set(prev); filteredIdxs.forEach(i => n.delete(i)); return n })
-    } else {
-      setSelected(prev => new Set([...prev, ...filteredIdxs]))
-    }
+    if (allSelected) setSelected(prev => { const n = new Set(prev); filteredIdxs.forEach(i => n.delete(i)); return n })
+    else             setSelected(prev => new Set([...prev, ...filteredIdxs]))
   }
   const toggleRow = (idx: number) =>
     setSelected(prev => { const n = new Set(prev); n.has(idx) ? n.delete(idx) : n.add(idx); return n })
 
-  // Excluir linhas selecionadas
   const deleteSelected = async () => {
     if (!selected.size) return
     setDeleting(true)
@@ -563,8 +540,7 @@ export function VisaoAnaliticaPage() {
     } catch (e: any) {
       toast({ variant: "destructive", title: "Erro ao excluir", description: e.message })
     } finally {
-      setDeleting(false)
-      setConfirmDelete(false)
+      setDeleting(false); setConfirmDelete(false)
     }
   }
 
@@ -598,10 +574,27 @@ export function VisaoAnaliticaPage() {
     if (sortCol === col) setSortAsc(a => !a)
     else { setSortCol(col); setSortAsc(true) }
   }
+  
+  const exportXlsx = React.useCallback(() => {
+    const dataToExport = filtered.map(row => {
+      const newRow: Record<string, any> = {};
+      gridCols.forEach(col => {
+        newRow[col] = row[col];
+      });
+      const tempo = newRow["TEMPO"];
+      if (typeof tempo === 'string' && tempo.includes('1899')) {
+        const timeMatch = tempo.match(/(\d{2}:\d{2}:\d{2})/);
+        if (timeMatch && timeMatch[1]) {
+          newRow["TEMPO"] = timeMatch[1];
+        }
+      }
+      return newRow;
+    });
+    exportExcel(dataToExport, `Visão Analítica - ${new Date().toLocaleDateString()}.xlsx`);
+  }, [filtered, gridCols]);
 
   return (
     <div className="space-y-4">
-
       {/* ── Filtros ── */}
       <Card className="shadow-sm border-border/60">
         <CardHeader className="pb-3">
@@ -615,15 +608,23 @@ export function VisaoAnaliticaPage() {
                 Dados do último pipeline processado para o período selecionado.
               </CardDescription>
             </div>
-            {/* Botão gerenciar importações */}
-            <Button
-              variant="outline" size="sm"
-              className="gap-1.5 text-xs h-8 shrink-0"
-              onClick={() => setShowGerenciar(true)}
-            >
-              <FileStack className="size-3.5 text-muted-foreground" />
-              Gerenciar Firebase
-            </Button>
+			<div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0"
+					onClick={() => setShowGerenciarColunas(true)}>
+					<Columns3 className="size-3.5 text-muted-foreground" />
+					Gerenciar Colunas
+				</Button>
+				<Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0"
+					onClick={exportXlsx}>
+					<FileDown className="size-3.5 text-muted-foreground" />
+					Exportar Excel
+				</Button>
+				<Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0"
+					onClick={() => setShowGerenciar(true)}>
+					<FileStack className="size-3.5 text-muted-foreground" />
+					Gerenciar Firebase
+				</Button>
+			</div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -642,14 +643,12 @@ export function VisaoAnaliticaPage() {
               <Label className="text-[10px] uppercase tracking-wider">
                 Dia <span className="normal-case text-muted-foreground font-normal">(0 = todos)</span>
               </Label>
-              <Input
-                type="number" min={0} max={31} className="w-20 h-8 text-xs"
+              <Input type="number" min={0} max={31} className="w-20 h-8 text-xs"
                 value={filterDay === 0 ? "" : filterDay}
                 onChange={e => {
                   const v = parseInt(e.target.value)
                   setFilterDay(isNaN(v) || v < 0 ? 0 : Math.min(v, 31))
-                }}
-              />
+                }} />
             </div>
             <div className="space-y-1">
               <Label className="text-[10px] uppercase tracking-wider">Filial</Label>
@@ -679,6 +678,12 @@ export function VisaoAnaliticaPage() {
                   value={search} onChange={e => setSearch(e.target.value)} />
               </div>
             </div>
+            <div className="flex items-center self-end pb-1">
+              <Checkbox id="hide-rota-chao" checked={hideRotaChao} onCheckedChange={v => setHideRotaChao(!!v)} className="size-3.5"/>
+              <label htmlFor="hide-rota-chao" className="ml-2 text-xs font-medium leading-none">
+                  Ocultar rota 'CHÃO'
+              </label>
+            </div>
             <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={fetchData} disabled={loading}>
               {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
               Atualizar
@@ -687,25 +692,15 @@ export function VisaoAnaliticaPage() {
 
           {rows.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap pt-1">
-              <Badge variant="outline" className="text-[10px]">
-                {filtered.length} de {rows.length} registros
-              </Badge>
-              {filterDay > 0 && (
-                <Badge variant="secondary" className="text-[10px]">
-                  Dia {String(filterDay).padStart(2, "0")}
-                </Badge>
-              )}
+              <Badge variant="outline" className="text-[10px]">{filtered.length} de {rows.length} registros</Badge>
+              {filterDay > 0 && <Badge variant="secondary" className="text-[10px]">Dia {String(filterDay).padStart(2, "0")}</Badge>}
               {selected.size > 0 && (
                 <>
                   <Badge className="text-[10px] bg-primary/10 text-primary border border-primary/20">
                     {selected.size} selecionado{selected.size > 1 ? "s" : ""}
                   </Badge>
-                  <Button
-                    variant="destructive" size="sm"
-                    className="h-6 text-[10px] px-2.5 gap-1"
-                    onClick={() => setConfirmDelete(true)}
-                    disabled={deleting}
-                  >
+                  <Button variant="destructive" size="sm" className="h-6 text-[10px] px-2.5 gap-1"
+                    onClick={() => setConfirmDelete(true)} disabled={deleting}>
                     {deleting ? <Loader2 className="size-3 animate-spin" /> : <Trash2 className="size-3" />}
                     Excluir selecionados
                   </Button>
@@ -716,94 +711,94 @@ export function VisaoAnaliticaPage() {
         </CardContent>
       </Card>
 
-      {/* ── Loading ── */}
       {loading && (
         <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground">
-          <Loader2 className="size-5 animate-spin" />
-          <span className="text-sm">Carregando...</span>
+          <Loader2 className="size-5 animate-spin" /><span className="text-sm">Carregando...</span>
         </div>
       )}
 
-      {/* ── Empty ── */}
       {!loading && rows.length === 0 && (
         <div className="rounded-xl border border-dashed border-border/60 py-16 text-center">
           <Database className="size-8 text-muted-foreground/30 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">
-            Nenhum dado para o período. Clique em <strong>Atualizar</strong> para recarregar.
+            Nenhum dado para o período. Clique em <strong>Atualizar</strong>.
           </p>
         </div>
       )}
 
-      {/* ── Grid ── */}
       {!loading && rows.length > 0 && (
-        <div className="rounded-xl border border-border/60 overflow-hidden shadow-sm">
-          <ScrollArea className="w-full">
-            <div className="overflow-x-auto">
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="bg-muted/30 border-b">
-                    <th className="px-3 py-2.5 w-10">
+        <div className="rounded-xl border border-border/60 overflow-x-auto shadow-sm">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="bg-muted/30 border-b">
+                <th className="px-3 py-2.5 w-10">
+                  <Checkbox
+                    checked={allSelected}
+                    aria-checked={someSelected ? "mixed" : allSelected}
+                    onCheckedChange={toggleAll}
+                    className="size-3.5"
+                  />
+                </th>
+                {gridCols.map(col => (
+                  <th
+                    key={col}
+                    className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
+                    onClick={() => toggleSort(col)}>
+                    <span className="flex items-center justify-center gap-1">
+                      {col}
+                      {sortCol === col ? (
+                        sortAsc ? (
+                          <ChevronUp className="size-3" />
+                        ) : (
+                          <ChevronDown className="size-3" />
+                        )
+                      ) : null}
+                    </span>
+                  </th>
+                ))}
+                <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground w-14">Editar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((row, i) => {
+                const isSelected = selected.has(row.__rowIdx);
+                return (
+                  <tr
+                    key={i}
+                    className={cn(
+                      "border-b transition-colors hover:bg-muted/10",
+                      isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/5"
+                    )}
+                  >
+                    <td className="px-3 py-2 text-center">
                       <Checkbox
-                        checked={allSelected}
-                        aria-checked={someSelected ? "mixed" : allSelected}
-                        onCheckedChange={toggleAll}
+                        checked={isSelected}
+                        onCheckedChange={() => toggleRow(row.__rowIdx)}
                         className="size-3.5"
                       />
-                    </th>
-                    {GRID_COLS.map(col => (
-                      <th key={col}
-                        className="px-3 py-2.5 text-left font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
-                        onClick={() => toggleSort(col)}
-                      >
-                        <span className="flex items-center gap-1">
-                          {col}
-                          {sortCol === col
-                            ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />
-                            : null}
-                        </span>
-                      </th>
+                    </td>
+                    {gridCols.map(col => (
+                      <td key={col} className={cn("px-3 py-2 whitespace-nowrap text-center", {
+                        "min-w-[240px]": col === "MOTORISTA",
+                        "min-w-[200px]": col === "AJUDANTE" || col === "AJUDANTE 2",
+                      })}>
+                        {cellVal(row[col], col)}
+                      </td>
                     ))}
-                    <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground w-14">
-                      Editar
-                    </th>
+                    <td className="px-3 py-2 text-center">
+                      <Button variant="ghost" size="icon" className="size-6" onClick={() => openEdit(row)}>
+                        <Edit2 className="size-3 text-primary" />
+                      </Button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((row, i) => {
-                    const isSelected = selected.has(row.__rowIdx)
-                    return (
-                      <tr key={i} className={cn(
-                        "border-b transition-colors hover:bg-muted/10",
-                        isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/5"
-                      )}>
-                        <td className="px-3 py-2">
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() => toggleRow(row.__rowIdx)}
-                            className="size-3.5"
-                          />
-                        </td>
-                        {GRID_COLS.map(col => (
-                          <td key={col} className="px-3 pyial-2 whitespace-nowrap max-w-[160px] truncate">
-                            {cellVal(row[col])}
-                          </td>
-                        ))}
-                        <td className="px-3 py-2 text-center">
-                          <Button variant="ghost" size="icon" className="size-6" onClick={() => openEdit(row)}>
-                            <Edit2 className="size-3 text-primary" />
-                          </Button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </ScrollArea>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* ── Confirmar exclusão de linhas ── */}
+      {/* Confirmar exclusão */}
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -814,46 +809,140 @@ export function VisaoAnaliticaPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={deleteSelected} disabled={deleting}
-            >
-              {deleting && <Loader2 className="size-3.5 animate-spin mr-1.5" />}
-              Excluir
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={deleteSelected} disabled={deleting}>
+              {deleting && <Loader2 className="size-3.5 animate-spin mr-1.5" />}Excluir
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ── Modal de Edição ── */}
+      {/* Modal edição */}
       <Dialog open={!!editRow} onOpenChange={open => { if (!open) setEditRow(null) }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col gap-0 p-0">
+          
+          {/* Header */}
+          <DialogHeader className="px-7 pt-6 pb-4 border-b shrink-0">
+            <DialogTitle className="flex items-center gap-2.5 text-base">
               <Edit2 className="size-4 text-primary" />
-              Editar Registro
+              Editar registro
               {editRow && (
-                <Badge variant="outline" className="ml-2 text-[10px]">
+                <Badge variant="outline" className="ml-1 text-[11px] font-normal">
                   {editRow["MOTORISTA"] || "—"} · {editRow["DATA DE ENTREGA"] || "—"}
                 </Badge>
               )}
             </DialogTitle>
+            <DialogDescription>
+              Altere os dados do registro nos campos abaixo e clique em Confirmar para salvar.
+            </DialogDescription>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 py-2">
-            {ALL_FIELDS.map(field => (
-              <div key={field} className={cn("space-y-1", ["OBSERVAÇÃO", "STATUS"].includes(field) && "col-span-2")}>
-                <Label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {field}
-                </Label>
-                <Input
-                  className="h-8 text-xs"
-                  value={editDraft[field] ?? ""}
-                  onChange={e => setEditDraft(prev => ({ ...prev, [field]: e.target.value }))}
-                />
+
+          {/* Body com scroll */}
+          <ScrollArea className="flex-1 px-7 py-5">
+            <div className="space-y-7">
+
+              {/* Seção: Identificação */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+                  Identificação
+                </p>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+                  {[
+                    { field: "DATA DE ENTREGA", span: 1 },
+                    { field: "DATA",            span: 1 },
+                    { field: "FILIAL",          span: 1 },
+                    { field: "REGIÃO",          span: 1 },
+                    { field: "ROTA",            span: 2 },
+                    { field: "VIAGENS",      span: 1 },
+                    { field: "STATUS",          span: 1 },
+                  ].map(({ field, span }) => (
+                    <div key={field} className={cn("space-y-1.5", span === 2 && "col-span-2")}>
+                      <Label className="text-[11px] text-muted-foreground">{field}</Label>
+                      <Input className="h-8 text-xs" value={editDraft[field] ?? ""}
+                        onChange={e => setEditDraft(p => ({ ...p, [field]: e.target.value }))} />
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
-          <DialogFooter className="gap-2 pt-2">
+
+              <div className="border-t border-border/50" />
+
+              {/* Seção: Equipe e veículo */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+                  Equipe e veículo
+                </p>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+                  {[
+                    { field: "MOTORISTA",     span: 2 },
+                    { field: "AJUDANTE",      span: 1 },
+                    { field: "AJUDANTE 2",    span: 1 },
+                    { field: "PLACA SISTEMA", span: 1 },
+                    { field: "PLACA",         span: 1 },
+                    { field: "MODELO",        span: 1 },
+                    { field: "OCP",           span: 1 },
+                  ].map(({ field, span }) => (
+                    <div key={field} className={cn("space-y-1.5", span === 2 && "col-span-2")}>
+                      <Label className="text-[11px] text-muted-foreground">{field}</Label>
+                      <Input className="h-8 text-xs" value={editDraft[field] ?? ""}
+                        onChange={e => setEditDraft(p => ({ ...p, [field]: e.target.value }))} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-border/50" />
+
+              {/* Seção: Operação */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+                  Operação
+                </p>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+                  {[
+                    { field: "ENTREGAS",  span: 1 },
+                    { field: "PESO",      span: 1 },
+                    { field: "TEMPO",     span: 1 },
+                    { field: "KM",        span: 1 },
+                    { field: "SAÍDA",     span: 1 },
+                    { field: "OBSERVAÇÃO",span: 3 },
+                  ].map(({ field, span }) => (
+                    <div key={field} className={cn("space-y-1.5", span > 1 && `col-span-${span}`)}>
+                      <Label className="text-[11px] text-muted-foreground">{field}</Label>
+                      <Input className="h-8 text-xs" value={editDraft[field] ?? ""}
+                        onChange={e => setEditDraft(p => ({ ...p, [field]: e.target.value }))} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="border-t border-border/50" />
+
+              {/* Seção: Financeiro */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+                  Financeiro
+                </p>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+                  {[
+                    "VALOR", "CHAPA", "FRETE", "DESCARGA PALET",
+                    "HOSPEDAGEM", "DIARIA", "EXTRA", "CONTRATO",
+                    "PERFORMAXXI", "ENTREGAS DEV", "VALOR DEV",
+                  ].map(field => (
+                    <div key={field} className="space-y-1.5">
+                      <Label className="text-[11px] text-muted-foreground">{field}</Label>
+                      <Input className="h-8 text-xs" value={editDraft[field] ?? ""}
+                        onChange={e => setEditDraft(p => ({ ...p, [field]: e.target.value }))} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </ScrollArea>
+
+          {/* Footer */}
+          <div className="flex items-center justify-end gap-2 px-7 py-4 border-t bg-muted/5 shrink-0">
             <DialogClose asChild>
               <Button variant="outline" size="sm" className="gap-1.5">
                 <X className="size-3.5" /> Cancelar
@@ -863,17 +952,19 @@ export function VisaoAnaliticaPage() {
               {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
               Confirmar
             </Button>
-          </DialogFooter>
+          </div>
+
         </DialogContent>
       </Dialog>
 
-      {/* ── Gerenciar Importações ── */}
       <GerenciarImportacoesDialog
-        open={showGerenciar}
-        onClose={() => setShowGerenciar(false)}
-        filterYear={filterYear}
-        filterMonth={filterMonth}
-        onDeleted={fetchData}
+        open={showGerenciar} onClose={() => setShowGerenciar(false)}
+        filterYear={filterYear} filterMonth={filterMonth} onDeleted={fetchData}
+      />
+
+      <GerenciarColunasDialog
+        open={showGerenciarColunas} onClose={() => setShowGerenciarColunas(false)}
+        cols={gridCols} setCols={setGridCols}
       />
     </div>
   )
