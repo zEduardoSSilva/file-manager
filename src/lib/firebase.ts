@@ -19,13 +19,13 @@ import {
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "AIzaSyBTCxHoYH8dfeIdEFHhaGlfgT3cAGD6bxE",
-  authDomain: "file-manager-hub-50030334.firebaseapp.com",
-  projectId: "file-manager-hub-50030334",
-  storageBucket: "file-manager-hub-50030334.firebasestorage.app",
-  messagingSenderId: "624881199937",
-  appId: "1:624881199937:web:32a47c8c0e94d72aa80fc0",
-  measurementId: "G-022RTQT8XG"
+  apiKey: "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
+  authDomain: "file-manager-hub-50030335.firebaseapp.com",
+  projectId: "file-manager-hub-50030335",
+  storageBucket: "file-manager-hub-50030335.firebasestorage.app",
+  messagingSenderId: "187801013388",
+  appId: "1:187801013388:web:ef1417fae5d8d24d93ffa9",
+  measurementId: "G-MJ60ERTPV8"
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();

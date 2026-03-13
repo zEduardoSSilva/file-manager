@@ -43,7 +43,7 @@ const DataTable = React.memo(({ data, limit = 500 }: { data: any[], limit?: numb
       <div className="overflow-x-auto">
         <Table className="min-w-max w-full table-auto border-collapse">
           <TableHeader className="sticky top-0 bg-white z-10 shadow-sm">
-            <TableRow className="bg-muted/50 border-b">
+            <TableRow className="bg-slate-100 border-b">
               {headers.map((h, i) => (
                 <TableHead key={i} className="text-[10px] uppercase font-black py-3 px-4 whitespace-nowrap text-muted-foreground">
                   {h}
@@ -60,7 +60,7 @@ const DataTable = React.memo(({ data, limit = 500 }: { data: any[], limit?: numb
             return (
               <div
                 key={virtualRow.index}
-                className="flex hover:bg-primary/5 transition-colors border-b last:border-0 group"
+                className="flex bg-white hover:bg-primary/5 transition-colors border-b last:border-0 group"
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -81,7 +81,7 @@ const DataTable = React.memo(({ data, limit = 500 }: { data: any[], limit?: numb
         </div>
       </div>
       {data.length > limit && (
-        <p className="text-[10px] text-center p-3 text-muted-foreground bg-muted/5 italic border-t font-medium">
+        <p className="text-[10px] text-center p-3 text-muted-foreground bg-slate-50 italic border-t font-medium">
           Exibindo os primeiros {limit} registros de {data.length}. Use o botão Exportar Excel para ver todos os dados.
         </p>
       )}
@@ -95,7 +95,7 @@ export function DataViewer({ result }: { result: PipelineResult }) {
 
   return (
     <Card className="border-t-4 border-t-green-500 shadow-xl overflow-hidden min-w-0 w-full bg-white animate-in zoom-in-95 duration-300">
-      <CardHeader className="p-4 sm:p-6 pb-4 border-b bg-muted/5">
+      <CardHeader className="p-4 sm:p-6 pb-4 border-b bg-slate-50">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -115,7 +115,7 @@ export function DataViewer({ result }: { result: PipelineResult }) {
       <CardContent className="p-0 sm:p-6 sm:pt-4">
         <Tabs defaultValue="drivers" className="w-full">
           <div className="px-4 sm:px-0">
-            <TabsList className="mb-4 h-10 w-full sm:w-auto justify-start bg-muted/50 p-1 border">
+            <TabsList className="mb-4 h-10 w-full sm:w-auto justify-start bg-slate-100 p-1 border">
               <TabsTrigger value="drivers" className="text-[11px] sm:text-xs px-6 font-bold data-[state=active]:shadow-md">CONSOLIDADO</TabsTrigger>
               {isPonto && result.absenteismoData && (
                 <TabsTrigger value="abs" className="text-[11px] sm:text-xs px-6 font-bold data-[state=active]:shadow-md">ABSENTEÍSMO</TabsTrigger>
@@ -139,7 +139,7 @@ export function DataViewer({ result }: { result: PipelineResult }) {
           )}
 
           <TabsContent value="overview" className="w-full focus-visible:outline-none">
-             <div className="mx-4 sm:mx-0 p-5 rounded-xl bg-primary/5 border border-primary/10 mb-4 shadow-inner">
+             <div className="mx-4 sm:mx-0 p-5 rounded-xl bg-slate-50 border border-primary/10 mb-4 shadow-inner">
                 <h4 className="text-xs font-black mb-3 flex items-center gap-2 text-primary uppercase tracking-widest">
                   <Info className="size-4" /> Relatório de Sistema
                 </h4>

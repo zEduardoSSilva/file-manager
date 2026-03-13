@@ -3,7 +3,7 @@ import {
   Play, Trash2, FileCode, Loader2, FileSpreadsheet, HelpCircle,
   Download, CheckCircle2, Circle, XCircle, AlertTriangle,
   ChevronRight, Terminal, Info, Database, Building2, Calendar,
-  Clock,
+  Clock, ShieldAlert,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
@@ -13,6 +13,11 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Progress } from "@/components/ui/progress"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Badge } from "@/components/ui/badge"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  DialogFooter, DialogClose,
+} from "@/components/ui/dialog"
 import { AIParamAssistant } from "../../pages/AI-Param-Assistant"
 import { executeConsolidacaoEntregasPipeline, montarNomeAba } from "@/app/actions/entregas-pipeline"
 import { useToast } from "@/hooks/use-toast"
@@ -24,6 +29,9 @@ import { cn } from "@/lib/utils"
 type StageStatus = "idle" | "running" | "done" | "error" | "warn"
 interface Stage { id: string; label: string; description: string; status: StageStatus }
 interface LogEntry { time: string; message: string; type: "info" | "success" | "error" | "warn" | "step" }
+interface DuplicadaInfo {
+  liquidacao: string; data: string; motorista: string; filial: string
+}
 
 // ─── Filiais ──────────────────────────────────────────────────────────────────
 const FILIAIS = [
@@ -34,7 +42,6 @@ const FILIAIS = [
   { id: "dourados",     label: "DOURADOS.xlsx",       regiao: "BV02" },
 ]
 
-// ─── Etapas (dia específico) ──────────────────────────────────────────────────
 const STAGES_DIA: Stage[] = [
   { id: "load",   label: "Carregar arquivos",          description: "Lê os arquivos de cada filial selecionada",      status: "idle" },
   { id: "sheet",  label: "Localizar aba",              description: "Busca a aba DD.MM.YYYY em cada arquivo",         status: "idle" },
@@ -43,7 +50,6 @@ const STAGES_DIA: Stage[] = [
   { id: "export", label: "Exportar / Salvar Firebase", description: "Abas por filial + Acumulado",                    status: "idle" },
 ]
 
-// ─── Etapas (mês completo) ────────────────────────────────────────────────────
 const STAGES_MES: Stage[] = [
   { id: "load",   label: "Carregar arquivo",           description: "Lê um arquivo por vez",                          status: "idle" },
   { id: "scan",   label: "Varrer abas do mês",         description: "Filtra abas DD.MM.YYYY do mês/ano selecionado",  status: "idle" },
@@ -53,10 +59,11 @@ const STAGES_MES: Stage[] = [
 ]
 
 const REGRAS = [
-  { condition: "Registros CHÃO",   result: "Removidos apenas no Acumulado",    variant: "warn"    as const },
-  { condition: "PLACA vazia",      result: "Substituída por PLACA SISTEMA",     variant: "info"    as const },
-  { condition: "TEMPO",            result: "Convertido para HH:MM",             variant: "info"    as const },
-  { condition: "Abas geradas",     result: "Uma por filial + Acumulado",        variant: "success" as const },
+  { condition: "Registros CHÃO",    result: "Removidos apenas no Acumulado",    variant: "warn"    as const },
+  { condition: "PLACA vazia",       result: "Substituída por PLACA SISTEMA",     variant: "info"    as const },
+  { condition: "TEMPO",             result: "Convertido para HH:MM",             variant: "info"    as const },
+  { condition: "Viagem duplicada",  result: "Ignorada, já existe no Firebase",   variant: "warn"    as const },
+  { condition: "Abas geradas",      result: "Uma por filial + Acumulado",        variant: "success" as const },
 ]
 
 // ─── Sub-componentes ──────────────────────────────────────────────────────────
@@ -67,13 +74,20 @@ function StageIcon({ status }: { status: StageStatus }) {
   if (status === "warn")    return <AlertTriangle className="size-4 text-amber-500 shrink-0" />
   return <Circle className="size-4 text-muted-foreground/30 shrink-0" />
 }
+
 const stageBg: Record<StageStatus, string> = {
-  idle: "bg-muted/20 border-border/40", running: "bg-primary/5 border-primary/30",
-  done: "bg-emerald-50 border-emerald-200", error: "bg-red-50 border-red-200", warn: "bg-amber-50 border-amber-200",
+  idle:    "bg-muted/20 border-border/40",
+  running: "bg-primary/5 border-primary/30",
+  done:    "bg-emerald-50 border-emerald-200",
+  error:   "bg-red-50 border-red-200",
+  warn:    "bg-amber-50 border-amber-200",
 }
 const stageLbl: Record<StageStatus, string> = {
-  idle: "text-muted-foreground", running: "text-primary font-semibold",
-  done: "text-emerald-700 font-medium", error: "text-red-700 font-semibold", warn: "text-amber-700 font-medium",
+  idle:    "text-muted-foreground",
+  running: "text-primary font-semibold",
+  done:    "text-emerald-700 font-medium",
+  error:   "text-red-700 font-semibold",
+  warn:    "text-amber-700 font-medium",
 }
 const ruleColor = {
   success: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -82,35 +96,108 @@ const ruleColor = {
   info:    "border-blue-200 bg-blue-50 text-blue-700",
 }
 const logColor: Record<LogEntry["type"], string> = {
-  info: "text-slate-400", success: "text-emerald-400",
-  error: "text-red-400 font-semibold", warn: "text-amber-400", step: "text-primary font-semibold",
+  info:    "text-slate-400",
+  success: "text-emerald-400",
+  error:   "text-red-400 font-semibold",
+  warn:    "text-amber-400",
+  step:    "text-primary font-semibold",
 }
 const logPrefix: Record<LogEntry["type"], string> = {
   info: "   ", success: "✅ ", error: "❌ ", warn: "⚠️  ", step: "▶  ",
 }
 
+// ─── Dialog de duplicadas ─────────────────────────────────────────────────────
+function DuplicadasDialog({
+  open, onClose, duplicadas,
+}: {
+  open: boolean
+  onClose: () => void
+  duplicadas: DuplicadaInfo[]
+}) {
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent className="max-w-xl max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <ShieldAlert className="size-4 text-amber-500" />
+            Viagens não importadas — já existem no banco
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            As viagens abaixo já constam no Firebase para este período e <strong>não foram cadastradas novamente</strong>.
+            Para substituir, exclua os registros existentes na Visão Analítica antes de reimportar.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center gap-2 px-1">
+          <Badge variant="outline" className="text-[11px] border-amber-300 text-amber-700 bg-amber-50">
+            {duplicadas.length} viagem{duplicadas.length !== 1 ? "ns" : ""} ignorada{duplicadas.length !== 1 ? "s" : ""}
+          </Badge>
+        </div>
+
+        <ScrollArea className="flex-1 rounded-lg border border-border/60 overflow-hidden">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="bg-muted/30 border-b sticky top-0">
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Liquidação</th>
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Data</th>
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Motorista</th>
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Filial</th>
+              </tr>
+            </thead>
+            <tbody>
+              {duplicadas.map((d, i) => (
+                <tr key={i} className={cn(
+                  "border-b transition-colors",
+                  i % 2 === 0 ? "bg-background" : "bg-muted/5"
+                )}>
+                  <td className="px-3 py-2 font-mono text-amber-700">{d.liquidacao}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{d.data}</td>
+                  <td className="px-3 py-2 max-w-[180px] truncate">{d.motorista}</td>
+                  <td className="px-3 py-2">{d.filial}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ScrollArea>
+
+        <DialogFooter className="pt-2">
+          <DialogClose asChild>
+            <Button size="sm" className="gap-1.5">
+              <CheckCircle2 className="size-3.5" />
+              Entendido
+            </Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ─── Componente principal ─────────────────────────────────────────────────────
 export function ConsolidacaoEntregasPipelineView() {
-  const [year, setYear]   = React.useState(new Date().getFullYear())
+  const [year,  setYear]  = React.useState(new Date().getFullYear())
   const [month, setMonth] = React.useState(new Date().getMonth() + 1)
-  // day = 0 → mês completo; day > 0 → dia específico
-  const [day, setDay]     = React.useState<number>(new Date().getDate())
+  const [day,   setDay]   = React.useState<number>(new Date().getDate())
 
-  const [files, setFiles]     = React.useState<Record<string, File | null>>({})
+  const [files,       setFiles]       = React.useState<Record<string, File | null>>({})
   const [isExecuting, setIsExecuting] = React.useState(false)
-  const [progress, setProgress]       = React.useState(0)
-  const [stages, setStages]           = React.useState<Stage[]>(STAGES_DIA)
-  const [logs, setLogs]               = React.useState<LogEntry[]>([])
-  const [lastResult, setLastResult]   = React.useState<PipelineResult | null>(null)
-  const [stats, setStats]             = React.useState<{
-    filiaisOk: number; total: number; acumulado: number
+  const [progress,    setProgress]    = React.useState(0)
+  const [stages,      setStages]      = React.useState<Stage[]>(STAGES_DIA)
+  const [logs,        setLogs]        = React.useState<LogEntry[]>([])
+  const [lastResult,  setLastResult]  = React.useState<PipelineResult | null>(null)
+  const [stats,       setStats]       = React.useState<{
+    filiaisOk: number; total: number; acumulado: number; duplicadas: number
   } | null>(null)
+
+  // Dialog duplicadas
+  const [duplicadas,      setDuplicadas]      = React.useState<DuplicadaInfo[]>([])
+  const [showDuplicadas,  setShowDuplicadas]  = React.useState(false)
+
   const logEndRef = React.useRef<HTMLDivElement>(null)
   const { toast } = useToast()
 
   const modoMesCompleto = day === 0
 
-  // Atualiza etapas quando modo muda
   React.useEffect(() => {
     setStages((modoMesCompleto ? STAGES_MES : STAGES_DIA).map(s => ({ ...s, status: "idle" })))
   }, [modoMesCompleto])
@@ -131,16 +218,15 @@ export function ConsolidacaoEntregasPipelineView() {
   }
 
   const canRun = FILIAIS.some(f => files[f.id])
-
   const handleFileChange = (id: string, file: File | null) =>
     setFiles(prev => ({ ...prev, [id]: file }))
 
-  // Preview do nome da aba que será lida
   const abaPreview = day > 0 ? montarNomeAba(day, month, year) : null
 
   const runPipeline = async (downloadOnly = false) => {
     if (!canRun) return
     setIsExecuting(true); setLogs([]); resetAll()
+    setDuplicadas([]); setShowDuplicadas(false)
 
     try {
       const selecionados = FILIAIS.filter(f => files[f.id])
@@ -148,58 +234,60 @@ export function ConsolidacaoEntregasPipelineView() {
 
       addLog(`Consolidação de Entregas — ${modoLabel}`, "step")
       addLog(`${selecionados.length} filial(is): ${selecionados.map(f => f.regiao).join(" · ")}`)
+      if (modoMesCompleto) addLog("⚠️  Modo mês completo — processamento pode ser demorado.", "warn")
 
-      if (modoMesCompleto) {
-        addLog("⚠️  Modo mês completo — processamento pode ser demorado.", "warn")
-      }
-
-      // Etapa 1
       setStage("load", "running"); setProgress(10)
       await new Promise(r => setTimeout(r, 150))
       selecionados.forEach(f => addLog(`• [${f.regiao}] ${f.label}`))
       setStage("load", "done"); setProgress(20)
 
-      // FormData
       const formData = new FormData()
       formData.append("year", String(year))
       formData.append("month", String(month))
-      formData.append("day", String(day)) // 0 = mês completo
+      formData.append("day", String(day))
+      if (day > 0) formData.append("sheetName", montarNomeAba(day, month, year))
       for (const filial of FILIAIS) {
         if (files[filial.id]) {
           formData.append("files", files[filial.id]!)
-          formData.append("fileNames", files[filial.id]!.name)
+          formData.append("fileNames", filial.id)  // ← usa o id fixo: "cambe", "cascavel", etc.
         }
       }
 
-      // Etapa 2 (sheet/scan)
       const stage2id = modoMesCompleto ? "scan" : "sheet"
       addLog(day > 0
         ? `Localizando aba "${abaPreview}" em cada arquivo...`
         : "Varrendo todas as abas DD.MM.YYYY do mês...", "step")
+      addLog("Verificando duplicatas no Firebase...", "info")
       setStage(stage2id, "running"); setProgress(35)
 
       const response = await executeConsolidacaoEntregasPipeline(formData)
       if (!response.success) throw new Error(response.error)
+
       setStage(stage2id, "done"); setProgress(52)
       addLog("Abas localizadas e lidas.", "success")
 
-      // Etapa 3
-      addLog("Processando registros...", "step")
       setStage("parse", "running"); setProgress(65)
       await new Promise(r => setTimeout(r, 100))
       setStage("parse", "done"); setProgress(78)
       addLog("Registros extraídos e padronizados.", "success")
 
-      // Etapa 4
       addLog("Gerando aba Acumulado — removendo registros CHÃO...", "step")
       setStage("accum", "running"); setProgress(88)
       await new Promise(r => setTimeout(r, 100))
       setStage("accum", "done"); setProgress(95)
 
-      // Etapa 5
       setStage("export", "running"); setProgress(97)
       const result = response.result
       setLastResult(result)
+
+      // ── Captura duplicadas retornadas pelo pipeline ─────────────────────
+      const dups: DuplicadaInfo[] = result.duplicadas ?? []
+      if (dups.length > 0) {
+        setDuplicadas(dups)
+        addLog(`${dups.length} viagem(ns) ignorada(s) — já existem no banco.`, "warn")
+        // Mostra o dialog após um pequeno delay para não sobrepor o toast
+        setTimeout(() => setShowDuplicadas(true), 600)
+      }
 
       const sumMatch = (result.summary ?? "").match(/(\d+) filiais · (\d+) registros · (\d+)/)
       if (sumMatch) {
@@ -207,25 +295,32 @@ export function ConsolidacaoEntregasPipelineView() {
           filiaisOk: parseInt(sumMatch[1]),
           total:     parseInt(sumMatch[2]),
           acumulado: parseInt(sumMatch[3]),
+          duplicadas: dups.length,
         })
       }
 
       if (downloadOnly && result.extraSheets) {
         const fileName = day > 0
-          ? `Entregas_${String(day).padStart(2,"0")}-${String(month).padStart(2,"0")}-${year}`
-          : `Entregas_${String(month).padStart(2,"0")}-${year}_MesCompleto`
+          ? `Consolidado_Entregas_${String(day).padStart(2,"0")}-${String(month).padStart(2,"0")}-${year}`
+          : `Consolidado_Entregas_${String(month).padStart(2,"0")}-${year}`
         downloadMultipleSheets(
           result.extraSheets.map((s: any) => ({ data: s.data, name: s.name })),
           fileName
         )
-        addLog("Excel baixado.", "success")
+        addLog(`Excel baixado: ${fileName}.xlsx`, "success")
       } else {
         addLog("Dados sincronizados com Firebase.", "success")
       }
 
       setStage("export", "done"); setProgress(100)
       addLog(result.summary ?? "Pipeline concluído.", "success")
-      toast({ title: downloadOnly ? "Excel pronto" : "Pipeline concluído", description: result.summary })
+
+      toast({
+        title: downloadOnly ? "Excel pronto" : "Pipeline concluído",
+        description: dups.length > 0
+          ? `${result.summary} — verifique as duplicatas.`
+          : result.summary,
+      })
 
     } catch (err: any) {
       addLog(`FALHA: ${err.message}`, "error")
@@ -262,6 +357,7 @@ export function ConsolidacaoEntregasPipelineView() {
         <AlertDescription className="text-xs mt-2">
           Com dia preenchido → lê apenas a aba daquele dia.
           Com dia <strong>em branco / zero</strong> → lê todas as abas do mês (mais lento).
+          Viagens já existentes no banco serão <strong>ignoradas automaticamente</strong>.
         </AlertDescription>
       </Alert>
 
@@ -282,15 +378,43 @@ export function ConsolidacaoEntregasPipelineView() {
               {/* Período */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-2">
-                  <Label>Ano</Label>
+                  <Label className="flex items-center gap-1.5">
+                    Ano
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="size-3 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p>Ano de referência do consolidado. Ex: <strong>2026</strong>.<br />
+                          Usado para filtrar as abas no formato <span className="font-mono">DD.MM.YYYY</span> e para indexar os dados no Firebase.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </Label>
                   <Input type="number" value={year}
                     onChange={e => setYear(parseInt(e.target.value))} />
                 </div>
+
                 <div className="space-y-2">
-                  <Label>Mês</Label>
+                  <Label className="flex items-center gap-1.5">
+                    Mês
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <HelpCircle className="size-3 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          <p>Mês de referência (1–12). Ex: <strong>3</strong> para março.<br />
+                          Apenas abas cujo mês e ano coincidam serão processadas.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </Label>
                   <Input type="number" min={1} max={12} value={month}
                     onChange={e => setMonth(parseInt(e.target.value))} />
                 </div>
+
                 <div className="space-y-2">
                   <Label className="flex items-center gap-1.5">
                     Dia
@@ -299,8 +423,9 @@ export function ConsolidacaoEntregasPipelineView() {
                         <TooltipTrigger asChild>
                           <HelpCircle className="size-3 text-muted-foreground cursor-help" />
                         </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Deixe <strong>0</strong> ou em branco para processar o mês inteiro.</p>
+                        <TooltipContent className="max-w-xs">
+                          <p>Dia específico a processar. Ex: <strong>12</strong> → busca a aba <span className="font-mono">12.03.2026</span>.<br />
+                          Deixe <strong>0</strong> ou vazio para processar <strong>todas as abas do mês</strong> (mais lento).</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
@@ -317,13 +442,12 @@ export function ConsolidacaoEntregasPipelineView() {
                 </div>
               </div>
 
-              {/* Preview da aba / aviso de mês completo */}
               {modoMesCompleto ? (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
                   <Clock className="size-3.5 text-amber-600 shrink-0 mt-0.5" />
                   <div className="text-[11px] text-amber-700">
-                    <span className="font-semibold">Modo mês completo</span> — todas as abas
-                    {" "}<span className="font-mono">DD.{String(month).padStart(2,"0")}.{year}</span>{" "}
+                    <span className="font-semibold">Modo mês completo</span> — todas as abas{" "}
+                    <span className="font-mono">DD.{String(month).padStart(2,"0")}.{year}</span>{" "}
                     serão processadas. Pode levar alguns minutos por arquivo.
                   </div>
                 </div>
@@ -331,8 +455,7 @@ export function ConsolidacaoEntregasPipelineView() {
                 <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
                   <Calendar className="size-3.5 text-primary shrink-0" />
                   <span className="text-[11px] text-primary">
-                    Aba alvo:{" "}
-                    <span className="font-mono font-bold">{abaPreview}</span>
+                    Aba alvo: <span className="font-mono font-bold">{abaPreview}</span>
                   </span>
                 </div>
               )}
@@ -356,7 +479,6 @@ export function ConsolidacaoEntregasPipelineView() {
                         hasFile ? "bg-emerald-50 border-emerald-200" : "bg-background border-border/40 hover:bg-muted/10"
                       )}>
                         <FileSpreadsheet className={cn("size-4 shrink-0", hasFile ? "text-emerald-600" : "text-primary/50")} />
-
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span className={cn(
@@ -373,7 +495,6 @@ export function ConsolidacaoEntregasPipelineView() {
                             ? <span className="text-[11px] text-emerald-600 font-medium truncate block mt-0.5">{files[filial.id]?.name}</span>
                             : <span className="text-[11px] text-muted-foreground italic mt-0.5 block">Nenhum arquivo selecionado</span>}
                         </div>
-
                         <div className="flex items-center gap-1 shrink-0">
                           {hasFile && (
                             <Button variant="ghost" size="icon" className="size-6"
@@ -419,12 +540,31 @@ export function ConsolidacaoEntregasPipelineView() {
                   </div>
                 </div>
               )}
+
+              {/* Banner de duplicadas (após conclusão) */}
+              {!isExecuting && duplicadas.length > 0 && (
+                <button
+                  onClick={() => setShowDuplicadas(true)}
+                  className="w-full flex items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left transition-colors hover:bg-amber-100"
+                >
+                  <ShieldAlert className="size-4 text-amber-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold text-amber-800">
+                      {duplicadas.length} viagem{duplicadas.length !== 1 ? "ns" : ""} não importada{duplicadas.length !== 1 ? "s" : ""}
+                    </p>
+                    <p className="text-[10px] text-amber-600">
+                      Já existem no banco. Clique para ver os detalhes.
+                    </p>
+                  </div>
+                  <ChevronRight className="size-3.5 text-amber-500 shrink-0" />
+                </button>
+              )}
             </CardContent>
 
             <CardFooter className="bg-muted/5 border-t pt-4 pb-4 flex gap-2">
               <Button
                 variant="outline" size="sm"
-                className="flex-1 h-9 text-xs font-semibold border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400 transition-all"
+                className="flex-1 h-9 text-xs font-semibold border-slate-300 text-slate-600 hover:bg-slate-50 hover:border-slate-400"
                 onClick={() => runPipeline(true)}
                 disabled={isExecuting || !canRun}
               >
@@ -432,7 +572,7 @@ export function ConsolidacaoEntregasPipelineView() {
               </Button>
               <Button
                 size="sm"
-                className="flex-1 h-9 text-xs font-semibold shadow-sm transition-all"
+                className="flex-1 h-9 text-xs font-semibold shadow-sm"
                 onClick={() => runPipeline(false)}
                 disabled={isExecuting || !canRun}
               >
@@ -476,23 +616,30 @@ export function ConsolidacaoEntregasPipelineView() {
           {stats && (
             <div className="grid grid-cols-2 gap-2">
               {[
-                { label: "Filiais",         value: `${stats.filiaisOk}/5`,                               icon: Building2,    highlight: false },
-                { label: "Registros",       value: stats.total.toLocaleString("pt-BR"),                  icon: Database,     highlight: false },
-                { label: "Linhas Acumulado",value: stats.acumulado.toLocaleString("pt-BR"),              icon: CheckCircle2, highlight: true  },
+                { label: "Filiais",          value: `${stats.filiaisOk}/5`,                     icon: Building2,     highlight: false, warn: false },
+                { label: "Registros",        value: stats.total.toLocaleString("pt-BR"),         icon: Database,      highlight: false, warn: false },
+                { label: "Linhas Acumulado", value: stats.acumulado.toLocaleString("pt-BR"),     icon: CheckCircle2,  highlight: true,  warn: false, span: true },
+                ...(stats.duplicadas > 0 ? [{
+                  label: "Duplicadas ignoradas", value: stats.duplicadas.toLocaleString("pt-BR"),
+                  icon: ShieldAlert, highlight: false, warn: true, span: true,
+                }] : []),
               ].map(stat => {
                 const Icon = stat.icon
                 return (
                   <div key={stat.label} className={cn(
                     "rounded-xl border px-3 py-2.5 flex items-center gap-2 shadow-sm",
-                    stat.label === "Linhas Acumulado" && "col-span-2",
+                    (stat as any).span ? "col-span-2" : "",
+                    stat.warn    ? "bg-amber-50 border-amber-200" :
                     stat.highlight ? "bg-primary/5 border-primary/20" : "bg-card border-border/60"
                   )}>
                     <div className={cn("size-7 rounded-lg flex items-center justify-center shrink-0",
-                      stat.highlight ? "bg-primary/10" : "bg-muted/30")}>
-                      <Icon className={cn("size-3.5", stat.highlight ? "text-primary" : "text-muted-foreground")} />
+                      stat.warn ? "bg-amber-100" : stat.highlight ? "bg-primary/10" : "bg-muted/30")}>
+                      <Icon className={cn("size-3.5",
+                        stat.warn ? "text-amber-500" : stat.highlight ? "text-primary" : "text-muted-foreground")} />
                     </div>
                     <div className="min-w-0">
-                      <p className={cn("text-sm font-bold leading-tight", stat.highlight ? "text-primary" : "text-foreground")}>
+                      <p className={cn("text-sm font-bold leading-tight",
+                        stat.warn ? "text-amber-700" : stat.highlight ? "text-primary" : "text-foreground")}>
                         {stat.value}
                       </p>
                       <p className="text-[10px] text-muted-foreground leading-tight">{stat.label}</p>
@@ -554,6 +701,13 @@ export function ConsolidacaoEntregasPipelineView() {
 
         </div>
       </div>
+
+      {/* ── Dialog de viagens duplicadas ── */}
+      <DuplicadasDialog
+        open={showDuplicadas}
+        onClose={() => setShowDuplicadas(false)}
+        duplicadas={duplicadas}
+      />
     </div>
   )
 }
