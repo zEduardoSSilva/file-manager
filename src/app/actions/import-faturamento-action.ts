@@ -2,6 +2,7 @@
 import { collection, writeBatch, doc, getDocs, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import * as XLSX from 'xlsx';
+import { trackRead, trackWrite } from "../../lib/firebaseUsageTracker";
 
 export async function importFaturamentoAction(file: File): Promise<{ success: boolean; message: string; }> {
   try {
@@ -60,18 +61,19 @@ export async function importFaturamentoAction(file: File): Promise<{ success: bo
 
     const batch = writeBatch(db);
     const faturamentoCollection = collection(db, "docs_faturamento");
+    let writeCount = 0;
 
     for (const item of data) {
       const viagem = item.VIAGEM ? String(item.VIAGEM).trim() : null;
 
       if (!viagem) {
-        // LOG DE DEPURAÇÃO MELHORADO
         console.warn("Skipping row due to missing VIAGEM. Row content:", JSON.stringify(item, null, 2));
         continue;
       }
 
       const q = query(faturamentoCollection, where("VIAGEM", "==", viagem));
       const querySnapshot = await getDocs(q);
+      trackRead(querySnapshot.size); // RASTREAMENTO LEITURA
 
       const faturamentoData: { [key: string]: any } = {
         DM_FILIAL: item.DM_FILIAL,
@@ -100,9 +102,13 @@ export async function importFaturamentoAction(file: File): Promise<{ success: bo
       } else {
         batch.set(doc(faturamentoCollection), faturamentoData);
       }
+      writeCount++;
     }
 
-    await batch.commit();
+    if (writeCount > 0) {
+        trackWrite(writeCount); // RASTREAMENTO ESCRITA
+        await batch.commit();
+    }
 
     return { success: true, message: "Importação de faturamento concluída com sucesso!" };
   } catch (error) {

@@ -8,6 +8,7 @@ import { VeiculosPipelineView } from '@/components/pipeline/veiculos-pipeline-vi
 import { FuncionariosPipelineView } from '@/components/pipeline/funcionarios-pipeline-view'
 import { FaturamentoPipelineView } from '@/components/pipeline/faturamento-pipeline-view'
 import { MotivosDevPipelineView } from '@/components/pipeline/motivos-dev-pipeline-view'
+import FirebaseUsage from '@/pages/FirebaseUsage'
 
 export default function App() {
   return (
@@ -16,6 +17,9 @@ export default function App() {
         <Route element={<PipelineLayout />}>
           {/* Rota principal para o Dashboard */}
           <Route path="/" element={<HomePage />} />
+
+          {/* Rota para a página de Uso de Recursos */}
+          <Route path="/usage" element={<FirebaseUsage />} />
 
           {/* Redireciona /pipeline para a página inicial para evitar erros */}
           <Route path="/pipeline" element={<Navigate to="/" />} />

@@ -32,17 +32,19 @@ import {
   GitMerge,
   Search,
   LayoutGrid,
-  Wrench,
+  Settings,
+  Layers,
   FileX
 } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
+import { Button } from "@/components/ui/button"
 
 const NAV_GROUPS = [
   {
     label: "VISUAIS",
     items: [
       { id: 'entregas-analitica', name: 'Visão Analítica', icon: LayoutGrid, path: "/visuais/entregas-analitica" },
-      { id: 'entregas-acumulada', name: 'Visão Acumulada', icon: LayoutGrid, path: "/visuais/entregas-acumulada" },
+      { id: 'entregas-acumulada', name: 'Visão Acumulada', icon: Layers, path: "/visuais/entregas-acumulada" },
     ]
   },
   {
@@ -178,7 +180,12 @@ export function PipelineLayout() {
         <header className="flex h-14 shrink-0 items-center gap-2 px-4 border-b bg-background/80 backdrop-blur-sm sticky top-0 z-30">
           <SidebarTrigger className="-ml-1" />
           <h1 className="text-sm sm:text-base font-bold text-primary truncate">File Manager</h1>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="ghost" size="icon" asChild>
+                <Link to="/usage">
+                    <Settings className="size-4" />
+                </Link>
+            </Button>
             <ModeToggle />
           </div>
         </header>

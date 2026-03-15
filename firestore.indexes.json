@@ -1,0 +1,24 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "pipeline_results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pipelineType", "order": "ASCENDING" },
+        { "fieldPath": "year",         "order": "ASCENDING" },
+        { "fieldPath": "month",        "order": "ASCENDING" },
+        { "fieldPath": "timestamp",    "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pipeline_results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pipelineType", "order": "ASCENDING" },
+        { "fieldPath": "year",         "order": "ASCENDING" },
+        { "fieldPath": "month",        "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

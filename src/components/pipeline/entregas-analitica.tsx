@@ -2,7 +2,7 @@ import * as React from "react"
 import {
   RefreshCw, Loader2, Edit2, X, Check, ChevronDown, ChevronUp,
   Search, Database, Trash2, ServerCrash, FileStack, CalendarDays,
-  Building2, Hash, FileDown, Columns3, ArrowUpDown, Undo2,
+  Building2, Hash, FileDown, Columns3, Undo2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,10 +27,11 @@ import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { exportExcel } from "@/lib/excel-utils"
 import {
-  collection, query, where, getDocs, getDoc,
-  doc, updateDoc, deleteDoc, writeBatch, getFirestore,
+  collection, doc, getDoc, getDocs, updateDoc, writeBatch, getFirestore,
 } from "firebase/firestore"
 import { initializeApp, getApps, getApp } from "firebase/app"
+import { trackRead, trackWrite, trackDelete } from "@/lib/firebaseUsageTracker"
+import { mainDocId, loadItemsFromFirebase } from "@/app/actions/actions-utils"
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -44,14 +45,12 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp()
 const db  = getFirestore(app)
 
-// ─── Colunas do grid ─────────────────────────────────────────────────────────
 const INITIAL_GRID_COLS = [
   "DATA DE ENTREGA", "FILIAL", "REGIÃO", "ROTA",
   "MOTORISTA", "AJUDANTE", "AJUDANTE 2",
   "PLACA", "PLACA SISTEMA",
   "ENTREGAS", "PESO", "TEMPO", "KM",
-  "VIAGENS", "VALOR",
-  "STATUS", "OBSERVAÇÃO",
+  "VIAGENS", "VALOR", "STATUS", "OBSERVAÇÃO",
 ]
 
 const ALL_FIELDS = [
@@ -59,25 +58,15 @@ const ALL_FIELDS = [
   "MOTORISTA", "AJUDANTE", "AJUDANTE 2",
   "PLACA SISTEMA", "PLACA", "MODELO", "OCP",
   "ENTREGAS", "PESO", "TEMPO", "KM",
-  "VIAGENS", "OBSERVAÇÃO",
-  "CHAPA", "FRETE", "DESCARGA PALET",
+  "VIAGENS", "OBSERVAÇÃO", "CHAPA", "FRETE", "DESCARGA PALET",
   "HOSPEDAGEM", "DIARIA", "EXTRA", "SAÍDA",
   "VALOR", "STATUS", "CONTRATO",
   "PERFORMAXXI", "ENTREGAS DEV", "VALOR DEV",
 ]
 
-// ✅ Row agora inclui __itemDocId (ID do documento na subcoleção items/)
 type Row = Record<string, any> & {
-  __mainDocId: string   // ID do pipeline_results/{id}
-  __itemDocId: string   // ID do pipeline_results/{id}/items/{itemDocId}
-  __rowIdx:    number
-}
-
-interface FireDoc {
-  id: string
-  timestamp: number
-  itemCount: number
-  porFilialDia: Record<string, Record<string, number>>
+  _itemId:  string  // ID do doc na subcoleção items/
+  __rowIdx: number
 }
 
 function cellVal(v: any, col: string) {
@@ -102,9 +91,7 @@ function fmtTs(ts: number): string {
   })
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// ── Gerenciar Colunas
-// ════════════════════════════════════════════════════════════════════════════
+// ── Gerenciar Colunas ─────────────────────────────────────────────────────────
 function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
   open: boolean; onClose: () => void; cols: string[]; setCols: (cols: string[]) => void
 }) {
@@ -121,35 +108,37 @@ function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
           </DialogTitle>
           <DialogDescription>Reordene as colunas da tabela.</DialogDescription>
         </DialogHeader>
-        <div className="py-2 space-y-2">
+        <div className="py-2 space-y-2 max-h-[60vh] overflow-y-auto">
           {cols.map((col, idx) => (
             <div key={col} className="flex items-center gap-2 p-2 rounded-md bg-muted/30">
               <span className="flex-1 text-sm font-medium">{col}</span>
-              <Button variant="ghost" size="icon" className="size-7" onClick={() => move(idx, "up")} disabled={idx === 0}>
+              <Button variant="ghost" size="icon" className="size-7"
+                onClick={() => move(idx, "up")} disabled={idx === 0}>
                 <ChevronUp className="size-4" />
               </Button>
-              <Button variant="ghost" size="icon" className="size-7" onClick={() => move(idx, "down")} disabled={idx === cols.length - 1}>
+              <Button variant="ghost" size="icon" className="size-7"
+                onClick={() => move(idx, "down")} disabled={idx === cols.length - 1}>
                 <ChevronDown className="size-4" />
               </Button>
             </div>
           ))}
         </div>
-        <DialogFooter className="pt-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setCols(INITIAL_GRID_COLS)}>
+        <div className="flex justify-between pt-2 border-t">
+          <Button variant="outline" size="sm" className="gap-1.5"
+            onClick={() => setCols(INITIAL_GRID_COLS)}>
             <Undo2 className="size-3.5" /> Restaurar Padrão
           </Button>
           <DialogClose asChild>
             <Button size="sm" className="gap-1.5"><Check className="size-3.5" /> Fechar</Button>
           </DialogClose>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// ── Gerenciar Importações
-// ════════════════════════════════════════════════════════════════════════════
+// ── Gerenciar Importações ─────────────────────────────────────────────────────
+// Usa o doc determinístico — 1 doc por mês, sem query multi-doc
 function GerenciarImportacoesDialog({
   open, onClose, filterYear, filterMonth, onDeleted,
 }: {
@@ -157,117 +146,86 @@ function GerenciarImportacoesDialog({
   filterYear: number; filterMonth: number; onDeleted: () => void
 }) {
   const { toast } = useToast()
-  const [docs,       setDocs]       = React.useState<FireDoc[]>([])
-  const [loading,    setLoading]    = React.useState(false)
-  const [filterDay,  setFilterDay]  = React.useState(0)
-  const [confirmDoc, setConfirmDoc] = React.useState<FireDoc | null>(null)
-  const [deleting,   setDeleting]   = React.useState(false)
+  const [localYear,    setLocalYear]    = React.useState(filterYear)
+  const [localMonth,   setLocalMonth]   = React.useState(filterMonth)
+  const [meta,         setMeta]         = React.useState<any | null>(null)
+  const [loading,      setLoading]      = React.useState(false)
+  const [filterDay,    setFilterDay]    = React.useState(0)
+  const [confirmWipe,  setConfirmWipe]  = React.useState(false)
+  const [wiping,       setWiping]       = React.useState(false)
 
-  const loadDocs = React.useCallback(async () => {
+  const loadMeta = React.useCallback(async () => {
     if (!open) return
     setLoading(true)
     try {
-      const q = query(
-        collection(db, "pipeline_results"),
-        where("pipelineType", "==", "consolidacao-entregas"),
-        where("year",  "==", filterYear),
-        where("month", "==", filterMonth),
-      )
-      const snap = await getDocs(q)
-
-      // ✅ Lê metadados + busca itens da subcoleção para montar porFilialDia
-      const result: FireDoc[] = await Promise.all(
-        snap.docs.map(async (d) => {
-          const data = d.data()
-          const itemsSnap = await getDocs(collection(db, "pipeline_results", d.id, "items"))
-          const rows = itemsSnap.docs.map(i => i.data())
-
-          const porFilialDia: Record<string, Record<string, number>> = {}
-          for (const row of rows) {
-            const filial = String(row["FILIAL"] ?? "—")
-            const dt     = String(row["DATA DE ENTREGA"] ?? "—")
-            if (!porFilialDia[filial]) porFilialDia[filial] = {}
-            porFilialDia[filial][dt] = (porFilialDia[filial][dt] ?? 0) + 1
-          }
-          return {
-            id: d.id,
-            timestamp: data.timestamp ?? 0,
-            itemCount: data.itemCount ?? rows.length,
-            porFilialDia,
-          }
-        })
-      )
-      setDocs(result.sort((a, b) => b.timestamp - a.timestamp))
+      const id   = mainDocId("consolidacao-entregas", localYear, localMonth)
+      const snap = await getDoc(doc(db, "pipeline_results", id))
+      trackRead(1)
+      setMeta(snap.exists() ? { ...snap.data(), id } : null)
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Erro ao carregar documentos", description: e.message })
+      toast({ variant: "destructive", title: "Erro", description: e.message })
     } finally {
       setLoading(false)
     }
-  }, [open, filterYear, filterMonth, toast])
+  }, [open, localYear, localMonth, toast])
 
-  React.useEffect(() => { loadDocs() }, [loadDocs])
+  React.useEffect(() => { if (open) loadMeta() }, [open, localYear, localMonth])
 
-  const deleteDoc_ = async (fireDoc: FireDoc) => {
-    setDeleting(true)
+  const wipePeriod = async () => {
+    if (!meta) return
+    setWiping(true)
     try {
-      // ✅ Exclui subcoleção items/ antes de excluir o doc principal
-      const itemsSnap = await getDocs(collection(db, "pipeline_results", fireDoc.id, "items"))
+      const docId    = meta.id
+      const itemsRef = collection(db, "pipeline_results", docId, "items")
+      const snap     = await getDocs(itemsRef)
+      trackRead(snap.size)
+
       const BATCH_LIMIT = 499
-      let batch = writeBatch(db)
-      let count = 0
-      for (const itemDoc of itemsSnap.docs) {
-        batch.delete(itemDoc.ref)
-        count++
+      let batch = writeBatch(db), count = 0
+      for (const d of snap.docs) {
+        batch.delete(d.ref); count++
         if (count >= BATCH_LIMIT) {
-          await batch.commit()
+          await batch.commit(); trackDelete(count)
           batch = writeBatch(db); count = 0
         }
       }
-      if (count > 0) await batch.commit()
-      await deleteDoc(doc(db, "pipeline_results", fireDoc.id))
-      toast({ title: "Documento excluído.", description: `ID: ${fireDoc.id}` })
-      setConfirmDoc(null)
-      await loadDocs()
+      if (count > 0) { await batch.commit(); trackDelete(count) }
+
+      await updateDoc(doc(db, "pipeline_results", docId), {
+        itemCount: 0, dedupKeys: [], porFilialDia: {}, summary: "", duplicadasCount: 0,
+      })
+      trackWrite(1)
+
+      toast({ title: "Período apagado.", description: `Todos os registros de ${String(localMonth).padStart(2,"0")}/${localYear} foram removidos.` })
+      setConfirmWipe(false)
+      await loadMeta()
       onDeleted()
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Erro ao excluir", description: e.message })
+      toast({ variant: "destructive", title: "Erro ao apagar", description: e.message })
     } finally {
-      setDeleting(false)
+      setWiping(false)
     }
   }
 
+  const porFilialDia: Record<string, Record<string, number>> = meta?.porFilialDia ?? {}
+
   const diasDisponiveis = React.useMemo(() => {
     const s = new Set<string>()
-    for (const d of docs) for (const dm of Object.values(d.porFilialDia)) for (const dia of Object.keys(dm)) s.add(dia)
+    for (const dm of Object.values(porFilialDia)) for (const dt of Object.keys(dm)) s.add(dt)
     return [...s].sort()
-  }, [docs])
+  }, [porFilialDia])
 
-  const docsFiltrados = React.useMemo(() => {
-    if (filterDay === 0) return docs
+  const porFilialDiaFiltrado = React.useMemo(() => {
+    if (filterDay === 0) return porFilialDia
     const pad = String(filterDay).padStart(2, "0")
-    return docs.map(d => {
-      const porFilialDia: Record<string, Record<string, number>> = {}
-      for (const [f, dm] of Object.entries(d.porFilialDia)) {
-        const filt: Record<string, number> = {}
-        for (const [dt, cnt] of Object.entries(dm)) if (dt.startsWith(pad + "/")) filt[dt] = cnt
-        if (Object.keys(filt).length) porFilialDia[f] = filt
-      }
-      const itemCount = Object.values(porFilialDia).reduce((a, dm) => a + Object.values(dm).reduce((b, n) => b + n, 0), 0)
-      return { ...d, porFilialDia, itemCount }
-    }).filter(d => d.itemCount > 0)
-  }, [docs, filterDay])
-
-  const latestTimestampsByFilial = React.useMemo(() => {
-    const map = new Map<string, number>()
-    for (const doc of docs) {
-      for (const filial of Object.keys(doc.porFilialDia)) {
-        if (!map.has(filial) || doc.timestamp > map.get(filial)!) {
-          map.set(filial, doc.timestamp)
-        }
-      }
+    const result: Record<string, Record<string, number>> = {}
+    for (const [f, dm] of Object.entries(porFilialDia)) {
+      const filt: Record<string, number> = {}
+      for (const [dt, cnt] of Object.entries(dm)) if (dt.startsWith(pad + "/")) filt[dt] = cnt
+      if (Object.keys(filt).length) result[f] = filt
     }
-    return map
-  }, [docs])
+    return result
+  }, [porFilialDia, filterDay])
 
   return (
     <>
@@ -277,13 +235,24 @@ function GerenciarImportacoesDialog({
             <DialogTitle className="flex items-center gap-2 text-base">
               <FileStack className="size-4 text-primary" /> Gerenciar Importações — Firebase
             </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Documentos em <span className="font-mono font-semibold text-foreground">pipeline_results</span>{" "}
-              para {String(filterMonth).padStart(2, "0")}/{filterYear}.
+            <DialogDescription className="text-xs">
+              Doc determinístico por mês em{" "}
+              <span className="font-mono font-semibold text-foreground">pipeline_results</span>.
             </DialogDescription>
           </DialogHeader>
           <Separator />
-          <div className="px-5 py-3 flex items-end gap-3 bg-muted/5">
+
+          <div className="px-5 py-3 flex items-end gap-3 bg-muted/5 flex-wrap">
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase tracking-wider">Ano</Label>
+              <Input type="number" className="w-24 h-8 text-xs"
+                value={localYear} onChange={e => setLocalYear(+e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase tracking-wider">Mês</Label>
+              <Input type="number" min={1} max={12} className="w-20 h-8 text-xs"
+                value={localMonth} onChange={e => setLocalMonth(+e.target.value)} />
+            </div>
             <div className="space-y-1">
               <Label className="text-[10px] uppercase tracking-wider">Filtrar dia</Label>
               <Select value={String(filterDay)} onValueChange={v => setFilterDay(parseInt(v))}>
@@ -297,104 +266,84 @@ function GerenciarImportacoesDialog({
               </Select>
             </div>
             <div className="flex items-center gap-2 ml-auto">
-              <Badge variant="outline" className="text-[10px]">{docs.length} documento(s)</Badge>
-              {docs.length > 1 && (
-                <Badge className="text-[10px] bg-amber-500/10 text-amber-600 border-amber-200">
-                  {docs.length - latestTimestampsByFilial.size} redundante(s)
+              {meta && (
+                <Badge variant="outline" className="text-[10px]">
+                  {meta.itemCount?.toLocaleString("pt-BR")} registros
                 </Badge>
               )}
-              <Button variant="ghost" size="icon" className="size-7" onClick={loadDocs} disabled={loading}>
+              <Button variant="ghost" size="icon" className="size-7" onClick={loadMeta} disabled={loading}>
                 {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
               </Button>
+              {meta && (
+                <Button variant="destructive" size="sm" className="h-7 text-[10px] px-2.5 gap-1"
+                  onClick={() => setConfirmWipe(true)}>
+                  <Trash2 className="size-3" /> Apagar período
+                </Button>
+              )}
             </div>
           </div>
           <Separator />
-          <div className="flex-1 px-5 py-3 overflow-y-auto">
-            {loading && (
+
+          <ScrollArea className="flex-1 px-5 py-3">
+            {loading ? (
               <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" /><span className="text-sm">Carregando...</span>
               </div>
-            )}
-            {!loading && docsFiltrados.length === 0 && (
+            ) : !meta ? (
               <div className="py-10 text-center">
                 <ServerCrash className="size-7 text-muted-foreground/30 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">Nenhum documento encontrado.</p>
+                <p className="text-sm text-muted-foreground">Nenhum dado importado para este período.</p>
+              </div>
+            ) : Object.keys(porFilialDiaFiltrado).length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">
+                Nenhum dado para o dia selecionado.
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border/60 overflow-hidden">
+                <div className="px-3 py-2 bg-muted/10 border-b flex items-center gap-2">
+                  <Database className="size-3.5 text-primary" />
+                  <span className="font-mono text-[10px] text-foreground/80">{meta.id}</span>
+                  <Badge className="text-[9px] h-4 px-1.5 bg-primary/10 text-primary border-primary/20 ml-1">ativo</Badge>
+                  <span className="text-[10px] text-muted-foreground ml-auto">
+                    {fmtTs(meta.timestamp)}
+                  </span>
+                </div>
+                <table className="w-full text-[10px]">
+                  <thead>
+                    <tr className="bg-muted/20">
+                      <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground w-28">
+                        <span className="flex items-center gap-1"><Building2 className="size-2.5" /> Filial</span>
+                      </th>
+                      <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground">
+                        <span className="flex items-center gap-1"><CalendarDays className="size-2.5" /> Data de Entrega</span>
+                      </th>
+                      <th className="px-3 py-1.5 text-right font-semibold text-muted-foreground w-20">
+                        <span className="flex items-center justify-end gap-1"><Hash className="size-2.5" /> Registros</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(porFilialDiaFiltrado).flatMap(([filial, diaMap], fi) =>
+                      Object.entries(diaMap).map(([dia, cnt], di) => (
+                        <tr key={`${fi}-${di}`} className={cn("border-t border-border/20",
+                          (fi + di) % 2 === 0 ? "bg-background" : "bg-muted/5")}>
+                          {di === 0 ? (
+                            <td className="px-3 py-1.5 font-semibold text-foreground/80"
+                              rowSpan={Object.keys(diaMap).length}>{filial}</td>
+                          ) : null}
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{dia}</td>
+                          <td className="px-3 py-1.5 text-right">
+                            <Badge variant="outline" className="text-[9px] h-4 px-1.5">{cnt}</Badge>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             )}
-            {!loading && docsFiltrados.length > 0 && (
-              <div className="space-y-3">
-                {docsFiltrados.map((fireDoc) => {
-                  const filiaisNesteDoc = Object.keys(fireDoc.porFilialDia)
-                  const isNewestForAtLeastOneFilial = filiaisNesteDoc.some(f => latestTimestampsByFilial.get(f) === fireDoc.timestamp)
-                  
-                  return (
-                    <div key={fireDoc.id} className={cn(
-                      "rounded-xl border overflow-hidden shadow-sm",
-                      isNewestForAtLeastOneFilial ? "border-primary/30" : "border-border/60"
-                    )}>
-                      <div className={cn("flex items-center gap-2 px-3 py-2.5",
-                        isNewestForAtLeastOneFilial ? "bg-primary/5" : "bg-muted/10")}>
-                        <Database className={cn("size-3.5 shrink-0", isNewestForAtLeastOneFilial ? "text-primary" : "text-muted-foreground")} />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-mono text-[10px] text-foreground/80 truncate">{fireDoc.id}</span>
-                            {isNewestForAtLeastOneFilial && <Badge className="text-[9px] h-4 px-1.5 bg-primary/10 text-primary border-primary/20">ativo</Badge>}
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[10px] text-muted-foreground">Importado em {fmtTs(fireDoc.timestamp)}</span>
-                            <span className="text-[10px] text-muted-foreground">·</span>
-                            <span className="text-[10px] font-semibold text-foreground">{fireDoc.itemCount} registros</span>
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost" size="icon"
-                          className="size-7 text-destructive/60 hover:text-destructive hover:bg-destructive/10 shrink-0"
-                          onClick={() => setConfirmDoc(fireDoc)}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
-                      <div className="border-t border-border/40">
-                        <table className="w-full text-[10px]">
-                          <thead>
-                            <tr className="bg-muted/20">
-                              <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground w-28">
-                                <span className="flex items-center gap-1"><Building2 className="size-2.5" /> Filial</span>
-                              </th>
-                              <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground">
-                                <span className="flex items-center gap-1"><CalendarDays className="size-2.5" /> Data de Entrega</span>
-                              </th>
-                              <th className="px-3 py-1.5 text-right font-semibold text-muted-foreground w-20">
-                                <span className="flex items-center justify-end gap-1"><Hash className="size-2.5" /> Registros</span>
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {Object.entries(fireDoc.porFilialDia).flatMap(([filial, diaMap], fi) =>
-                              Object.entries(diaMap).map(([dia, cnt], di) => (
-                                <tr key={`${fi}-${di}`} className={cn("border-t border-border/20",
-                                  (fi + di) % 2 === 0 ? "bg-background" : "bg-muted/5")}>
-                                  {di === 0 ? (
-                                    <td className="px-3 py-1.5 font-semibold text-foreground/80" rowSpan={Object.keys(diaMap).length}>
-                                      {filial}
-                                    </td>
-                                  ) : null}
-                                  <td className="px-3 py-1.5 font-mono text-muted-foreground">{dia}</td>
-                                  <td className="px-3 py-1.5 text-right">
-                                    <Badge variant="outline" className="text-[9px] h-4 px-1.5">{cnt}</Badge>
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+          </ScrollArea>
+
           <Separator />
           <div className="px-5 py-3">
             <DialogClose asChild>
@@ -406,30 +355,31 @@ function GerenciarImportacoesDialog({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!confirmDoc} onOpenChange={v => { if (!v) setConfirmDoc(null) }}>
+      <AlertDialog open={confirmWipe} onOpenChange={v => { if (!v) setConfirmWipe(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <Trash2 className="size-4 text-destructive" /> Excluir documento do Firebase?
+              <Trash2 className="size-4 text-destructive" /> Apagar período inteiro?
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
                 <p>
-                  Remove permanentemente <span className="font-mono text-foreground bg-muted px-1 rounded">{confirmDoc?.id}</span>{" "}
-                  com <strong>{confirmDoc?.itemCount} registros</strong>.
+                  Remove <strong>todos os {meta?.itemCount?.toLocaleString("pt-BR")} registros</strong> de{" "}
+                  {String(localMonth).padStart(2,"0")}/{localYear} permanentemente.
                 </p>
-                <p className="text-muted-foreground text-xs">Esta ação não pode ser desfeita.</p>
+                <p className="text-muted-foreground text-xs">
+                  As chaves de dedup também serão limpas — você poderá reimportar do zero.
+                </p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={wiping}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => confirmDoc && deleteDoc_(confirmDoc)} disabled={deleting}
-            >
-              {deleting && <Loader2 className="size-3.5 animate-spin mr-1.5" />}
-              Excluir do Firebase
+              onClick={wipePeriod} disabled={wiping}>
+              {wiping && <Loader2 className="size-3.5 animate-spin mr-1.5" />}
+              Apagar tudo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -438,9 +388,7 @@ function GerenciarImportacoesDialog({
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// ── Página principal
-// ════════════════════════════════════════════════════════════════════════════
+// ── Página principal ──────────────────────────────────────────────────────────
 export function VisaoAnaliticaPage() {
   const { toast } = useToast()
   const today = new Date()
@@ -448,13 +396,14 @@ export function VisaoAnaliticaPage() {
   const [filterYear,   setFilterYear]   = React.useState(today.getFullYear())
   const [filterMonth,  setFilterMonth]  = React.useState(today.getMonth() + 1)
   const [filterDay,    setFilterDay]    = React.useState<number>(today.getDate())
-  const [filterRegiao, setFilterRegiao] = React.useState("all")
   const [filterFilial, setFilterFilial] = React.useState("all")
+  const [filterRegiao, setFilterRegiao] = React.useState("all")
   const [search,       setSearch]       = React.useState("")
   const [hideRotaChao, setHideRotaChao] = React.useState(true)
 
   const [rows,    setRows]    = React.useState<Row[]>([])
   const [loading, setLoading] = React.useState(true)
+  const [totalCount, setTotalCount] = React.useState(0)
   const [gridCols, setGridCols] = React.useState(INITIAL_GRID_COLS)
 
   const [selected,      setSelected]      = React.useState<Set<number>>(new Set())
@@ -471,78 +420,40 @@ export function VisaoAnaliticaPage() {
   const [showGerenciar,        setShowGerenciar]        = React.useState(false)
   const [showGerenciarColunas, setShowGerenciarColunas] = React.useState(false)
 
-  // ─── ✅ Fetch: Combina múltiplas importações, usando a mais recente por FILIAL ───
+  // ── Fetch: 1 leitura metadata + N leituras items ──────────────────────────
   const fetchData = React.useCallback(async () => {
-    setLoading(true);
-    setSelected(new Set());
+    setLoading(true)
+    setSelected(new Set())
     try {
-      const q = query(
-        collection(db, "pipeline_results"),
-        where("pipelineType", "==", "consolidacao-entregas"),
-        where("year",  "==", filterYear),
-        where("month", "==", filterMonth)
-      );
-      const snap = await getDocs(q);
+      const docId    = mainDocId("consolidacao-entregas", filterYear, filterMonth)
+      const metaSnap = await getDoc(doc(db, "pipeline_results", docId))
+      trackRead(1)
 
-      if (snap.empty) {
-        setRows([]);
-        toast({ description: "Nenhum resultado encontrado para este período." });
-        return;
+      if (!metaSnap.exists()) {
+        setRows([]); setTotalCount(0)
+        toast({ description: "Nenhum dado importado para este período." })
+        return
       }
 
-      // 1. Carrega todos os items de todos os documentos do período, guardando o timestamp e filial.
-      const allItems: any[] = [];
-      for (const mainDoc of snap.docs) {
-        const timestamp = mainDoc.data().timestamp ?? 0;
-        const itemsSnap = await getDocs(collection(db, "pipeline_results", mainDoc.id, "items"));
-        for (const itemDoc of itemsSnap.docs) {
-          const itemData = itemDoc.data();
-          allItems.push({
-            ...itemData,
-            __mainDocId: mainDoc.id,
-            __itemDocId: itemDoc.id,
-            __timestamp: timestamp,
-            __filial: itemData["FILIAL"] ?? "INDEFINIDA",
-          });
-        }
-      }
+      setTotalCount(metaSnap.data().itemCount ?? 0)
 
-      // 2. Encontra o timestamp mais recente para cada filial
-      const latestTimestampByFilial = new Map<string, number>();
-      for (const item of allItems) {
-        const currentLatest = latestTimestampByFilial.get(item.__filial) ?? 0;
-        if (item.__timestamp > currentLatest) {
-          latestTimestampByFilial.set(item.__filial, item.__timestamp);
-        }
-      }
-
-      // 3. Filtra os items, mantendo apenas aqueles do documento mais recente para sua respectiva filial
-      const finalRows = allItems
-        .filter(item => item.__timestamp === latestTimestampByFilial.get(item.__filial))
-        .map((item, idx) => {
-          // Remove os campos de ajuda antes de salvar no estado
-          const { __timestamp, __filial, ...rest } = item;
-          return {
-            ...rest,
-            __rowIdx: idx,
-          };
-        });
-
-      setRows(finalRows as Row[]);
-      toast({ description: `${finalRows.length} registros carregados de ${latestTimestampByFilial.size} filial(is) ativa(s).` });
-
+      const items = await loadItemsFromFirebase("consolidacao-entregas", filterYear, filterMonth)
+      setRows(items.map((r, idx) => ({ ...r, __rowIdx: idx })) as Row[])
+      toast({ description: `${items.length} registros carregados.` })
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message });
-      setRows([]);
+      toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message })
+      setRows([])
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [filterYear, filterMonth, toast]);
+  }, [filterYear, filterMonth, toast])
 
   React.useEffect(() => { fetchData() }, [fetchData])
 
-  const filiais = React.useMemo(() => [...new Set(rows.map(r => r["FILIAL"]).filter(Boolean))].sort(), [rows])
-  const regioes = React.useMemo(() => [...new Set(rows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rows])
+  const filiais = React.useMemo(() =>
+    [...new Set(rows.map(r => r["FILIAL"]).filter(Boolean))].sort(), [rows])
+  const regioes = React.useMemo(() =>
+    [...new Set(rows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rows])
 
   const filtered = React.useMemo(() => {
     let r = rows
@@ -556,8 +467,7 @@ export function VisaoAnaliticaPage() {
     }
     if (sortCol) {
       r = [...r].sort((a, b) => {
-        const av = String(a[sortCol] ?? "")
-        const bv = String(b[sortCol] ?? "")
+        const av = String(a[sortCol] ?? ""); const bv = String(b[sortCol] ?? "")
         return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av)
       })
     }
@@ -575,40 +485,29 @@ export function VisaoAnaliticaPage() {
   const toggleRow = (idx: number) =>
     setSelected(prev => { const n = new Set(prev); n.has(idx) ? n.delete(idx) : n.add(idx); return n })
 
-  // ✅ deleteSelected: exclui documentos individuais da subcoleção items/
   const deleteSelected = async () => {
     if (!selected.size) return
     setDeleting(true)
+    const docId = mainDocId("consolidacao-entregas", filterYear, filterMonth)
     try {
-      const toDelete = rows.filter(r => selected.has(r.__rowIdx))
-
-      // Agrupa por mainDocId (normalmente só 1)
-      const byMainDoc = new Map<string, Row[]>()
-      for (const r of toDelete) {
-        if (!byMainDoc.has(r.__mainDocId)) byMainDoc.set(r.__mainDocId, [])
-        byMainDoc.get(r.__mainDocId)!.push(r)
-      }
-
+      const toDelete  = rows.filter(r => selected.has(r.__rowIdx))
+      const itemsRef  = collection(db, "pipeline_results", docId, "items")
       const BATCH_LIMIT = 499
-      let batch = writeBatch(db)
-      let count = 0
+      let batch = writeBatch(db), count = 0
 
-      for (const [mainDocId, rowsToDelete] of byMainDoc) {
-        for (const r of rowsToDelete) {
-          const itemRef = doc(db, "pipeline_results", mainDocId, "items", r.__itemDocId)
-          batch.delete(itemRef)
-          count++
-          if (count >= BATCH_LIMIT) {
-            await batch.commit()
-            batch = writeBatch(db); count = 0
-          }
+      for (const r of toDelete) {
+        batch.delete(doc(itemsRef, r._itemId)); count++
+        if (count >= BATCH_LIMIT) {
+          await batch.commit(); trackDelete(count)
+          batch = writeBatch(db); count = 0
         }
-        // Atualiza itemCount no documento principal
-        const newCount = (rows.filter(r => r.__mainDocId === mainDocId).length) - rowsToDelete.length
-        batch.update(doc(db, "pipeline_results", mainDocId), { itemCount: newCount })
-        count++
       }
-      if (count > 0) await batch.commit()
+      if (count > 0) { await batch.commit(); trackDelete(count) }
+
+      const newCount = totalCount - toDelete.length
+      await updateDoc(doc(db, "pipeline_results", docId), { itemCount: newCount })
+      trackWrite(1)
+      setTotalCount(newCount)
 
       setRows(prev => prev.filter(r => !selected.has(r.__rowIdx)).map((r, idx) => ({ ...r, __rowIdx: idx })))
       toast({ title: `${selected.size} registro(s) excluído(s).` })
@@ -627,16 +526,15 @@ export function VisaoAnaliticaPage() {
     setEditDraft(draft)
   }
 
-  // ✅ saveEdit: atualiza o documento individual na subcoleção items/
   const saveEdit = async () => {
     if (!editRow) return
     setSaving(true)
     try {
-      const itemRef = doc(db, "pipeline_results", editRow.__mainDocId, "items", editRow.__itemDocId)
+      const docId   = mainDocId("consolidacao-entregas", filterYear, filterMonth)
+      const itemRef = doc(db, "pipeline_results", docId, "items", editRow._itemId)
       await updateDoc(itemRef, editDraft)
-      setRows(prev => prev.map(r =>
-        r.__rowIdx === editRow.__rowIdx ? { ...r, ...editDraft } : r
-      ))
+      trackWrite(1)
+      setRows(prev => prev.map(r => r.__rowIdx === editRow.__rowIdx ? { ...r, ...editDraft } : r))
       toast({ title: "Salvo!", description: "Registro atualizado." })
       setEditRow(null)
     } catch (e: any) {
@@ -653,35 +551,44 @@ export function VisaoAnaliticaPage() {
 
   const exportXlsx = React.useCallback(() => {
     const data = filtered.map(row => {
-      const newRow: Record<string, any> = {}
-      gridCols.forEach(col => { newRow[col] = row[col] })
-      const tempo = newRow["TEMPO"]
-      if (typeof tempo === "string" && tempo.includes("1899")) {
-        const m = tempo.match(/(\d{2}:\d{2}:\d{2})/)
-        if (m) newRow["TEMPO"] = m[1]
-      }
-      return newRow
+      const obj: Record<string, any> = {}
+      gridCols.forEach(col => {
+        let v = row[col]
+        if (col === "TEMPO" && typeof v === "string" && v.includes("1899")) {
+          const m = v.match(/(\d{2}:\d{2}:\d{2})/); if (m) v = m[1]
+        }
+        obj[col] = v
+      })
+      return obj
     })
-    exportExcel(data, `Visão Analítica - ${new Date().toLocaleDateString()}.xlsx`)
-  }, [filtered, gridCols])
+    exportExcel(data, `Visão Analítica - ${String(filterMonth).padStart(2,"0")}-${filterYear}.xlsx`)
+  }, [filtered, gridCols, filterMonth, filterYear])
 
   return (
     <div className="space-y-4">
       <Card className="shadow-sm border-border/60">
         <CardHeader className="pb-3">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
                 <Database className="size-4 text-primary" /> Visão Analítica — Entregas
               </CardTitle>
-              <CardDescription className="mt-0.5">Rotas de Entrega</CardDescription>
+              <CardDescription className="mt-0.5">
+                Rotas de Entrega
+                {totalCount > 0 && (
+                  <span className="ml-1 font-semibold text-foreground">
+                    · {totalCount.toLocaleString("pt-BR")} registros no banco.
+                  </span>
+                )}
+              </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0"
                 onClick={() => setShowGerenciarColunas(true)}>
-                <Columns3 className="size-3.5 text-muted-foreground" /> Gerenciar Colunas
+                <Columns3 className="size-3.5 text-muted-foreground" /> Colunas
               </Button>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0" onClick={exportXlsx}>
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0"
+                onClick={exportXlsx}>
                 <FileDown className="size-3.5 text-muted-foreground" /> Exportar Excel
               </Button>
               <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0"
@@ -742,10 +649,11 @@ export function VisaoAnaliticaPage() {
                   value={search} onChange={e => setSearch(e.target.value)} />
               </div>
             </div>
-            <div className="flex items-center self-end pb-1">
-              <Checkbox id="hide-rota-chao" checked={hideRotaChao} onCheckedChange={v => setHideRotaChao(!!v)} className="size-3.5" />
-              <label htmlFor="hide-rota-chao" className="ml-2 text-xs font-medium leading-none">
-                Ocultar rota 'CHÃO'
+            <div className="flex items-center self-end pb-1 gap-2">
+              <Checkbox id="hide-rota-chao" checked={hideRotaChao}
+                onCheckedChange={v => setHideRotaChao(!!v)} className="size-3.5" />
+              <label htmlFor="hide-rota-chao" className="text-xs font-medium leading-none cursor-pointer">
+                Ocultar CHÃO
               </label>
             </div>
             <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={fetchData} disabled={loading}>
@@ -784,7 +692,9 @@ export function VisaoAnaliticaPage() {
       {!loading && rows.length === 0 && (
         <div className="rounded-xl border border-dashed border-border/60 py-16 text-center">
           <Database className="size-8 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Nenhum dado para o período. Clique em <strong>Atualizar</strong>.</p>
+          <p className="text-sm text-muted-foreground">
+            Nenhum dado para o período. Clique em <strong>Atualizar</strong>.
+          </p>
         </div>
       )}
 
@@ -803,7 +713,7 @@ export function VisaoAnaliticaPage() {
                     onClick={() => toggleSort(col)}>
                     <span className="flex items-center justify-center gap-1">
                       {col}
-                      {sortCol === col ? (sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />) : null}
+                      {sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
                     </span>
                   </th>
                 ))}
@@ -814,7 +724,7 @@ export function VisaoAnaliticaPage() {
               {filtered.map((row, i) => {
                 const isSelected = selected.has(row.__rowIdx)
                 return (
-                  <tr key={i} className={cn(
+                  <tr key={row._itemId ?? i} className={cn(
                     "border-b transition-colors hover:bg-muted/10",
                     isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/5"
                   )}>
@@ -898,7 +808,9 @@ export function VisaoAnaliticaPage() {
                 ].map(f => ({ field: f, span: 1 })) },
               ].map(section => (
                 <div key={section.title}>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">{section.title}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+                    {section.title}
+                  </p>
                   <div className="grid grid-cols-4 gap-x-4 gap-y-3">
                     {section.fields.map(({ field, span }) => (
                       <div key={field} className={cn("space-y-1.5", span > 1 && `col-span-${span}`)}>

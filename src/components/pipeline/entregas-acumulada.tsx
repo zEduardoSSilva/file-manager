@@ -19,10 +19,10 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { exportExcel } from "@/lib/excel-utils"
-import {
-  collection, query, where, getDocs, getFirestore,
-} from "firebase/firestore"
+import { collection, getDocs, getFirestore } from "firebase/firestore"
 import { initializeApp, getApps, getApp } from "firebase/app"
+import { trackRead } from "@/lib/firebaseUsageTracker"
+import { mainDocId } from "@/app/actions/actions-utils"
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -37,63 +37,23 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp()
 const db  = getFirestore(app)
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
-interface RawRow {
-  "DATA DE ENTREGA"?: any
-  "FILIAL"?: any
-  "REGIÃO"?: any
-  "ROTA"?: any
-  "MOTORISTA"?: any
-  "AJUDANTE"?: any
-  "AJUDANTE 2"?: any
-  "PLACA"?: any
-  "PLACA SISTEMA"?: any
-  "ENTREGAS"?: any
-  "PESO"?: any
-  "TEMPO"?: any
-  "KM"?: any
-  "VIAGENS"?: any
-  "VALOR"?: any
-  "FRETE"?: any
-  "DESCARGA PALET"?: any
-  "HOSPEDAGEM"?: any
-  "DIARIA"?: any
-  "EXTRA"?: any
-  "CHAPA"?: any
-  "OBSERVAÇÃO"?: any
-  "STATUS"?: any
-  [key: string]: any
-}
+interface RawRow { [key: string]: any }
 
 interface AccumulatedRow {
   "DATA DE ENTREGA": string
-  "FILIAL": string
-  "REGIÃO": string
-  "MOTORISTA": string
-  "AJUDANTE": string
-  "AJUDANTE 2": string
-  "PLACA": string
-  "PLACA SISTEMA": string
+  "FILIAL": string; "REGIÃO": string
+  "MOTORISTA": string; "AJUDANTE": string; "AJUDANTE 2": string
+  "PLACA": string; "PLACA SISTEMA": string
   "TIPO CARGA": string
-  "ENTREGAS": number
-  "PESO": number
-  "KM": number
-  "KM_MAX": number
-  "TEMPO_MINUTOS": number
-  "TEMPO": string
-  "VIAGENS": string
-  "ROTA": string
-  "VALOR": number
-  "FRETE": number
-  "DESCARGA PALET": number
-  "HOSPEDAGEM": number
-  "DIARIA": number
-  "EXTRA": number
-  "CHAPA": number
-  "__cargas": number
-  "__linhasOriginais": RawRow[]
+  "ENTREGAS": number; "PESO": number; "KM": number; "KM_MAX": number
+  "TEMPO_MINUTOS": number; "TEMPO": string
+  "VIAGENS": string; "ROTA": string
+  "VALOR": number; "FRETE": number; "DESCARGA PALET": number
+  "HOSPEDAGEM": number; "DIARIA": number; "EXTRA": number; "CHAPA": number
+  __cargas: number
+  __linhasOriginais: RawRow[]
 }
 
-// ─── Colunas padrão ───────────────────────────────────────────────────────────
 const INITIAL_GRID_COLS = [
   "DATA DE ENTREGA", "TIPO CARGA", "FILIAL", "REGIÃO",
   "ROTA", "MOTORISTA", "AJUDANTE", "AJUDANTE 2",
@@ -103,13 +63,13 @@ const INITIAL_GRID_COLS = [
 ]
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function classificarTipoCarga(observacao: any): string {
-  if (observacao == null || observacao === "") return "Carga A"
-  const obs = String(observacao).toUpperCase().trim()
-  if (obs.includes("CARGA E") || obs.includes("CARGA-E")) return "Carga E"
-  if (obs.includes("CARGA D") || obs.includes("CARGA-D")) return "Carga D"
-  if (obs.includes("CARGA C") || obs.includes("CARGA-C")) return "Carga C"
-  if (obs.includes("CARGA B") || obs.includes("CARGA-B")) return "Carga B"
+function classificarTipoCarga(obs: any): string {
+  if (!obs) return "Carga A"
+  const o = String(obs).toUpperCase().trim()
+  if (o.includes("CARGA E") || o.includes("CARGA-E")) return "Carga E"
+  if (o.includes("CARGA D") || o.includes("CARGA-D")) return "Carga D"
+  if (o.includes("CARGA C") || o.includes("CARGA-C")) return "Carga C"
+  if (o.includes("CARGA B") || o.includes("CARGA-B")) return "Carga B"
   return "Carga A"
 }
 
@@ -144,6 +104,22 @@ function fmtNum(v: number, decimais = 2): string {
   return v.toLocaleString("pt-BR", { minimumFractionDigits: decimais, maximumFractionDigits: decimais })
 }
 
+function normalizarPlaca(placa: any): string {
+  return String(placa ?? "").trim().toUpperCase().replace(/[-\s]/g, "")
+}
+
+function ocupacaoBadge(peso: number, placa: string, capacidadeMap: Map<string, number>): React.ReactNode {
+  const cap = capacidadeMap.get(normalizarPlaca(placa)) ?? 0
+  if (!normalizarPlaca(placa) || cap <= 0) {
+    return <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Sem cadastro</span>
+  }
+  const pct = (peso / cap) * 100
+  const label = `${pct.toFixed(1)}%`
+  if (pct >= 100) return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{label}</span>
+  if (pct >= 85)  return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{label}</span>
+  return              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">{label}</span>
+}
+
 // ─── Acumulação ───────────────────────────────────────────────────────────────
 function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
   const grupos = new Map<string, AccumulatedRow>()
@@ -156,9 +132,8 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
 
     const tipoCarga = classificarTipoCarga(row["OBSERVAÇÃO"])
     const chave     = `${data}||${motorista}||${placa}||${tipoCarga}`
-
-    const viagem = String(row["VIAGENS"] ?? "").trim()
-    const rota   = String(row["ROTA"]    ?? "").trim()
+    const viagem    = String(row["VIAGENS"] ?? "").trim()
+    const rota      = String(row["ROTA"]    ?? "").trim()
 
     if (!grupos.has(chave)) {
       grupos.set(chave, {
@@ -171,12 +146,12 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
         "PLACA":           String(row["PLACA"]         ?? ""),
         "PLACA SISTEMA":   String(row["PLACA SISTEMA"] ?? ""),
         "TIPO CARGA":      tipoCarga,
-        "ENTREGAS": 0, "PESO": 0, "KM": 0, "KM_MAX": 0, "TEMPO_MINUTOS": 0, "TEMPO": "",
+        "ENTREGAS": 0, "PESO": 0, "KM": 0, "KM_MAX": 0,
+        "TEMPO_MINUTOS": 0, "TEMPO": "",
         "VIAGENS": viagem, "ROTA": rota,
         "VALOR": 0, "FRETE": 0, "DESCARGA PALET": 0,
         "HOSPEDAGEM": 0, "DIARIA": 0, "EXTRA": 0, "CHAPA": 0,
-        "__cargas": 1,
-        "__linhasOriginais": [row],
+        __cargas: 1, __linhasOriginais: [row],
       })
     } else {
       const g = grupos.get(chave)!
@@ -186,8 +161,8 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
       const rotas = g["ROTA"].split(" / ").filter(Boolean)
       if (rota && !rotas.includes(rota)) rotas.push(rota)
       g["ROTA"] = rotas.join(" / ")
-      g["__cargas"]++
-      g["__linhasOriginais"].push(row)
+      g.__cargas++
+      g.__linhasOriginais.push(row)
     }
 
     const g = grupos.get(chave)!
@@ -206,10 +181,7 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
   }
 
   for (const g of grupos.values()) {
-    const minDiv = g["__cargas"] > 0
-      ? Math.round(g["TEMPO_MINUTOS"] / g["__cargas"])
-      : g["TEMPO_MINUTOS"]
-    g["TEMPO"] = minutosParaTempo(minDiv)
+    g["TEMPO"] = minutosParaTempo(g.__cargas > 0 ? Math.round(g["TEMPO_MINUTOS"] / g.__cargas) : g["TEMPO_MINUTOS"])
     g["KM"]    = Math.round(g["KM_MAX"] * 1.2 * 100) / 100
   }
 
@@ -251,16 +223,12 @@ function cellVal(row: AccumulatedRow, col: string) {
     return <span className="tabular-nums">{fmtNum(n, col === "ENTREGAS" ? 0 : 2)}</span>
   }
 
-  if (v == null || v === "" || v === 0)
-    return <span className="text-muted-foreground/40 text-[10px]">—</span>
-
+  if (v == null || v === "" || v === 0) return <span className="text-muted-foreground/40 text-[10px]">—</span>
   return <span>{String(v)}</span>
 }
 
 // ─── Dialog: detalhe de cargas ────────────────────────────────────────────────
-function DetalheCargas({ row, open, onClose }: {
-  row: AccumulatedRow | null; open: boolean; onClose: () => void
-}) {
+function DetalheCargas({ row, open, onClose }: { row: AccumulatedRow | null; open: boolean; onClose: () => void }) {
   if (!row) return null
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
@@ -286,7 +254,7 @@ function DetalheCargas({ row, open, onClose }: {
           <table className="w-full text-[11px]">
             <thead>
               <tr className="bg-muted/30 border-b sticky top-0">
-                {["#", "Rota", "Viagens", "Entregas", "Peso", "Tempo", "KM", "Observação"].map(h => (
+                {["#","Rota","Viagens","Entregas","Peso","Tempo","KM","Observação"].map(h => (
                   <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -371,8 +339,6 @@ function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// ── Página Principal
-// ════════════════════════════════════════════════════════════════════════════
 export function VisaoAcumuladaPage() {
   const { toast } = useToast()
   const today = new Date()
@@ -395,44 +361,37 @@ export function VisaoAcumuladaPage() {
   const [detalheRow,           setDetalheRow]           = React.useState<AccumulatedRow | null>(null)
   const [showGerenciarColunas, setShowGerenciarColunas] = React.useState(false)
 
-  // ─── ✅ Fetch: sempre lê da subcoleção items/ ────────────────────────────
+  const [capacidadeMap, setCapacidadeMap] = React.useState<Map<string, number>>(new Map())
+
+  React.useEffect(() => {
+    getDocs(collection(db, "docs_veiculos")).then(snap => {
+      const map = new Map<string, number>()
+      for (const d of snap.docs) {
+        const data = d.data()
+        const cap  = Number(data.CAPACIDADE_KG ?? 0)
+        if (cap > 0) map.set(normalizarPlaca(d.id), cap)
+      }
+      setCapacidadeMap(map)
+    }).catch(() => {})
+  }, [])
+
+  // ── Fetch: usa mainDocId + subcoleção items/ ──────────────────────────────
   const fetchData = React.useCallback(async () => {
     setLoading(true)
     try {
-      const q = query(
-        collection(db, "pipeline_results"),
-        where("pipelineType", "==", "consolidacao-entregas"),
-        where("year",  "==", filterYear),
-        where("month", "==", filterMonth),
-      )
-      const snap = await getDocs(q)
+      const docId    = mainDocId("consolidacao-entregas", filterYear, filterMonth)
+      const itemsRef = collection(db, "pipeline_results", docId, "items")
+      const snap     = await getDocs(itemsRef)
+      trackRead(snap.size)
+
       if (snap.empty) {
         setRawRows([])
-        toast({ description: "Nenhum resultado para este período." })
+        toast({ description: "Nenhum dado para este período. Importe os arquivos primeiro." })
         return
       }
 
-      // Pega o documento mais recente
-      const sorted  = snap.docs.sort((a, b) => (b.data().timestamp ?? 0) - (a.data().timestamp ?? 0))
-      const mainDoc = sorted[0]
-
-      // ✅ Lê SEMPRE da subcoleção items/ — sem fallback para campo data[]
-      const itemsSnap = await getDocs(collection(db, "pipeline_results", mainDoc.id, "items"))
-
-      if (itemsSnap.empty) {
-        toast({
-          variant: "destructive",
-          title: "Documento sem dados na subcoleção",
-          description: `ID: ${mainDoc.id} — Re-processe o período.`,
-        })
-        setRawRows([])
-        return
-      }
-
-      const data: RawRow[] = itemsSnap.docs.map(d => d.data() as RawRow)
-      setRawRows(data)
-      toast({ description: `${data.length} registros carregados.` })
-
+      setRawRows(snap.docs.map(d => d.data() as RawRow))
+      toast({ description: `${snap.size} registros carregados.` })
     } catch (e: any) {
       toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message })
       setRawRows([])
@@ -448,7 +407,6 @@ export function VisaoAcumuladaPage() {
   const regioes = React.useMemo(() =>
     [...new Set(rawRows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rawRows])
 
-  // ─── Pipeline: filtra → acumula → ordena ────────────────────────────────
   const acumulado = React.useMemo(() => {
     let r = rawRows
     if (filterDay > 0)          r = r.filter(row => extractDay(row["DATA DE ENTREGA"]) === filterDay)
@@ -495,6 +453,9 @@ export function VisaoAcumuladaPage() {
     exportExcel(data, `Visão Acumulada - ${String(filterMonth).padStart(2, "0")}-${filterYear}.xlsx`)
   }, [acumulado, gridCols, filterMonth, filterYear])
 
+  // ── Índice da coluna PESO nas gridCols (para injetar CAP+OCUPAÇÃO depois) ─
+  const pesoColIdx = gridCols.indexOf("PESO")
+
   return (
     <div className="space-y-4">
       <Card className="shadow-sm border-border/60">
@@ -502,8 +463,7 @@ export function VisaoAcumuladaPage() {
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div>
               <CardTitle className="flex items-center gap-2 text-base">
-                <Layers className="size-4 text-primary" />
-                Visão Acumulada — Entregas
+                <Layers className="size-4 text-primary" /> Visão Acumulada — Entregas
               </CardTitle>
               <CardDescription className="mt-0.5">Agrupamento de Rotas</CardDescription>
             </div>
@@ -535,8 +495,7 @@ export function VisaoAcumuladaPage() {
                 Dia <span className="normal-case text-muted-foreground font-normal">(0 = todos)</span>
               </Label>
               <Input type="number" min={0} max={31} className="w-20 h-8 text-xs"
-                value={filterDay === 0 ? "" : filterDay}
-                placeholder="0"
+                value={filterDay === 0 ? "" : filterDay} placeholder="0"
                 onChange={e => {
                   const v = parseInt(e.target.value)
                   setFilterDay(isNaN(v) || v < 0 ? 0 : Math.min(v, 31))
@@ -572,8 +531,7 @@ export function VisaoAcumuladaPage() {
             </div>
             <div className="flex items-center self-end pb-1 gap-2">
               <input type="checkbox" id="hide-chao-acum" checked={hideRotaChao}
-                onChange={e => setHideRotaChao(e.target.checked)}
-                className="size-3.5 accent-primary" />
+                onChange={e => setHideRotaChao(e.target.checked)} className="size-3.5 accent-primary" />
               <label htmlFor="hide-chao-acum" className="text-xs font-medium leading-none cursor-pointer">
                 Ocultar CHÃO
               </label>
@@ -629,20 +587,32 @@ export function VisaoAcumuladaPage() {
                 <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap w-16">
                   CARGAS
                 </th>
-                {gridCols.map(col => (
-                  <th key={col}
-                    className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
-                    onClick={() => toggleSort(col)}>
-                    <span className="flex items-center justify-center gap-1">
-                      {col}
-                      {sortCol === col
-                        ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />
-                        : null}
-                    </span>
-                  </th>
+                {gridCols.map((col, ci) => (
+                  <React.Fragment key={col}>
+                    <th
+                      className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
+                      onClick={() => toggleSort(col)}>
+                      <span className="flex items-center justify-center gap-1">
+                        {col}
+                        {sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
+                      </span>
+                    </th>
+                    {/* CAP e OCUPAÇÃO só depois do PESO — uma vez apenas */}
+                    {col === "PESO" && (
+                      <>
+                        <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground whitespace-nowrap">
+                          CAP. (kg)
+                        </th>
+                        <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap">
+                          OCUPAÇÃO
+                        </th>
+                      </>
+                    )}
+                  </React.Fragment>
                 ))}
               </tr>
             </thead>
+
             <tbody>
               {acumulado.map((row, i) => {
                 const multiRota = row.__cargas > 1
@@ -651,9 +621,7 @@ export function VisaoAcumuladaPage() {
                     "border-b transition-colors",
                     multiRota
                       ? "bg-amber-50/40 hover:bg-amber-50/80"
-                      : i % 2 === 0
-                        ? "bg-background hover:bg-muted/10"
-                        : "bg-muted/5 hover:bg-muted/10"
+                      : i % 2 === 0 ? "bg-background hover:bg-muted/10" : "bg-muted/5 hover:bg-muted/10"
                   )}>
                     <td className="px-3 py-2 text-center">
                       {multiRota ? (
@@ -668,19 +636,39 @@ export function VisaoAcumuladaPage() {
                         <span className="text-[10px] text-muted-foreground/50">1</span>
                       )}
                     </td>
+
                     {gridCols.map(col => (
-                      <td key={col} className={cn("px-3 py-2 whitespace-nowrap text-center", {
-                        "min-w-[200px]": col === "MOTORISTA",
-                        "min-w-[160px]": col === "AJUDANTE" || col === "AJUDANTE 2",
-                        "min-w-[180px]": col === "VIAGENS" || col === "ROTA",
-                      })}>
-                        {cellVal(row, col)}
-                      </td>
+                      <React.Fragment key={col}>
+                        <td className={cn("px-3 py-2 whitespace-nowrap text-center", {
+                          "min-w-[200px]": col === "MOTORISTA",
+                          "min-w-[160px]": col === "AJUDANTE" || col === "AJUDANTE 2",
+                          "min-w-[180px]": col === "VIAGENS" || col === "ROTA",
+                        })}>
+                          {cellVal(row, col)}
+                        </td>
+                        {/* ✅ CAP e OCUPAÇÃO inseridas UMA VEZ logo após PESO */}
+                        {col === "PESO" && (
+                          <>
+                            <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
+                              {(() => {
+                                const cap = capacidadeMap.get(normalizarPlaca(row["PLACA"]))
+                                return cap
+                                  ? <span>{cap.toLocaleString("pt-BR")} kg</span>
+                                  : <span className="text-muted-foreground/40">—</span>
+                              })()}
+                            </td>
+                            <td className="px-3 py-2 text-center whitespace-nowrap">
+                              {ocupacaoBadge(row["PESO"], row["PLACA"], capacidadeMap)}
+                            </td>
+                          </>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tr>
                 )
               })}
             </tbody>
+
             <tfoot>
               <tr className="border-t-2 border-border bg-muted/20 font-semibold">
                 <td className="px-3 py-2.5 text-[11px] text-muted-foreground text-center">Total</td>
@@ -693,7 +681,16 @@ export function VisaoAcumuladaPage() {
                   else if (col === "VALOR")    content = <span className="tabular-nums">{fmtNum(totais.valor)}</span>
                   else if (col === "FRETE")    content = <span className="tabular-nums">{fmtNum(totais.frete)}</span>
                   return (
-                    <td key={col} className="px-3 py-2.5 text-center text-[11px]">{content}</td>
+                    <React.Fragment key={col}>
+                      <td className="px-3 py-2.5 text-center text-[11px]">{content}</td>
+                      {/* ✅ células vazias alinhadas com CAP e OCUPAÇÃO — apenas após PESO */}
+                      {col === "PESO" && (
+                        <>
+                          <td className="px-3 py-2.5" />
+                          <td className="px-3 py-2.5" />
+                        </>
+                      )}
+                    </React.Fragment>
                   )
                 })}
               </tr>

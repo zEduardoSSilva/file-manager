@@ -20,6 +20,13 @@ service cloud.firestore {
     match /pipeline_results/{docId=**} {
       allow read, write: if true;
     }
+
+    // Permite a leitura da coleção 'usage' pelo frontend
+    match /usage/{usageDoc} {
+      allow read: if true;
+      allow write: if false;
+    }
+    
     match /{document=**} {
       allow read, write: if false;
     }

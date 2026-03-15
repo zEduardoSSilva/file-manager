@@ -123,8 +123,8 @@ export function VeiculosPipelineView() {
         toast({ title: "Sucesso!", description: "Veículo atualizado." })
       } else {
         const rawPlaca = dataToSave.PLACA
-        if (!rawPlaca || typeof rawPlaca !== 'string') throw new Error("O campo 'Placa' é obrigatório.")
-        const docId = rawPlaca.trim().toUpperCase().replace(/-/g, '')
+        if (!rawPlaca || typeof rawPlaca !== "string") throw new Error("O campo 'Placa' é obrigatório.")
+        const docId = rawPlaca.trim().toUpperCase().replace(/-/g, "")
         await setDoc(doc(db, "docs_veiculos", docId), dataToSave)
         addLog(`Veículo ${docId} adicionado.`, "success")
         toast({ title: "Sucesso!", description: "Veículo adicionado." })
@@ -166,7 +166,7 @@ export function VeiculosPipelineView() {
       try {
         const data = e.target?.result
         if (!data) throw new Error("Não foi possível ler o arquivo.")
-        const workbook = XLSX.read(data, { type: 'array' })
+        const workbook = XLSX.read(data, { type: "array" })
         const sheetName = workbook.SheetNames[0]
         const worksheet = workbook.Sheets[sheetName]
         const jsonData = XLSX.utils.sheet_to_json(worksheet)
@@ -201,22 +201,45 @@ export function VeiculosPipelineView() {
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
+  // ✅ helper: badge de ocupação — vermelho < 85%, amarelo 85–99%, verde 100%+
+  const ocupacaoBadge = (pesoAtual: number, capacidade: number) => {
+    if (!capacidade || capacidade <= 0) return null
+    const pct = (pesoAtual / capacidade) * 100
+    const label = `${pct.toFixed(1)}%`
+    if (pct >= 100) return (
+      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+        {label}
+      </span>
+    )
+    if (pct >= 85) return (
+      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+        {label}
+      </span>
+    )
+    return (
+      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+        {label}
+      </span>
+    )
+  }
+
   const filteredItems = items.filter(item =>
     search ? searchableFields.some(field =>
       String(item[field] ?? "").toLowerCase().includes(search.toLowerCase())
     ) : true
   )
 
-  const proprios = items.filter(i => i.TIPO_VINCULO === "Próprio").length
+  const proprios  = items.filter(i => i.TIPO_VINCULO === "Próprio").length
   const terceiros = items.filter(i => i.TIPO_VINCULO === "Terceiro").length
   const agregados = items.filter(i => i.TIPO_VINCULO === "Agregado").length
 
   const fields = [
-    { name: "PLACA", label: "Placa", type: "text" },
-    { name: "MODELO", label: "Modelo", type: "text" },
-    { name: "TIPO_VINCULO", label: "Vínculo", type: "select", options: ["Próprio", "Terceiro", "Agregado"] },
-    { name: "CAPACIDADE_KG", label: "Capacidade (kg)", type: "number" },
-    { name: "STATUS_VEICULO", label: "Status", type: "text" },
+    { name: "PLACA",          label: "Placa",           type: "text"   },
+    { name: "MODELO",         label: "Modelo",          type: "text"   },
+    { name: "TIPO_VINCULO",   label: "Vínculo",         type: "select", options: ["Próprio", "Terceiro", "Agregado"] },
+    { name: "CAPACIDADE_KG",  label: "Capacidade (kg)", type: "number" },
+    { name: "PESO_ATUAL_KG",  label: "Peso Atual (kg)", type: "number" },
+    { name: "STATUS_VEICULO", label: "Status",          type: "text"   },
   ]
 
   return (
@@ -228,6 +251,7 @@ export function VeiculosPipelineView() {
         </div>
         <AlertDescription className="text-sm mt-2">
           Gerencie os dados mestres de veículos. O ID do documento é gerado a partir da <strong>Placa</strong>.
+          A coluna <strong>Ocupação</strong> calcula <em>Peso Atual ÷ Capacidade</em> — verde ≥ 100%, amarelo ≥ 85%, vermelho &lt; 85%.
         </AlertDescription>
       </Alert>
 
@@ -264,6 +288,9 @@ export function VeiculosPipelineView() {
                       <TableHead>Marca</TableHead>
                       <TableHead>Ano</TableHead>
                       <TableHead>Vínculo</TableHead>
+                      {/* ✅ novas colunas */}
+                      <TableHead className="text-right">Cap. (kg)</TableHead>
+                      <TableHead className="text-center">Ocupação</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="w-[60px]" />
                     </TableRow>
@@ -271,59 +298,75 @@ export function VeiculosPipelineView() {
                   <TableBody>
                     {loading ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center">
+                        <TableCell colSpan={9} className="h-24 text-center">
                           <div className="flex justify-center items-center gap-2 text-muted-foreground">
                             <Loader2 className="size-4 animate-spin" /> Carregando...
                           </div>
                         </TableCell>
                       </TableRow>
                     ) : filteredItems.length > 0 ? (
-                      filteredItems.map(item => (
-                        <TableRow key={item.id}>
-                          <TableCell className="font-medium font-mono">{item.PLACA}</TableCell>
-                          <TableCell>{item.MODELO}</TableCell>
-                          <TableCell>{item.MARCA}</TableCell>
-                          <TableCell>{item.ANO_MODELO}</TableCell>
-                          <TableCell>
-                            <span className={cn(
-                              "text-[10px] font-bold px-2 py-0.5 rounded-full",
-                              vinculoColor[item.TIPO_VINCULO] || "bg-slate-100 text-slate-600"
-                            )}>
-                              {item.TIPO_VINCULO}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <span className={cn(
-                              "text-[10px] font-bold px-2 py-0.5 rounded-full",
-                              String(item.STATUS_VEICULO).toUpperCase().includes("ATIVO")
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-slate-100 text-slate-600"
-                            )}>
-                              {item.STATUS_VEICULO}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => openForm(item)}>
-                                  <Edit className="mr-2 h-4 w-4" /> Editar
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => openDeleteAlert(item)} className="text-destructive">
-                                  <Trash2 className="mr-2 h-4 w-4" /> Excluir
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        </TableRow>
-                      ))
+                      filteredItems.map(item => {
+                        const cap   = Number(item.CAPACIDADE_KG  ?? 0)
+                        const peso  = Number(item.PESO_ATUAL_KG  ?? 0)
+                        return (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium font-mono">{item.PLACA}</TableCell>
+                            <TableCell>{item.MODELO}</TableCell>
+                            <TableCell>{item.MARCA}</TableCell>
+                            <TableCell>{item.ANO_MODELO}</TableCell>
+                            <TableCell>
+                              <span className={cn(
+                                "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                                vinculoColor[item.TIPO_VINCULO] || "bg-slate-100 text-slate-600"
+                              )}>
+                                {item.TIPO_VINCULO}
+                              </span>
+                            </TableCell>
+                            {/* ✅ Capacidade */}
+                            <TableCell className="text-right tabular-nums text-xs">
+                              {cap > 0
+                                ? cap.toLocaleString("pt-BR") + " kg"
+                                : <span className="text-muted-foreground/40">—</span>}
+                            </TableCell>
+                            {/* ✅ Ocupação */}
+                            <TableCell className="text-center">
+                              {cap > 0 && peso > 0
+                                ? ocupacaoBadge(peso, cap)
+                                : <span className="text-muted-foreground/40 text-[10px]">—</span>}
+                            </TableCell>
+                            <TableCell>
+                              <span className={cn(
+                                "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                                String(item.STATUS_VEICULO).toUpperCase().includes("ATIVO")
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-slate-100 text-slate-600"
+                              )}>
+                                {item.STATUS_VEICULO}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => openForm(item)}>
+                                    <Edit className="mr-2 h-4 w-4" /> Editar
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => openDeleteAlert(item)} className="text-destructive">
+                                    <Trash2 className="mr-2 h-4 w-4" /> Excluir
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                        <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
                           Nenhum veículo encontrado.
                         </TableCell>
                       </TableRow>
@@ -350,10 +393,10 @@ export function VeiculosPipelineView() {
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-2">
             {[
-              { label: "Total de Veículos", value: items.length.toLocaleString("pt-BR"), icon: Car, highlight: false },
-              { label: "Próprios", value: proprios.toLocaleString("pt-BR"), icon: CheckCircle2, highlight: true },
-              { label: "Terceiros", value: terceiros.toLocaleString("pt-BR"), icon: Truck, highlight: false },
-              { label: "Agregados", value: agregados.toLocaleString("pt-BR"), icon: Gauge, highlight: false },
+              { label: "Total de Veículos", value: items.length.toLocaleString("pt-BR"),   icon: Car,          highlight: false },
+              { label: "Próprios",          value: proprios.toLocaleString("pt-BR"),        icon: CheckCircle2, highlight: true  },
+              { label: "Terceiros",         value: terceiros.toLocaleString("pt-BR"),       icon: Truck,        highlight: false },
+              { label: "Agregados",         value: agregados.toLocaleString("pt-BR"),       icon: Gauge,        highlight: false },
             ].map(stat => {
               const Icon = stat.icon
               return (
@@ -361,12 +404,15 @@ export function VeiculosPipelineView() {
                   "rounded-xl border px-3 py-2.5 flex items-center gap-2 shadow-sm",
                   stat.highlight ? "bg-primary/5 border-primary/20" : "bg-card border-border/60"
                 )}>
-                  <div className={cn("size-7 rounded-lg flex items-center justify-center shrink-0",
-                    stat.highlight ? "bg-primary/10" : "bg-muted/30")}>
+                  <div className={cn(
+                    "size-7 rounded-lg flex items-center justify-center shrink-0",
+                    stat.highlight ? "bg-primary/10" : "bg-muted/30"
+                  )}>
                     <Icon className={cn("size-3.5", stat.highlight ? "text-primary" : "text-muted-foreground")} />
                   </div>
                   <div>
-                    <p className={cn("text-sm font-bold leading-tight", stat.highlight ? "text-primary" : "text-foreground")}>
+                    <p className={cn("text-sm font-bold leading-tight",
+                      stat.highlight ? "text-primary" : "text-foreground")}>
                       {stat.value}
                     </p>
                     <p className="text-[10px] text-muted-foreground leading-tight">{stat.label}</p>
@@ -384,7 +430,8 @@ export function VeiculosPipelineView() {
                 <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Console</span>
               </div>
               {logs.length > 0 && (
-                <button onClick={() => setLogs([])} className="text-[9px] text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => setLogs([])}
+                  className="text-[9px] text-muted-foreground hover:text-foreground transition-colors">
                   limpar
                 </button>
               )}
@@ -476,7 +523,8 @@ export function VeiculosPipelineView() {
               />
             </div>
             <p className="text-xs text-muted-foreground px-4 text-center">
-              Cabeçalhos esperados: PLACA, MODELO, MARCA, ANO_MODELO, TIPO_VINCULO, CAPACIDADE_KG, STATUS_VEICULO.
+              Cabeçalhos esperados: PLACA, MODELO, MARCA, ANO_MODELO, TIPO_VINCULO,
+              CAPACIDADE_KG, PESO_ATUAL_KG, STATUS_VEICULO.
             </p>
           </div>
           <DialogFooter>
@@ -494,7 +542,9 @@ export function VeiculosPipelineView() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-            <AlertDialogDescription>Esta ação não pode ser desfeita. O item será excluído permanentemente.</AlertDialogDescription>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. O item será excluído permanentemente.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>

@@ -1,23 +1,8 @@
 "use server"
 
-import { processAndSave, PipelineArgs, ProcessorOutput, PipelineResponse } from "./actions-utils"
-import {
-  getFirestore, collection, query, where, getDocs, orderBy, limit,
-} from "firebase/firestore"
-import { initializeApp, getApps, getApp } from "firebase/app"
+import { processAndSave, PipelineArgs, ProcessorOutput, PipelineResponse, getDedupKeys } from "./actions-utils"
 
-// ─── Firebase ────────────────────────────────────────────────────────────────
-const firebaseConfig = {
-  apiKey:            "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
-  authDomain:        "file-manager-hub-50030335.firebaseapp.com",
-  projectId:         "file-manager-hub-50030335",
-  storageBucket:     "file-manager-hub-50030335.firebasestorage.app",
-  messagingSenderId: "187801013388",
-  appId:             "1:187801013388:web:ef1417fae5d8d24d93ffa9",
-}
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp()
-const db  = getFirestore(app)
-
+// ─── Configurações ────────────────────────────────────────────────────────────
 const MAPA_FILIAL_REGIAO: Record<string, string> = {
   "Cambe":        "RK01",
   "Cascavel":     "KP01",
@@ -27,7 +12,7 @@ const MAPA_FILIAL_REGIAO: Record<string, string> = {
 }
 
 function removeAcentos(txt: string): string {
-  return txt.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase()
+  return txt.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
 }
 
 function formatarTempo(valor: any): string {
@@ -65,58 +50,11 @@ function findCol(colsKeys: string[], ...patterns: RegExp[]): string | undefined 
   return undefined
 }
 
+// ─── Chave de deduplicação ────────────────────────────────────────────────────
 function dedupKey(row: any): string {
-  const viagem = String(row["VIAGENS"]        ?? "").trim()
+  const viagem = String(row["VIAGENS"]         ?? "").trim()
   const data   = String(row["DATA DE ENTREGA"] ?? "").trim()
   return `${viagem}|${data}`
-}
-
-// ─── buscarDadosExistentes ────────────────────────────────────────────────────
-// ✅ CORRIGIDO: lê a subcoleção items/ em vez do campo data[] do doc principal.
-//    O campo data[] não existe mais no documento principal — ele ficaria > 1 MB.
-// ─────────────────────────────────────────────────────────────────────────────
-async function buscarDadosExistentes(
-  year: number,
-  month: number,
-): Promise<{ keys: Set<string>; rows: any[]; mainDocId: string | null }> {
-  try {
-    // 1. Encontra o documento principal mais recente para este mês/ano
-    const q = query(
-      collection(db, "pipeline_results"),
-      where("pipelineType", "==", "consolidacao-entregas"),
-      where("year",  "==", year),
-      where("month", "==", month),
-      orderBy("timestamp", "desc"),
-      limit(1),
-    )
-    const snap = await getDocs(q)
-    if (snap.empty) {
-      console.log(`[buscarDadosExistentes] Nenhum resultado para ${month}/${year}.`)
-      return { keys: new Set(), rows: [], mainDocId: null }
-    }
-
-    const mainDocId = snap.docs[0].id
-    console.log(`[buscarDadosExistentes] Doc principal: ${mainDocId}`)
-
-    // 2. ✅ Lê os itens da subcoleção (sem limite de tamanho)
-    const itemsSnap = await getDocs(
-      collection(db, "pipeline_results", mainDocId, "items")
-    )
-    const rows = itemsSnap.docs.map(d => d.data())
-    console.log(`[buscarDadosExistentes] ${rows.length} itens carregados da subcoleção.`)
-
-    // 3. Constrói o Set de chaves para deduplicação
-    const keys = new Set<string>()
-    for (const row of rows) {
-      const k = dedupKey(row)
-      if (k !== "|") keys.add(k)
-    }
-
-    return { keys, rows, mainDocId }
-  } catch (err: any) {
-    console.error("[buscarDadosExistentes] Erro:", err.message)
-    return { keys: new Set(), rows: [], mainDocId: null }
-  }
 }
 
 // ─── Processamento de linhas ──────────────────────────────────────────────────
@@ -160,21 +98,24 @@ function processarRows(rows: any[], filialNome: string, dataEntrega: string): an
   const colEntDev     = findCol(colsKeys, /ENTREGAS.?DEV/)
   const colValorDev   = findCol(colsKeys, /VALOR.?DEV/)
 
+  console.log(
+    `[processarRows] ${filialNome} | `,
+    `DATA="${colData}" MOT="${colMotorista}" AJ1="${colAjudante1}" AJ2="${colAjudante2}"`,
+    `PLACA="${colPlaca}" VGS="${colViagens}"`
+  )
+
   const resultado: any[] = []
 
   for (const row of rows) {
     const dataVal = colData ? row[colData] : null
     if (!dataVal) continue
-
     const dataStr = String(dataVal).toUpperCase()
     if (/TOTAL|GERAL|CARGAS|FROTA/.test(dataStr)) continue
-
     const motoristaVal = colMotorista ? row[colMotorista] : null
     if (!motoristaVal) continue
     if (String(motoristaVal).toUpperCase() === "MOTORISTA") continue
 
     const rota = String(row.__rota__ ?? "").trim()
-
     let placa = colPlaca ? (row[colPlaca] ?? null) : null
     if (!placa && colPlacaSis) placa = row[colPlacaSis] ?? null
 
@@ -213,13 +154,14 @@ function processarRows(rows: any[], filialNome: string, dataEntrega: string): an
     })
   }
 
+  console.log(`[processarRows] ${filialNome} → ${resultado.length} registros (${rows.length} linhas)`)
   return resultado
 }
 
 // ─── Processor principal ──────────────────────────────────────────────────────
 async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<ProcessorOutput> {
   const { year, month, files, formData } = args
-  const day    = parseInt(formData?.get("day") as string ?? "0") || 0
+  const day     = parseInt(formData?.get("day") as string ?? "0") || 0
   const abaAlvo = day > 0 ? montarNomeAba(day, month, year) : ""
   if (abaAlvo) formData.set("sheetName", abaAlvo)
 
@@ -227,8 +169,11 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
   const fileNames: string[] = (formData.getAll("fileNames") as string[]) ?? []
   if (!sheetsData.length) throw new Error("Nenhum arquivo ou aba encontrada.")
 
-  // ✅ buscarDadosExistentes agora lê subcoleção items/ corretamente
-  const { keys: existentes, rows: rowsExistentes } = await buscarDadosExistentes(year, month)
+  // ── Dedup: lê APENAS metadata do doc principal (1 leitura) ───────────────
+  // Não lê items/ — as chaves estão no campo dedupKeys do doc principal.
+  // Isso elimina a leitura O(N) que explodia a cota.
+  const { keys: existentes } = await getDedupKeys("consolidacao-entregas", year, month)
+  console.log(`[consolidacao] Chaves de dedup no banco: ${existentes.size}`)
 
   const filialData: Record<string, any[]> = {}
   let totalRegistros = 0
@@ -261,6 +206,7 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
     totalRegistros += processados.length
   }
 
+  // Todos os registros extraídos (incluindo CHÃO — o grid mostra tudo)
   const todosRegistros: any[] = []
   for (const rows of Object.values(filialData)) todosRegistros.push(...rows)
 
@@ -272,7 +218,7 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
     const k = dedupKey(row)
     if (k !== "|" && existentes.has(k)) {
       duplicadas.push({
-        viagens:   String(row["VIAGENS"]        ?? "—"),
+        viagens:   String(row["VIAGENS"]         ?? "—"),
         data:      String(row["DATA DE ENTREGA"] ?? "—"),
         motorista: String(row["MOTORISTA"]       ?? "—"),
         filial:    String(row["FILIAL"]          ?? "—"),
@@ -282,25 +228,22 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
     }
   }
 
-  // ── Acumulado final ───────────────────────────────────────────────────────
-  const acumuladoFinal = [...rowsExistentes, ...novosRegistros]
+  console.log(
+    `[consolidacao] Total extraído: ${todosRegistros.length} | ` +
+    `Novos: ${novosRegistros.length} | Duplicados: ${duplicadas.length}`
+  )
 
-  const acumuladoSemChao = acumuladoFinal.filter(row => {
+  // ── ExtraSheet Acumulado = sem CHÃO (para download Excel) ────────────────
+  const acumuladoSemChao = novosRegistros.filter(row => {
     const rota = removeAcentos(String(row["ROTA"] ?? "")).trim()
     return rota !== "CHAO"
   })
 
-  // ── extraSheets para download Excel (NÃO vai ao Firestore) ───────────────
-  const filialDataFiltrada: Record<string, any[]> = {}
+  // ExtraSheets por filial
   const duplicadasKeys = new Set(duplicadas.map(d => `${d.viagens}|${d.data}`))
-
+  const filialDataFiltrada: Record<string, any[]> = {}
   for (const [filial, rows] of Object.entries(filialData)) {
     filialDataFiltrada[filial] = rows.filter(r => !duplicadasKeys.has(dedupKey(r)))
-  }
-  for (const row of rowsExistentes) {
-    const filial = String(row["FILIAL"] ?? "Desconhecida")
-    if (!filialDataFiltrada[filial]) filialDataFiltrada[filial] = []
-    filialDataFiltrada[filial].push(row)
   }
 
   const filiaisOk = Object.values(filialDataFiltrada).filter(r => r.length > 0).length
@@ -308,11 +251,13 @@ async function consolidacaoEntregasProcessor(args: PipelineArgs): Promise<Proces
   const dupInfo    = duplicadas.length > 0 ? ` · ${duplicadas.length} duplicada(s) ignorada(s)` : ""
 
   return {
-    // ✅ data = acumulado completo → vai para subcoleção items/ (sem limite de tamanho)
-    data: acumuladoFinal,
-    summary: `Consolidação ${String(month).padStart(2, "0")}/${year} (${diasLabel}): ${filiaisOk} filiais · ${totalRegistros} registros novos · ${acumuladoFinal.length} no acumulado${dupInfo}`,
+    // ✅ data = APENAS os novos registros (nunca reescreve os antigos)
+    // O saveToFirebase vai ACRESCENTAR esses itens à subcoleção existente
+    data: novosRegistros,
+    summary: `Consolidação ${String(month).padStart(2, "0")}/${year} (${diasLabel}): ${filiaisOk} filiais · ${novosRegistros.length} novos · ${existentes.size + novosRegistros.length} total no banco${dupInfo}`,
     duplicadas,
-    // ✅ extraSheets = para download Excel → nunca vai ao Firestore (separado em processAndSave)
+    // ✅ dedupKeys das novas linhas → saveToFirebase merge com as existentes no metadata
+    dedupKeys: novosRegistros.map(r => dedupKey(r)).filter(k => k !== "|"),
     extraSheets: [
       ...Object.entries(filialDataFiltrada).map(([filial, rows]) => ({
         name: filial.slice(0, 31),
