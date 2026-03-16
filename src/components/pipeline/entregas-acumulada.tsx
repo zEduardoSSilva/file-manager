@@ -19,10 +19,13 @@ import {
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { exportExcel } from "@/lib/excel-utils"
-import { collection, getDocs, getFirestore } from "firebase/firestore"
+import { collection, doc, getDoc, getDocs, getFirestore } from "firebase/firestore"
 import { initializeApp, getApps, getApp } from "firebase/app"
 import { trackRead } from "@/lib/firebaseUsageTracker"
 import { mainDocId } from "@/app/actions/actions-utils"
+import { getFromCache, setInCache, getAcumuladaCacheKey } from "@/lib/data-cache"
+
+// ... (o resto do arquivo permanece o mesmo até a função fetchData)
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -338,14 +341,14 @@ function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
   )
 }
 
-// ════════════════════════════════════════════════════════════════════════════
+// ── Página principal ──────────────────────────────────────────────────────────
 export function VisaoAcumuladaPage() {
   const { toast } = useToast()
   const today = new Date()
 
   const [filterYear,   setFilterYear]   = React.useState(today.getFullYear())
   const [filterMonth,  setFilterMonth]  = React.useState(today.getMonth() + 1)
-  const [filterDay,    setFilterDay]    = React.useState<number>(today.getDate())
+  const [filterDay,    setFilterDay]    = React.useState<number>(0)
   const [filterFilial, setFilterFilial] = React.useState("all")
   const [filterRegiao, setFilterRegiao] = React.useState("all")
   const [search,       setSearch]       = React.useState("")
@@ -353,6 +356,7 @@ export function VisaoAcumuladaPage() {
 
   const [rawRows,  setRawRows]  = React.useState<RawRow[]>([])
   const [loading,  setLoading]  = React.useState(true)
+  const [totalCount, setTotalCount] = React.useState(0)
   const [gridCols, setGridCols] = React.useState(INITIAL_GRID_COLS)
 
   const [sortCol, setSortCol] = React.useState<string | null>(null)
@@ -375,30 +379,55 @@ export function VisaoAcumuladaPage() {
     }).catch(() => {})
   }, [])
 
-  // ── Fetch: usa mainDocId + subcoleção items/ ──────────────────────────────
-  const fetchData = React.useCallback(async () => {
-    setLoading(true)
-    try {
-      const docId    = mainDocId("consolidacao-entregas", filterYear, filterMonth)
-      const itemsRef = collection(db, "pipeline_results", docId, "items")
-      const snap     = await getDocs(itemsRef)
-      trackRead(snap.size)
+  const fetchData = React.useCallback(async (forceRefresh = false) => {
+    setLoading(true);
+    const cacheKey = getAcumuladaCacheKey(filterYear, filterMonth);
 
-      if (snap.empty) {
-        setRawRows([])
-        toast({ description: "Nenhum dado para este período. Importe os arquivos primeiro." })
-        return
+    if (!forceRefresh) {
+      const cachedData = getFromCache<{ rows: RawRow[], totalCount: number }>(cacheKey);
+      if (cachedData) {
+        setRawRows(cachedData.rows);
+        setTotalCount(cachedData.totalCount);
+        toast({ description: `${cachedData.rows.length} registros carregados do cache.` });
+        setLoading(false);
+        return;
+      }
+    }
+
+    try {
+      const docId = mainDocId("consolidacao-entregas", filterYear, filterMonth);
+      const metaSnap = await getDoc(doc(db, "pipeline_results", docId));
+      trackRead(1);
+
+      if (!metaSnap.exists()) {
+        setRawRows([]);
+        setTotalCount(0);
+        toast({ description: "Nenhum dado para este período. Importe os arquivos primeiro." });
+        setLoading(false);
+        return;
       }
 
-      setRawRows(snap.docs.map(d => d.data() as RawRow))
-      toast({ description: `${snap.size} registros carregados.` })
+      const itemCount = metaSnap.data().itemCount ?? 0;
+      setTotalCount(itemCount);
+
+      const itemsRef = collection(db, "pipeline_results", docId, "items");
+      const snap = await getDocs(itemsRef);
+      trackRead(snap.size);
+
+      const newRawRows = snap.docs.map(d => d.data() as RawRow);
+      setRawRows(newRawRows);
+
+      setInCache(cacheKey, { rows: newRawRows, totalCount: itemCount });
+
+      toast({ description: `${newRawRows.length} registros carregados.` });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message })
-      setRawRows([])
+      toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message });
+      setRawRows([]);
+      setTotalCount(0);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [filterYear, filterMonth, toast])
+  }, [filterYear, filterMonth, toast]);
 
   React.useEffect(() => { fetchData() }, [fetchData])
 
@@ -453,9 +482,6 @@ export function VisaoAcumuladaPage() {
     exportExcel(data, `Visão Acumulada - ${String(filterMonth).padStart(2, "0")}-${filterYear}.xlsx`)
   }, [acumulado, gridCols, filterMonth, filterYear])
 
-  // ── Índice da coluna PESO nas gridCols (para injetar CAP+OCUPAÇÃO depois) ─
-  const pesoColIdx = gridCols.indexOf("PESO")
-
   return (
     <div className="space-y-4">
       <Card className="shadow-sm border-border/60">
@@ -465,7 +491,14 @@ export function VisaoAcumuladaPage() {
               <CardTitle className="flex items-center gap-2 text-base">
                 <Layers className="size-4 text-primary" /> Visão Acumulada — Entregas
               </CardTitle>
-              <CardDescription className="mt-0.5">Agrupamento de Rotas</CardDescription>
+              <CardDescription className="mt-0.5">
+                Rotas de Entrega
+                {totalCount > 0 && (
+                  <span className="ml-1 font-semibold text-foreground">
+                    · {totalCount.toLocaleString("pt-BR")} registros no banco.
+                  </span>
+                )}
+              </CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8"
@@ -536,7 +569,7 @@ export function VisaoAcumuladaPage() {
                 Ocultar CHÃO
               </label>
             </div>
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={fetchData} disabled={loading}>
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fetchData(true)} disabled={loading}>
               {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
               Atualizar
             </Button>

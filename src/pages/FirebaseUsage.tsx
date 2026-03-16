@@ -73,8 +73,8 @@ function fmtDate(iso: string) {
 }
 
 // ─── Barra de quota ───────────────────────────────────────────────────────────
-function QuotaBar({ label, value, limit, icon: Icon, color, exceeded }: {
-  label: string; value: number; limit: number; icon: React.ElementType
+function QuotaBar({ label, value = 0, limit = 1, icon: Icon, color, exceeded }: {
+  label: string; value?: number; limit: number; icon: React.ElementType
   color: "blue" | "emerald" | "rose"; exceeded?: boolean
 }) {
   const pct     = exceeded ? 100 : Math.min((value / limit) * 100, 100)
@@ -214,7 +214,8 @@ export default function AdminDashboard() {
   const totalRows = docs.reduce((acc, d) => acc + (d.data?.length ?? 0), 0)
 
   // Hoje
-  const todayUsage = usage[usage.length - 1] ?? { reads: 0, writes: 0, deletes: 0, lastSeen: 0 }
+  const todayUsage = usage.find(u => u.date === new Date().toISOString().slice(0, 10)) 
+                     ?? { totalReads: 0, totalWrites: 0, totalDeletes: 0, users: {} };
 
   const barData = stats.slice(0, 8).map(s => ({
     name: s.label.replace("Consolidação ", "Consol. "),
@@ -237,7 +238,10 @@ export default function AdminDashboard() {
   }, [docs])
 
   const usageChartData = usage.map(u => ({
-    name: fmtDate(u.date), Leituras: u.reads, Escritas: u.writes, Exclusões: u.deletes,
+    name: fmtDate(u.date), 
+    Leituras: u.totalReads ?? 0, 
+    Escritas: u.totalWrites ?? 0, 
+    Exclusões: u.totalDeletes ?? 0,
   }))
 
   const anyQuotaExceeded = quotaExceeded || usageQuotaExceeded
@@ -392,9 +396,9 @@ export default function AdminDashboard() {
             </div>
           ) : (
             <>
-              <QuotaBar label="Leituras"  value={todayUsage.reads}   limit={SPARK_LIMITS.reads}   icon={BookOpen} color="blue"    exceeded={usageQuotaExceeded} />
-              <QuotaBar label="Escritas"  value={todayUsage.writes}  limit={SPARK_LIMITS.writes}  icon={Pencil}   color="emerald" exceeded={usageQuotaExceeded} />
-              <QuotaBar label="Exclusões" value={todayUsage.deletes} limit={SPARK_LIMITS.deletes} icon={Trash2}   color="rose"    exceeded={usageQuotaExceeded} />
+              <QuotaBar label="Leituras"  value={todayUsage.totalReads}   limit={SPARK_LIMITS.reads}   icon={BookOpen} color="blue"    exceeded={usageQuotaExceeded} />
+              <QuotaBar label="Escritas"  value={todayUsage.totalWrites}  limit={SPARK_LIMITS.writes}  icon={Pencil}   color="emerald" exceeded={usageQuotaExceeded} />
+              <QuotaBar label="Exclusões" value={todayUsage.totalDeletes} limit={SPARK_LIMITS.deletes} icon={Trash2}   color="rose"    exceeded={usageQuotaExceeded} />
             </>
           )}
         </div>
@@ -413,7 +417,7 @@ export default function AdminDashboard() {
                 <BarChart data={usageChartData} barSize={14} barGap={2} margin={{ left: -10, right: 8, top: 4 }}>
                   <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                  <Tooltip contentStyle={tooltipStyle} formatter={(v: any, n: string) => [v.toLocaleString("pt-BR"), n]} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(v: any, n: string) => [(v || 0).toLocaleString("pt-BR"), n]} />
                   <Bar dataKey="Leituras"  fill="#3b82f6" fillOpacity={0.8} radius={[3,3,0,0]} />
                   <Bar dataKey="Escritas"  fill="#22c55e" fillOpacity={0.8} radius={[3,3,0,0]} />
                   <Bar dataKey="Exclusões" fill="#f43f5e" fillOpacity={0.8} radius={[3,3,0,0]} />

@@ -32,6 +32,8 @@ import {
 import { initializeApp, getApps, getApp } from "firebase/app"
 import { trackRead, trackWrite, trackDelete } from "@/lib/firebaseUsageTracker"
 import { mainDocId, loadItemsFromFirebase } from "@/app/actions/actions-utils"
+import { getAnaliticaCacheKey, getFromCache, setInCache, clearCacheEntry } from "@/lib/data-cache"
+
 
 // ─── Firebase ────────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -216,21 +218,35 @@ function GerenciarImportacoesDialog({
   }, [porFilialDia])
 
   const porFilialDiaFiltrado = React.useMemo(() => {
-    if (filterDay === 0) return porFilialDia
-    const pad = String(filterDay).padStart(2, "0")
-    const result: Record<string, Record<string, number>> = {}
-    for (const [f, dm] of Object.entries(porFilialDia)) {
-      const filt: Record<string, number> = {}
-      for (const [dt, cnt] of Object.entries(dm)) if (dt.startsWith(pad + "/")) filt[dt] = cnt
-      if (Object.keys(filt).length) result[f] = filt
+    const source = filterDay === 0 ? porFilialDia : (() => {
+      const pad = String(filterDay).padStart(2, "0")
+      const result: Record<string, Record<string, number>> = {}
+      for (const [f, dm] of Object.entries(porFilialDia)) {
+        const filt: Record<string, number> = {}
+        for (const [dt, cnt] of Object.entries(dm)) if (dt.startsWith(pad + "/")) filt[dt] = cnt
+        if (Object.keys(filt).length) result[f] = filt
+      }
+      return result
+    })()
+  
+    // ✅ Ordena as datas em cada filial em ordem crescente (DD/MM/YYYY)
+    const sorted: Record<string, Record<string, number>> = {}
+    for (const [filial, diaMap] of Object.entries(source)) {
+      sorted[filial] = Object.fromEntries(
+        Object.entries(diaMap).sort(([a], [b]) => {
+          const [da, ma, ya] = a.split("/").map(Number)
+          const [db, mb, yb] = b.split("/").map(Number)
+          return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime()
+        })
+      )
     }
-    return result
+    return sorted
   }, [porFilialDia, filterDay])
 
   return (
     <>
       <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col gap-0 p-0">
+        <DialogContent className="max-w-2xl h-[85vh] flex flex-col gap-0 p-0">
           <DialogHeader className="px-5 pt-5 pb-3">
             <DialogTitle className="flex items-center gap-2 text-base">
               <FileStack className="size-4 text-primary" /> Gerenciar Importações — Firebase
@@ -284,7 +300,7 @@ function GerenciarImportacoesDialog({
           </div>
           <Separator />
 
-          <ScrollArea className="flex-1 px-5 py-3">
+          <ScrollArea className="flex-1 min-h-0 px-5 py-3">
             {loading ? (
               <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" /><span className="text-sm">Carregando...</span>
@@ -421,32 +437,51 @@ export function VisaoAnaliticaPage() {
   const [showGerenciarColunas, setShowGerenciarColunas] = React.useState(false)
 
   // ── Fetch: 1 leitura metadata + N leituras items ──────────────────────────
-  const fetchData = React.useCallback(async () => {
-    setLoading(true)
-    setSelected(new Set())
+  const fetchData = React.useCallback(async (forceRefresh = false) => {
+    setLoading(true);
+    setSelected(new Set());
+    const cacheKey = getAnaliticaCacheKey(filterYear, filterMonth);
+
+    if (!forceRefresh) {
+      const cachedData = getFromCache<{ rows: Row[]; totalCount: number }>(cacheKey);
+      if (cachedData) {
+        setRows(cachedData.rows);
+        setTotalCount(cachedData.totalCount);
+        toast({ description: `${cachedData.rows.length} registros carregados do cache.` });
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
-      const docId    = mainDocId("consolidacao-entregas", filterYear, filterMonth)
-      const metaSnap = await getDoc(doc(db, "pipeline_results", docId))
-      trackRead(1)
+      const docId = mainDocId("consolidacao-entregas", filterYear, filterMonth);
+      const metaSnap = await getDoc(doc(db, "pipeline_results", docId));
+      trackRead(1);
 
       if (!metaSnap.exists()) {
-        setRows([]); setTotalCount(0)
-        toast({ description: "Nenhum dado importado para este período." })
-        return
+        setRows([]);
+        setTotalCount(0);
+        toast({ description: "Nenhum dado importado para este período." });
+        return;
       }
 
-      setTotalCount(metaSnap.data().itemCount ?? 0)
+      const itemCount = metaSnap.data().itemCount ?? 0;
+      setTotalCount(itemCount);
 
-      const items = await loadItemsFromFirebase("consolidacao-entregas", filterYear, filterMonth)
-      setRows(items.map((r, idx) => ({ ...r, __rowIdx: idx })) as Row[])
-      toast({ description: `${items.length} registros carregados.` })
+      const items = await loadItemsFromFirebase("consolidacao-entregas", filterYear, filterMonth);
+      const newRows = items.map((r, idx) => ({ ...r, __rowIdx: idx })) as Row[];
+      setRows(newRows);
+      
+      setInCache(cacheKey, { rows: newRows, totalCount: itemCount });
+
+      toast({ description: `${items.length} registros carregados.` });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message })
-      setRows([])
+      toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message });
+      setRows([]);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [filterYear, filterMonth, toast])
+  }, [filterYear, filterMonth, toast]);
 
   React.useEffect(() => { fetchData() }, [fetchData])
 
@@ -656,7 +691,7 @@ export function VisaoAnaliticaPage() {
                 Ocultar CHÃO
               </label>
             </div>
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={fetchData} disabled={loading}>
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fetchData(true)} disabled={loading}>
               {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
               Atualizar
             </Button>
@@ -838,7 +873,7 @@ export function VisaoAnaliticaPage() {
 
       <GerenciarImportacoesDialog
         open={showGerenciar} onClose={() => setShowGerenciar(false)}
-        filterYear={filterYear} filterMonth={filterMonth} onDeleted={fetchData}
+        filterYear={filterYear} filterMonth={filterMonth} onDeleted={() => fetchData(true)}
       />
       <GerenciarColunasDialog
         open={showGerenciarColunas} onClose={() => setShowGerenciarColunas(false)}

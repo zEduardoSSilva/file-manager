@@ -12,6 +12,8 @@ import {
   limit,
   Timestamp 
 } from "firebase/firestore";
+import { getFirebaseConnectionStatus } from './firebase-connection';
+
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -55,7 +57,7 @@ export interface AbsenteismoData {
   'Grupo': string;
   'Total_Dias': number;
   'Faltas': number;
-  'Percentual (%)'?: number;
+  'Percentual (% )'?: number;
   'Valor_Incentivo': number;
 }
 
@@ -73,6 +75,10 @@ export interface PipelineResult {
 
 export const firebaseStore = {
   saveResult: async (type: string, result: Omit<PipelineResult, 'id'>) => {
+    if (!getFirebaseConnectionStatus()) {
+      console.log("Firebase connection is disabled. Save operation cancelled.");
+      return;
+    }
     try {
       const docRef = await addDoc(collection(db, "pipeline_results"), {
         ...result,
@@ -86,6 +92,10 @@ export const firebaseStore = {
   },
 
   getRecentActivity: async (maxItems: number = 5): Promise<PipelineResult[]> => {
+    if (!getFirebaseConnectionStatus()) {
+      console.log("Firebase connection is disabled. Fetch operation cancelled.");
+      return [];
+    }
     try {
       const q = query(
         collection(db, "pipeline_results"),

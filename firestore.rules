@@ -26,6 +26,11 @@ service cloud.firestore {
       allow read: if true;
       allow write: if false;
     }
+
+    // Permite que usuários autenticados leiam e escrevam os dados de uso
+    match /_meta/{usageDoc} {
+      allow read, write: if request.auth != null;
+    }
     
     match /{document=**} {
       allow read, write: if false;

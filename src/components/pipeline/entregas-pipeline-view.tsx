@@ -1,293 +1,686 @@
-'use client'
-
-import * as React from 'react'
-import { executeConsolidacaoEntregasPipeline } from '@/app/actions/import-entregas-action'
+import * as React from "react"
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardFooter,
-} from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { useToast } from '@/hooks/use-toast'
+  Play, Trash2, Loader2, FileSpreadsheet, HelpCircle,
+  CheckCircle2, Circle, XCircle, AlertTriangle,
+  ChevronRight, Terminal, Info, Database, Building2, Calendar,
+  Clock, ShieldAlert,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Progress } from "@/components/ui/progress"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Badge } from "@/components/ui/badge"
 import {
-  Loader2,
-  Upload,
-  Info,
-  Terminal,
-  FileSpreadsheet,
-  FileCheck2,
-  FileX2,
-} from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { PipelineResponse } from '@/app/actions/actions-utils'
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  DialogFooter, DialogClose,
+} from "@/components/ui/dialog"
+import { AIParamAssistant } from "../../pages/AI-Param-Assistant"
+import { executeConsolidacaoEntregasPipeline, montarNomeAba } from "@/app/actions/import-entregas-action"
+import { useToast } from "@/hooks/use-toast"
+import { cn } from "@/lib/utils"
 
-type LogEntry = {
-  time: string
-  message: string
-  type: 'info' | 'success' | 'error' | 'warn' | 'step'
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+type StageStatus = "idle" | "running" | "done" | "error" | "warn"
+interface Stage { id: string; label: string; description: string; status: StageStatus }
+interface LogEntry { time: string; message: string; type: "info" | "success" | "error" | "warn" | "step" }
+interface DuplicadaInfo { viagens: string; data: string; motorista: string; filial: string }
+
+// ─── Filiais ──────────────────────────────────────────────────────────────────
+const FILIAIS = [
+  { id: "cambe",        label: "CAMBE.xlsx",       regiao: "RK01" },
+  { id: "cascavel",     label: "CASCAVEL.xlsx",     regiao: "KP01" },
+  { id: "curitiba",     label: "CURITIBA.xlsx",     regiao: "RK03" },
+  { id: "campo-grande", label: "CAMPO GRANDE.xlsx", regiao: "BV01" },
+  { id: "dourados",     label: "DOURADOS.xlsx",     regiao: "BV02" },
+]
+
+// ─── Etapas ───────────────────────────────────────────────────────────────────
+const STAGES_DIA: Stage[] = [
+  { id: "load",  label: "Carregar arquivos",    description: "Lê os arquivos de cada filial selecionada",          status: "idle" },
+  { id: "sheet", label: "Localizar aba",        description: "Busca a aba DD.MM.YYYY em cada arquivo",             status: "idle" },
+  { id: "dedup", label: "Verificar duplicatas", description: "1 leitura de metadata — sem ler subcoleção",         status: "idle" },
+  { id: "parse", label: "Processar registros",  description: "Extrai tabelas · PLACA fallback · TEMPO HH:MM",      status: "idle" },
+  { id: "accum", label: "Gerar Acumulado",      description: "Consolida filiais · remove CHÃO",                    status: "idle" },
+  { id: "save",  label: "Salvar Firebase",      description: "Escreve apenas os novos itens na subcoleção items/", status: "idle" },
+]
+
+const STAGES_MES: Stage[] = [
+  { id: "load",  label: "Carregar arquivo",     description: "Lê um arquivo por vez",                              status: "idle" },
+  { id: "scan",  label: "Varrer abas do mês",   description: "Filtra abas DD.MM.YYYY do mês/ano selecionado",      status: "idle" },
+  { id: "dedup", label: "Verificar duplicatas", description: "1 leitura de metadata — sem ler subcoleção",         status: "idle" },
+  { id: "parse", label: "Processar registros",  description: "Extrai tabelas de cada aba encontrada",              status: "idle" },
+  { id: "accum", label: "Gerar Acumulado",      description: "Consolida todos os dias · remove CHÃO",              status: "idle" },
+  { id: "save",  label: "Salvar Firebase",      description: "Escreve apenas os novos itens na subcoleção items/", status: "idle" },
+]
+
+const REGRAS = [
+  { condition: "Registros CHÃO",     result: "Removidos apenas no Acumulado",          variant: "warn"    as const },
+  { condition: "PLACA vazia",        result: "Substituída por PLACA SISTEMA",           variant: "info"    as const },
+  { condition: "TEMPO",              result: "Convertido para HH:MM",                  variant: "info"    as const },
+  { condition: "Viagens duplicadas", result: "Ignoradas, já existem no Firebase",       variant: "warn"    as const },
+  { condition: "Doc no banco",       result: "1 por mês — nunca recria, só acrescenta", variant: "success" as const },
+]
+
+// ─── Sub-componentes ──────────────────────────────────────────────────────────
+function StageIcon({ status }: { status: StageStatus }) {
+  if (status === "running") return <Loader2 className="size-4 animate-spin text-primary shrink-0" />
+  if (status === "done")    return <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+  if (status === "error")   return <XCircle className="size-4 text-destructive shrink-0" />
+  if (status === "warn")    return <AlertTriangle className="size-4 text-amber-500 shrink-0" />
+  return <Circle className="size-4 text-muted-foreground/30 shrink-0" />
 }
 
-const logColor: Record<LogEntry['type'], string> = {
-  info: 'text-slate-400',
-  success: 'text-emerald-500',
-  error: 'text-red-400 font-semibold',
-  warn: 'text-amber-400',
-  step: 'text-primary font-semibold',
+const stageBg: Record<StageStatus, string> = {
+  idle:    "bg-muted/20 border-border/40",
+  running: "bg-primary/5 border-primary/30",
+  done:    "bg-emerald-50 border-emerald-200",
+  error:   "bg-red-50 border-red-200",
+  warn:    "bg-amber-50 border-amber-200",
+}
+const stageLbl: Record<StageStatus, string> = {
+  idle:    "text-muted-foreground",
+  running: "text-primary font-semibold",
+  done:    "text-emerald-700 font-medium",
+  error:   "text-red-700 font-semibold",
+  warn:    "text-amber-700 font-medium",
+}
+const ruleColor = {
+  success: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  danger:  "border-red-200 bg-red-50 text-red-700",
+  warn:    "border-amber-200 bg-amber-50 text-amber-700",
+  info:    "border-blue-200 bg-blue-50 text-blue-700",
+}
+const logColor: Record<LogEntry["type"], string> = {
+  info:    "text-slate-400",
+  success: "text-emerald-400",
+  error:   "text-red-400 font-semibold",
+  warn:    "text-amber-400",
+  step:    "text-primary font-semibold",
+}
+const logPrefix: Record<LogEntry["type"], string> = {
+  info: "   ", success: "✅ ", error: "❌ ", warn: "⚠️  ", step: "▶  ",
 }
 
-const logPrefix: Record<LogEntry['type'], string> = {
-  info: '   ',
-  success: '✅ ',
-  error: '❌ ',
-  warn: '⚠️  ',
-  step: '▶  ',
+function fmtSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function ConsolidacaoEntregasPipelineView() {
-  const { toast } = useToast()
-  const [isProcessing, setProcessing] = React.useState(false)
-  const [files, setFiles] = React.useState<File[] | null>(null)
-  const [year, setYear] = React.useState(new Date().getFullYear())
-  const [month, setMonth] = React.useState(new Date().getMonth() + 1)
-  const [logs, setLogs] = React.useState<LogEntry[]>([])
-  const logEndRef = React.useRef<HTMLDivElement>(null)
-  const [result, setResult] = React.useState<PipelineResponse['result'] | null>(
-    null,
+// ─── Dialog de duplicadas ─────────────────────────────────────────────────────
+function DuplicadasDialog({ open, onClose, duplicadas }: {
+  open: boolean; onClose: () => void; duplicadas: DuplicadaInfo[]
+}) {
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent className="max-w-xl max-h-[80vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <ShieldAlert className="size-4 text-amber-500" />
+            Viagens não importadas — já existem no banco
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Já constam no Firebase e <strong>não foram cadastradas novamente</strong>.
+            Para substituir, apague os registros na Visão Analítica antes de reimportar.
+          </DialogDescription>
+        </DialogHeader>
+        <Badge variant="outline" className="text-[11px] border-amber-300 text-amber-700 bg-amber-50 w-fit">
+          {duplicadas.length} viagem{duplicadas.length !== 1 ? "ns" : ""} ignorada{duplicadas.length !== 1 ? "s" : ""}
+        </Badge>
+        <ScrollArea className="flex-1 rounded-lg border border-border/60 overflow-hidden">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="bg-muted/30 border-b sticky top-0">
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Viagens</th>
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Data</th>
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Motorista</th>
+                <th className="px-3 py-2 text-left font-semibold text-muted-foreground">Filial</th>
+              </tr>
+            </thead>
+            <tbody>
+              {duplicadas.map((d, i) => (
+                <tr key={i} className={cn("border-b", i % 2 === 0 ? "bg-background" : "bg-muted/5")}>
+                  <td className="px-3 py-2 font-mono text-amber-700">{d.viagens}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{d.data}</td>
+                  <td className="px-3 py-2 max-w-[180px] truncate">{d.motorista}</td>
+                  <td className="px-3 py-2">{d.filial}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ScrollArea>
+        <DialogFooter className="pt-2">
+          <DialogClose asChild>
+            <Button size="sm" className="gap-1.5">
+              <CheckCircle2 className="size-3.5" /> Entendido
+            </Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
+export function ConsolidacaoEntregasPipelineView() {
+  const today = new Date()
+
+  // Dia padrão = hoje; 0 = mês completo
+  const [year,  setYear]  = React.useState(today.getFullYear())
+  const [month, setMonth] = React.useState(today.getMonth() + 1)
+  const [day,   setDay]   = React.useState<number>(today.getDate())
+
+  const [files,       setFiles]       = React.useState<Record<string, File | null>>({})
+  const [isExecuting, setIsExecuting] = React.useState(false)
+  const [progress,    setProgress]    = React.useState(0)
+  const [stages,      setStages]      = React.useState<Stage[]>(STAGES_DIA)
+  const [logs,        setLogs]        = React.useState<LogEntry[]>([])
+  const [stats,       setStats]       = React.useState<{
+    filiaisOk: number; novos: number; total: number; duplicadas: number
+  } | null>(null)
+
+  const [duplicadas,     setDuplicadas]     = React.useState<DuplicadaInfo[]>([])
+  const [showDuplicadas, setShowDuplicadas] = React.useState(false)
+
+  const logEndRef = React.useRef<HTMLDivElement>(null)
+  const { toast } = useToast()
+
+  // Dia 0 = mês completo, dia > 0 = dia específico
+  const modoMesCompleto = day === 0
 
   React.useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    setStages((modoMesCompleto ? STAGES_MES : STAGES_DIA).map(s => ({ ...s, status: "idle" })))
+  }, [modoMesCompleto])
+
+  React.useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [logs])
 
-  const addLog = (message: string, type: LogEntry['type'] = 'info') => {
-    const time = new Date().toLocaleTimeString('pt-BR')
-    setLogs((prev) => [...prev, { time, message, type }])
+  const addLog  = (message: string, type: LogEntry["type"] = "info") =>
+    setLogs(prev => [...prev, { time: new Date().toLocaleTimeString("pt-BR"), message, type }])
+
+  const setStage = (id: string, status: StageStatus) =>
+    setStages(prev => prev.map(s => s.id === id ? { ...s, status } : s))
+
+  const resetAll = () => {
+    setStages((modoMesCompleto ? STAGES_MES : STAGES_DIA).map(s => ({ ...s, status: "idle" })))
+    setProgress(0); setStats(null)
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files))
-      addLog(`${e.target.files.length} arquivo(s) selecionado(s).`)
-    }
-  }
+  const canRun     = FILIAIS.some(f => files[f.id])
+  const abaPreview = day > 0 ? montarNomeAba(day, month, year) : null
 
-  const handleExecute = async () => {
-    if (!files || files.length === 0) {
-      toast({
-        variant: 'destructive',
-        title: 'Nenhum arquivo selecionado',
-        description: 'Por favor, selecione os arquivos para processar.',
-      })
-      return
-    }
+  const handleFileChange = (id: string, file: File | null) =>
+    setFiles(prev => ({ ...prev, [id]: file }))
 
-    setProcessing(true)
-    setLogs([])
-    setResult(null)
-    addLog(
-      `Iniciando pipeline 'consolidacao-entregas' para ${String(
-        month,
-      ).padStart(2, '0')}/${year}`,
-      'step',
-    )
-
-    const formData = new FormData()
-    formData.append('year', String(year))
-    formData.append('month', String(month))
-    files.forEach((file) => {
-      formData.append('files', file)
-      formData.append('fileNames', file.name)
-    })
+  const runPipeline = async () => {
+    if (!canRun) return
+    setIsExecuting(true); setLogs([]); resetAll()
+    setDuplicadas([]); setShowDuplicadas(false)
 
     try {
-      const response = await executeConsolidacaoEntregasPipeline(formData)
-      if (response.success) {
-        addLog('Pipeline executado com sucesso!', 'success')
-        addLog(response.result.summary, 'info')
-        toast({
-          title: 'Pipeline Concluído',
-          description: response.result.summary,
-        })
-        setResult(response.result)
+      const selecionados = FILIAIS.filter(f => files[f.id])
+      const modoLabel    = day > 0
+        ? `aba ${montarNomeAba(day, month, year)}`
+        : `mês ${String(month).padStart(2, "0")}/${year} completo`
 
-        if (response.result.duplicadas && response.result.duplicadas.length > 0) {
-            addLog(`${response.result.duplicadas.length} viagens duplicadas foram ignoradas.`, 'warn')
-        }
+      addLog(`Consolidação de Entregas — ${modoLabel}`, "step")
+      addLog(`${selecionados.length} filial(is): ${selecionados.map(f => f.regiao).join(" · ")}`)
+      if (modoMesCompleto) addLog("Modo mês completo — pode ser demorado para arquivos grandes.", "warn")
 
-      } else {
-        addLog(response.error ?? 'Ocorreu um erro desconhecido.', 'error')
-        toast({
-          variant: 'destructive',
-          title: 'Erro no Pipeline',
-          description: response.error,
-        })
-      }
-    } catch (e: any) {
-      addLog(`Erro inesperado: ${e.message}`, 'error')
-      toast({
-        variant: 'destructive',
-        title: 'Erro Inesperado',
-        description: e.message,
+      // Etapa load
+      setStage("load", "running"); setProgress(8)
+      await new Promise(r => setTimeout(r, 100))
+      selecionados.forEach(f => {
+        const sz = files[f.id]?.size ?? 0
+        addLog(`• [${f.regiao}] ${f.label} — ${fmtSize(sz)}${sz > 5 * 1024 * 1024 ? " ⚠️ arquivo grande" : ""}`)
       })
+      setStage("load", "done"); setProgress(15)
+
+      // FormData
+      const formData = new FormData()
+      formData.append("year",  String(year))
+      formData.append("month", String(month))
+      formData.append("day",   String(day))
+      if (day > 0) formData.append("sheetName", montarNomeAba(day, month, year))
+      for (const filial of FILIAIS) {
+        if (files[filial.id]) {
+          formData.append("files",     files[filial.id]!)
+          formData.append("fileNames", files[filial.id]!.name)
+        }
+      }
+
+      // Etapa sheet/scan
+      const stage2id = modoMesCompleto ? "scan" : "sheet"
+      addLog(day > 0
+        ? `Localizando aba "${abaPreview}" em cada arquivo...`
+        : "Varrendo todas as abas DD.MM.YYYY do mês...", "step")
+      setStage(stage2id, "running"); setProgress(25)
+
+      // Etapa dedup
+      setStage("dedup", "running"); setProgress(35)
+      addLog("Verificando duplicatas (1 leitura de metadata)...", "info")
+
+      const response = await executeConsolidacaoEntregasPipeline(formData)
+
+      if (!response.success) {
+        const msg = response.error ?? "Erro desconhecido"
+        addLog(`FALHA: ${msg}`, "error")
+        if (msg.includes("não foi encontrada")) {
+          addLog(`Dica: verifique se o arquivo contém a aba "${abaPreview}".`, "warn")
+          addLog(`Formato esperado: DD.MM.YYYY — ex: ${abaPreview}`, "warn")
+        }
+        setStages(prev => prev.map(s => s.status === "running" ? { ...s, status: "error" } : s))
+        setProgress(0)
+        toast({ variant: "destructive", title: "Erro no pipeline", description: msg })
+        return
+      }
+
+      setStage(stage2id, "done")
+      setStage("dedup", "done"); setProgress(55)
+      addLog("Abas localizadas e duplicatas verificadas.", "success")
+
+      setStage("parse", "running"); setProgress(68)
+      await new Promise(r => setTimeout(r, 100))
+      setStage("parse", "done"); setProgress(80)
+      addLog("Registros extraídos e padronizados.", "success")
+
+      addLog("Gerando Acumulado — removendo CHÃO...", "step")
+      setStage("accum", "running"); setProgress(90)
+      await new Promise(r => setTimeout(r, 80))
+      setStage("accum", "done")
+
+      setStage("save", "running"); setProgress(97)
+      const result = response.result
+
+      // Duplicadas
+      const dups: DuplicadaInfo[] = (result as any).duplicadas ?? []
+      if (dups.length > 0) {
+        setDuplicadas(dups)
+        addLog(`${dups.length} viagem(ns) ignorada(s) — já existem no banco.`, "warn")
+        setTimeout(() => setShowDuplicadas(true), 600)
+      }
+
+      // Stats — extrai do summary
+      const m = (result.summary ?? "").match(/(\d+) filiais? · (\d+) novos · (\d+) total/)
+      if (m) {
+        setStats({ filiaisOk: parseInt(m[1]), novos: parseInt(m[2]), total: parseInt(m[3]), duplicadas: dups.length })
+      }
+
+      addLog("Dados sincronizados com Firebase.", "success")
+      setStage("save", "done"); setProgress(100)
+      addLog(result.summary ?? "Pipeline concluído.", "success")
+
+      toast({
+        title: "Pipeline concluído",
+        description: dups.length > 0 ? `${result.summary} — verifique as duplicatas.` : result.summary,
+      })
+
+    } catch (err: any) {
+      addLog(`FALHA: ${err.message}`, "error")
+      setStages(prev => prev.map(s => s.status === "running" ? { ...s, status: "error" } : s))
+      setProgress(0)
+      toast({ variant: "destructive", title: "Erro no pipeline", description: err.message })
     } finally {
-      setProcessing(false)
+      setIsExecuting(false)
     }
   }
+
+  const doneCount = stages.filter(s => s.status === "done" || s.status === "warn").length
+  const hasError  = stages.some(s => s.status === "error")
 
   return (
     <div className="space-y-6">
+
+      {/* Alert */}
       <Alert className="bg-primary/5 border-primary/20">
         <div className="flex items-center gap-2">
-          <Info className="size-4 text-primary" />
+          <Building2 className="size-4 text-primary" />
           <AlertTitle className="mb-0">Consolidação de Entregas</AlertTitle>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-4 text-muted-foreground cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <p>Lê a aba correspondente à data nos arquivos de cada filial. As abas seguem o padrão <strong>DD.MM.YYYY</strong>.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
-        <AlertDescription className="text-sm mt-2">
-          Importe múltiplos arquivos de entrega (Excel/CSV) para um mês e ano específicos. O sistema irá consolidar os dados, remover duplicatas e salvar o resultado.
+        <AlertDescription className="text-xs mt-2">
+          Com <strong>dia preenchido</strong> → lê apenas a aba daquele dia (rápido, ideal para uso diário).
+          Com <strong>dia 0 ou em branco</strong> → lê todas as abas do mês (mais lento).
+          Viagens já existentes são <strong>ignoradas automaticamente</strong>.
         </AlertDescription>
       </Alert>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* -- Coluna Principal -- */}
+
+        {/* ── Coluna principal ── */}
         <div className="lg:col-span-2 space-y-6">
           <Card className="shadow-sm border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Upload className="size-5 text-primary" />
-                Executar Pipeline de Consolidação
+                <Building2 className="size-5 text-primary" />
+                Configuração da Consolidação
               </CardTitle>
-              <CardDescription>
-                Selecione os arquivos e o período para iniciar o processamento.
-              </CardDescription>
+              <CardDescription>Selecione o período e os arquivos de cada filial.</CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-3">
-                    <Label htmlFor="files">Arquivos de Entregas</Label>
-                    <Input
-                        id="files"
-                        type="file"
-                        multiple
-                        onChange={handleFileChange}
-                        className="mt-1"
-                        accept=".xlsx,.xls,.csv"
-                    />
+            <CardContent className="space-y-5">
+              {/* Período */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    Ano
+                    <TooltipProvider><Tooltip>
+                      <TooltipTrigger asChild><HelpCircle className="size-3 text-muted-foreground cursor-help" /></TooltipTrigger>
+                      <TooltipContent><p>Ano de referência. Ex: <strong>2026</strong>.</p></TooltipContent>
+                    </Tooltip></TooltipProvider>
+                  </Label>
+                  <Input type="number" value={year} onChange={e => setYear(parseInt(e.target.value))} />
                 </div>
-                <div>
-                    <Label htmlFor="month">Mês</Label>
-                    <Input
-                        id="month"
-                        type="number"
-                        value={month}
-                        onChange={(e) => setMonth(Number(e.target.value))}
-                        placeholder="Mês (1-12)"
-                        className="mt-1"
-                    />
+
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    Mês
+                    <TooltipProvider><Tooltip>
+                      <TooltipTrigger asChild><HelpCircle className="size-3 text-muted-foreground cursor-help" /></TooltipTrigger>
+                      <TooltipContent><p>Mês (1–12). Ex: <strong>3</strong> para março.</p></TooltipContent>
+                    </Tooltip></TooltipProvider>
+                  </Label>
+                  <Input type="number" min={1} max={12} value={month} onChange={e => setMonth(parseInt(e.target.value))} />
                 </div>
-                <div>
-                    <Label htmlFor="year">Ano</Label>
-                    <Input
-                        id="year"
-                        type="number"
-                        value={year}
-                        onChange={(e) => setYear(Number(e.target.value))}
-                        placeholder="Ano (YYYY)"
-                        className="mt-1"
-                    />
+
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-1.5">
+                    Dia
+                    <TooltipProvider><Tooltip>
+                      <TooltipTrigger asChild><HelpCircle className="size-3 text-muted-foreground cursor-help" /></TooltipTrigger>
+                      <TooltipContent><p>Dia específico → aba <span className="font-mono">DD.MM.YYYY</span> (rápido).<br/>Deixe <strong>0</strong> para processar o mês todo (lento).</p></TooltipContent>
+                    </Tooltip></TooltipProvider>
+                  </Label>
+                  <Input
+                    type="number" min={0} max={31}
+                    value={day === 0 ? "" : day}
+                    placeholder="0 = mês todo"
+                    onChange={e => {
+                      const v = parseInt(e.target.value)
+                      setDay(isNaN(v) || v < 0 ? 0 : Math.min(v, 31))
+                    }}
+                  />
                 </div>
               </div>
+
+              {/* Preview do modo */}
+              {modoMesCompleto ? (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                  <Clock className="size-3.5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-amber-700">
+                    <span className="font-semibold">Modo mês completo</span> — todas as abas{" "}
+                    <span className="font-mono">DD.{String(month).padStart(2,"0")}.{year}</span>{" "}
+                    serão processadas. Pode ser demorado para arquivos grandes.
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+                  <Calendar className="size-3.5 text-primary shrink-0" />
+                  <span className="text-[11px] text-primary">
+                    Aba alvo: <span className="font-mono font-bold">{abaPreview}</span>
+                    <span className="text-muted-foreground ml-2">— apenas esta aba será lida (rápido)</span>
+                  </span>
+                </div>
+              )}
+
+              <AIParamAssistant
+                onParamsUpdate={(m, y) => { setMonth(m); setYear(y) }}
+                currentMonth={month} currentYear={year}
+              />
+
+              {/* Filiais — um seletor por filial */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-primary">
+                  Arquivos de Controle ({FILIAIS.filter(f => files[f.id]).length}/{FILIAIS.length} selecionados)
+                </Label>
+                <div className="space-y-1.5 rounded-xl border border-border/60 p-2 bg-muted/5">
+                  {FILIAIS.map(filial => {
+                    const hasFile = !!files[filial.id]
+                    const sz      = files[filial.id]?.size ?? 0
+                    const isBig   = hasFile && sz > 5 * 1024 * 1024
+                    return (
+                      <div key={filial.id} className={cn(
+                        "flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors",
+                        hasFile ? "bg-emerald-50 border-emerald-200" : "bg-background border-border/40 hover:bg-muted/10"
+                      )}>
+                        <FileSpreadsheet className={cn("size-4 shrink-0", hasFile ? "text-emerald-600" : "text-primary/50")} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={cn(
+                              "text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0",
+                              hasFile ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"
+                            )}>
+                              {filial.regiao}
+                            </span>
+                            <span className="text-xs font-semibold truncate">
+                              CONTROLE DE DISTRIBUIÇÃO — {filial.label}
+                            </span>
+                            {isBig && (
+                              <Badge className="text-[9px] h-4 px-1.5 bg-amber-100 text-amber-700 border-amber-200">
+                                {fmtSize(sz)} — arquivo grande
+                              </Badge>
+                            )}
+                          </div>
+                          {hasFile
+                            ? <span className="text-[11px] text-emerald-600 font-medium truncate block mt-0.5">
+                                {files[filial.id]?.name}
+                                {!isBig && <span className="text-muted-foreground ml-1">({fmtSize(sz)})</span>}
+                              </span>
+                            : <span className="text-[11px] text-muted-foreground italic mt-0.5 block">
+                                Nenhum arquivo selecionado
+                              </span>}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {hasFile && (
+                            <Button variant="ghost" size="icon" className="size-6"
+                              onClick={() => handleFileChange(filial.id, null)}>
+                              <Trash2 className="size-3 text-destructive/70" />
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" className="h-6 text-[10px] px-2"
+                            onClick={() => document.getElementById(`file-ent-${filial.id}`)?.click()}>
+                            {hasFile ? "Trocar" : "Selecionar"}
+                          </Button>
+                        </div>
+                        <input
+                          id={`file-ent-${filial.id}`} type="file" className="hidden" accept=".xlsx,.xls"
+                          onChange={e => handleFileChange(filial.id, e.target.files?.[0] || null)}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Progresso */}
+              {(isExecuting || progress > 0) && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-primary">
+                      {hasError ? "Erro na execução" : progress === 100 ? "Concluído" : "Processando..."}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-muted-foreground">{progress}%</span>
+                  </div>
+                  <Progress value={progress} className={cn("h-2", hasError && "[&>div]:bg-destructive")} />
+                  <div className="flex justify-between text-[9px] text-muted-foreground">
+                    <span>{doneCount}/{stages.length} etapas</span>
+                    <span>
+                      {isExecuting
+                        ? (stages.find(s => s.status === "running")?.label ?? "...")
+                        : progress === 100 ? "Pipeline finalizado" : ""}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Banner duplicadas */}
+              {!isExecuting && duplicadas.length > 0 && (
+                <button
+                  onClick={() => setShowDuplicadas(true)}
+                  className="w-full flex items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left hover:bg-amber-100 transition-colors"
+                >
+                  <ShieldAlert className="size-4 text-amber-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold text-amber-800">
+                      {duplicadas.length} viagem{duplicadas.length !== 1 ? "ns" : ""} não importada{duplicadas.length !== 1 ? "s" : ""}
+                    </p>
+                    <p className="text-[10px] text-amber-600">Já existem no banco. Clique para ver os detalhes.</p>
+                  </div>
+                  <ChevronRight className="size-3.5 text-amber-500 shrink-0" />
+                </button>
+              )}
             </CardContent>
 
             <CardFooter className="bg-muted/5 border-t pt-4 pb-4">
               <Button
-                onClick={handleExecute}
-                disabled={isProcessing || !files}
-                className="w-full h-10 text-sm font-semibold bg-primary hover:bg-primary/90 shadow-sm"
+                size="sm" className="w-full h-9 text-xs font-semibold shadow-sm"
+                onClick={runPipeline} disabled={isExecuting || !canRun}
               >
-                {isProcessing ? (
-                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processando...</>
-                ) : (
-                  'Executar Consolidação'
-                )}
+                {isExecuting
+                  ? <><Loader2 className="mr-1.5 size-3.5 animate-spin" /> Processando...</>
+                  : <><Play className="mr-1.5 size-3.5 fill-current" /> Iniciar Consolidação</>}
               </Button>
             </CardFooter>
           </Card>
         </div>
 
-        {/* -- Coluna Lateral -- */}
+        {/* ── Coluna lateral ── */}
         <div className="space-y-4">
-        <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
-            <div className="px-4 py-2.5 border-b bg-muted/10 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                <Terminal className="size-3 text-muted-foreground" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Console de Execução</span>
-                </div>
-                {logs.length > 0 && (
-                <button onClick={() => setLogs([])} className="text-[9px] text-muted-foreground hover:text-foreground transition-colors">
-                    limpar
-                </button>
-                )}
-            </div>
-            <ScrollArea className="h-[300px] bg-slate-950">
-                <div className="p-3 font-mono text-[10px] leading-relaxed space-y-0.5">
-                {logs.length === 0 ? (
-                    <span className="text-slate-500 italic">Aguardando execução do pipeline...</span>
-                ) : (
-                    logs.map((log, i) => (
-                    <div key={i} className={cn('flex gap-1.5', logColor[log.type])}>
-                        <span className="text-slate-600 shrink-0">{log.time}</span>
-                        <span className="shrink-0">{logPrefix[log.type]}</span>
-                        <span className="break-all">{log.message}</span>
-                    </div>
-                    ))
-                )}
-                <div ref={logEndRef} />
-                </div>
-            </ScrollArea>
-            </div>
 
-            {result && (
-                 <Card className="shadow-sm border-border/60">
-                    <CardHeader className='pb-2'>
-                        <CardTitle className="flex items-center gap-2 text-base">
-                            <FileCheck2 className="size-5 text-emerald-500" />
-                            Resultado
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className='text-xs space-y-2'>
-                       <p>{result.summary}</p>
-                       {result.duplicadas && result.duplicadas.length > 0 && (
-                           <Alert variant={'destructive'} className='p-2'>
-                               <div className='flex items-start gap-2'>
-                                <FileX2 className='size-4 mt-0.5'/>
-                                <div className='flex-1'>
-                                <AlertTitle className='text-sm mb-1'>Viagens Duplicadas Ignoradas</AlertTitle>
-                                <AlertDescription className='text-xs'>
-                                    <ScrollArea className='h-20'>
-                                        <ul className='space-y-1'>
-                                        {result.duplicadas.map((d: any, i:number) => (
-                                            <li key={i}>{d.viagens} - {d.data} - {d.motorista}</li>
-                                        ))}
-                                        </ul>
-                                    </ScrollArea>
-                                </AlertDescription>
-                                </div>
-                               </div>
-                           </Alert>
-                       )}
-                    </CardContent>
-                </Card>
-            )}
+          {/* Etapas */}
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+            <div className="px-4 py-2.5 border-b bg-muted/10">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                Etapas — {modoMesCompleto ? "Mês Completo" : "Dia Específico"}
+              </span>
+            </div>
+            <div className="p-3 space-y-2">
+              {stages.map((stage, idx) => (
+                <div key={stage.id} className="flex items-start gap-2">
+                  <div className="flex flex-col items-center pt-0.5">
+                    <StageIcon status={stage.status} />
+                    {idx < stages.length - 1 && (
+                      <div className={cn("w-px mt-1 min-h-[14px]",
+                        stage.status === "done" ? "bg-emerald-300" : "bg-border/60")} />
+                    )}
+                  </div>
+                  <div className={cn("flex-1 px-2.5 py-1.5 rounded-lg border text-xs transition-all", stageBg[stage.status])}>
+                    <p className={cn("leading-tight", stageLbl[stage.status])}>{stage.label}</p>
+                    <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">{stage.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Stats */}
+          {stats && (
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { label: "Filiais",           value: `${stats.filiaisOk}/5`,              icon: Building2,    highlight: false, warn: false },
+                { label: "Novos registros",   value: stats.novos.toLocaleString("pt-BR"), icon: Database,     highlight: false, warn: false },
+                { label: "Total no banco",    value: stats.total.toLocaleString("pt-BR"), icon: CheckCircle2, highlight: true,  warn: false, span: true },
+                ...(stats.duplicadas > 0 ? [{
+                  label: "Duplicadas ignoradas", value: stats.duplicadas.toLocaleString("pt-BR"),
+                  icon: ShieldAlert, highlight: false, warn: true, span: true,
+                }] : []),
+              ] as any[]).map((stat: any) => {
+                const Icon = stat.icon
+                return (
+                  <div key={stat.label} className={cn(
+                    "rounded-xl border px-3 py-2.5 flex items-center gap-2 shadow-sm",
+                    stat.span ? "col-span-2" : "",
+                    stat.warn      ? "bg-amber-50 border-amber-200" :
+                    stat.highlight ? "bg-primary/5 border-primary/20" : "bg-card border-border/60"
+                  )}>
+                    <div className={cn("size-7 rounded-lg flex items-center justify-center shrink-0",
+                      stat.warn ? "bg-amber-100" : stat.highlight ? "bg-primary/10" : "bg-muted/30")}>
+                      <Icon className={cn("size-3.5",
+                        stat.warn ? "text-amber-500" : stat.highlight ? "text-primary" : "text-muted-foreground")} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className={cn("text-sm font-bold leading-tight",
+                        stat.warn ? "text-amber-700" : stat.highlight ? "text-primary" : "text-foreground")}>
+                        {stat.value}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground leading-tight">{stat.label}</p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Regras */}
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+            <div className="px-4 py-2.5 border-b bg-muted/10 flex items-center gap-2">
+              <Info className="size-3 text-muted-foreground" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Regras</span>
+            </div>
+            <div className="p-3 space-y-1.5">
+              {REGRAS.map((rule, idx) => (
+                <div key={idx} className={cn("flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px]", ruleColor[rule.variant])}>
+                  <ChevronRight className="size-3 mt-0.5 shrink-0 opacity-60" />
+                  <div>
+                    <span className="font-semibold">{rule.condition}</span>
+                    <span className="mx-1 opacity-50">→</span>
+                    <span>{rule.result}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Console */}
+          <div className="rounded-xl border border-border/60 bg-card overflow-hidden shadow-sm">
+            <div className="px-4 py-2.5 border-b bg-muted/10 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Terminal className="size-3 text-muted-foreground" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Console</span>
+              </div>
+              {logs.length > 0 && (
+                <button onClick={() => setLogs([])} className="text-[9px] text-muted-foreground hover:text-foreground transition-colors">
+                  limpar
+                </button>
+              )}
+            </div>
+            <ScrollArea className="h-[240px] bg-slate-950">
+              <div className="p-3 font-mono text-[10px] leading-relaxed space-y-0.5">
+                {logs.length === 0
+                  ? <span className="text-slate-500 italic">Aguardando execução...</span>
+                  : logs.map((log, i) => (
+                    <div key={i} className={cn("flex gap-1.5", logColor[log.type])}>
+                      <span className="text-slate-600 shrink-0">{log.time}</span>
+                      <span className="shrink-0">{logPrefix[log.type]}</span>
+                      <span className="break-all">{log.message}</span>
+                    </div>
+                  ))}
+                <div ref={logEndRef} />
+              </div>
+            </ScrollArea>
+          </div>
 
         </div>
       </div>
+
+      <DuplicadasDialog
+        open={showDuplicadas}
+        onClose={() => setShowDuplicadas(false)}
+        duplicadas={duplicadas}
+      />
     </div>
   )
 }

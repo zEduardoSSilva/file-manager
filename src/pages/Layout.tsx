@@ -1,59 +1,36 @@
-import { Outlet, Link, useLocation, useParams } from "react-router-dom"
-import { 
-  SidebarProvider, 
-  Sidebar, 
-  SidebarContent, 
-  SidebarHeader, 
-  SidebarMenu, 
-  SidebarMenuItem, 
-  SidebarMenuButton,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarInset,
-  SidebarTrigger,
-  SidebarFooter
+import { Outlet, Link, useLocation, useParams, useNavigate } from "react-router-dom"
+import {
+  SidebarProvider, Sidebar, SidebarContent, SidebarHeader,
+  SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarGroup,
+  SidebarGroupLabel, SidebarInset, SidebarTrigger, SidebarFooter
 } from "@/components/ui/sidebar"
-import { 
-  Truck, 
-  Database, 
-  LayoutDashboard, 
-  LogOut,
-  ChevronRight,
-  User,
-  Zap,
-  Clock,
-  FileStack,
-  FileSpreadsheet,
-  Building2,
-  TrendingUp,
-  PackageX,
-  BadgePercent,
-  MapPin,
-  GitMerge,
-  Search,
-  LayoutGrid,
-  Settings,
-  Layers,
-  FileX
+import {
+  Truck, Database, LayoutDashboard, LogOut, ChevronRight, User,
+  Zap, ZapOff, Clock, FileStack, FileSpreadsheet, Building2,
+  TrendingUp, PackageX, BadgePercent, MapPin, GitMerge, Search,
+  LayoutGrid, Settings, Layers, FileX
 } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Button } from "@/components/ui/button"
+import { useState } from "react"
+import { toggleFirebaseConnection, getFirebaseConnectionStatus } from "@/lib/firebase-connection"
+import { useAuth } from "@/contexts/AuthContext"
 
 const NAV_GROUPS = [
   {
     label: "VISUAIS",
     items: [
       { id: 'entregas-analitica', name: 'Visão Analítica', icon: LayoutGrid, path: "/visuais/entregas-analitica" },
-      { id: 'entregas-acumulada', name: 'Visão Acumulada', icon: Layers, path: "/visuais/entregas-acumulada" },
+      { id: 'entregas-acumulada', name: 'Visão Acumulada', icon: Layers,     path: "/visuais/entregas-acumulada" },
     ]
   },
   {
     label: "CADASTROS",
     items: [
-      { id: 'funcionarios', name: 'Funcionarios', icon: User, path: '/pipeline/funcionarios' },
-      { id: 'veiculos', name: 'Veiculos', icon: Truck, path: '/pipeline/veiculos' },
-      { id: 'faturamento', name: 'Faturamento', icon: BadgePercent, path: '/pipeline/faturamento' },
-      { id: 'motivos-dev', name: 'Motivos Dev.', icon: FileX, path: '/pipeline/motivos-dev' },
+      { id: 'funcionarios', name: 'Funcionarios', icon: User,         path: '/pipeline/funcionarios' },
+      { id: 'veiculos',     name: 'Veiculos',     icon: Truck,        path: '/pipeline/veiculos' },
+      { id: 'faturamento',  name: 'Faturamento',  icon: BadgePercent, path: '/pipeline/faturamento' },
+      { id: 'motivos-dev',  name: 'Motivos Dev.', icon: FileX,        path: '/pipeline/motivos-dev' },
     ]
   },
   {
@@ -65,38 +42,55 @@ const NAV_GROUPS = [
   {
     label: "INDICADORES",
     items: [
-      { id: 'vfleet',        name: 'vFleet Pilot',   icon: Truck,          path: '/pipeline/vfleet' },
-      { id: 'performaxxi',   name: 'Performaxxi',    icon: Zap,            path: '/pipeline/performaxxi' },
-      { id: 'ponto',         name: 'Absenteísmo',    icon: Clock,          path: '/pipeline/ponto' },
-      { id: 'faturista',     name: 'Faturista',      icon: BadgePercent,   path: '/pipeline/faturista' },
-      { id: 'roadshow',      name: 'Roadshow',       icon: MapPin,         path: '/pipeline/roadshow' },
-      { id: 'devolucoes',    name: 'Devoluções',     icon: PackageX,       path: '/pipeline/devolucoes' },
-      { id: 'coordenadores', name: 'Coordenadores',  icon: Building2,      path: '/pipeline/coordenadores' },
-      { id: 'cco',           name: 'CCO Empresa',    icon: TrendingUp,     path: '/pipeline/cco' },
-      { id: 'consolidador',  name: 'Final',          icon: FileStack,      path: '/pipeline/consolidador' },
+      { id: 'vfleet',        name: 'vFleet Pilot',  icon: Truck,        path: '/pipeline/vfleet' },
+      { id: 'performaxxi',   name: 'Performaxxi',   icon: Zap,          path: '/pipeline/performaxxi' },
+      { id: 'ponto',         name: 'Absenteísmo',   icon: Clock,        path: '/pipeline/ponto' },
+      { id: 'faturista',     name: 'Faturista',     icon: BadgePercent, path: '/pipeline/faturista' },
+      { id: 'roadshow',      name: 'Roadshow',      icon: MapPin,       path: '/pipeline/roadshow' },
+      { id: 'devolucoes',    name: 'Devoluções',    icon: PackageX,     path: '/pipeline/devolucoes' },
+      { id: 'coordenadores', name: 'Coordenadores', icon: Building2,    path: '/pipeline/coordenadores' },
+      { id: 'cco',           name: 'CCO Empresa',   icon: TrendingUp,   path: '/pipeline/cco' },
+      { id: 'consolidador',  name: 'Final',         icon: FileStack,    path: '/pipeline/consolidador' },
     ]
   },
   {
     label: "TAREFAS",
     items: [
-      { id: 'retorno-pedidos',    name: 'Retorn. Pedidos TXT',    icon: Search,    path: '/pipeline/retorno-pedidos' },
-      { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL',     icon: MapPin,    path: '/pipeline/retorno-pedidos-ul' },
-      { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow',   icon: GitMerge,  path: '/pipeline/mercanete-roadshow' },
+      { id: 'retorno-pedidos',    name: 'Retorn. Pedidos TXT',  icon: Search,   path: '/pipeline/retorno-pedidos' },
+      { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL',   icon: MapPin,   path: '/pipeline/retorno-pedidos-ul' },
+      { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', icon: GitMerge, path: '/pipeline/mercanete-roadshow' },
     ]
   }
 ]
 
 export function PipelineLayout() {
-  const { pathname } = useLocation()
+  const { pathname }   = useLocation()
   const { pipelineId } = useParams<{ pipelineId: string }>()
+  const navigate       = useNavigate()
+  const { currentUser, logout } = useAuth()
+
+  const [isFirebaseConnected, setFirebaseConnected] = useState(getFirebaseConnectionStatus())
+
+  const handleToggleFirebase = () => {
+    toggleFirebaseConnection()
+    setFirebaseConnected(getFirebaseConnectionStatus())
+  }
+
+  // ✅ Logout → redireciona para /login
+  const handleLogout = async () => {
+    await logout()
+    navigate("/login", { replace: true })
+  }
+
+  // ✅ Nome e email vindos do Firebase Auth
+  const displayName = currentUser?.displayName
+    ?? currentUser?.email?.split("@")[0]
+    ?? "Usuário"
+  const email = currentUser?.email ?? ""
 
   return (
     <SidebarProvider>
-      <Sidebar
-        variant="inset"
-        collapsible="offcanvas"
-        className="bg-sidebar will-change-transform"
-      >
+      <Sidebar variant="inset" collapsible="offcanvas" className="bg-sidebar will-change-transform">
         <SidebarHeader className="border-b pb-4 pt-4">
           <SidebarMenu>
             <SidebarMenuItem>
@@ -119,7 +113,7 @@ export function PipelineLayout() {
           <SidebarGroup>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Dashboard" isActive={pathname === '/'} asChild>
+                <SidebarMenuButton tooltip="Dashboard" isActive={pathname === "/"} asChild>
                   <Link to="/">
                     <LayoutDashboard className="size-4" />
                     <span className="text-xs font-semibold">Dashboard</span>
@@ -136,14 +130,10 @@ export function PipelineLayout() {
               </SidebarGroupLabel>
               <SidebarMenu>
                 {group.items.map((p) => {
-                  const Icon = p.icon;
+                  const Icon = p.icon
                   return (
                     <SidebarMenuItem key={p.id}>
-                      <SidebarMenuButton
-                        tooltip={p.name}
-                        isActive={pathname === p.path}
-                        asChild
-                      >
+                      <SidebarMenuButton tooltip={p.name} isActive={pathname === p.path} asChild>
                         <Link to={p.path}>
                           <Icon className="size-4" />
                           <span className="text-xs">{p.name}</span>
@@ -151,25 +141,26 @@ export function PipelineLayout() {
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
-                  );
+                  )
                 })}
               </SidebarMenu>
             </SidebarGroup>
           ))}
         </SidebarContent>
 
+        {/* ✅ Footer com dados reais + logout */}
         <SidebarFooter className="border-t pt-2">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton size="lg">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-accent text-accent-foreground">
+              <SidebarMenuButton size="lg" onClick={handleLogout} className="cursor-pointer group">
+                <div className="flex aspect-square size-8 items-center justify-center rounded-full bg-accent text-accent-foreground shrink-0">
                   <User className="size-4" />
                 </div>
-                <div className="grid flex-1 text-left text-[11px] leading-tight">
-                  <span className="truncate font-semibold text-primary">Eduardo Sousa</span>
-                  <span className="truncate opacity-70">eduardo@rfk.com</span>
+                <div className="grid flex-1 text-left text-[11px] leading-tight min-w-0">
+                  <span className="truncate font-semibold text-primary">{displayName}</span>
+                  <span className="truncate opacity-70">{email}</span>
                 </div>
-                <LogOut className="ml-auto size-3 opacity-50" />
+                <LogOut className="ml-auto size-3 shrink-0 opacity-40 group-hover:opacity-100 group-hover:text-destructive transition-all" />
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -181,10 +172,17 @@ export function PipelineLayout() {
           <SidebarTrigger className="-ml-1" />
           <h1 className="text-sm sm:text-base font-bold text-primary truncate">File Manager</h1>
           <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="ghost" size="icon"
+              onClick={handleToggleFirebase}
+              title={isFirebaseConnected ? "Desconectar Firebase" : "Conectar Firebase"}
+            >
+              {isFirebaseConnected
+                ? <Zap    className="size-4 text-green-500" />
+                : <ZapOff className="size-4 text-red-500"  />}
+            </Button>
             <Button variant="ghost" size="icon" asChild>
-                <Link to="/usage">
-                    <Settings className="size-4" />
-                </Link>
+              <Link to="/usage"><Settings className="size-4" /></Link>
             </Button>
             <ModeToggle />
           </div>
