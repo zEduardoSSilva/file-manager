@@ -36,7 +36,7 @@ const pipelineViewMap: { [key: string]: React.ComponentType } = {
   'vfleet': VFleetPipelineView,
   'funcionarios': FuncionariosPipelineView,
   'veiculos': VeiculosPipelineView,
-  'incentivo': IncentivoPipelineView,
+  'incentivo_mensal': IncentivoPipelineView,
   'motivos-dev': MotivosDevPipelineView,
 };
 

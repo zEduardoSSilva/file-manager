@@ -532,16 +532,25 @@ export function VisaoAnaliticaPage() {
     } finally { setFatProcessing(false) }
   }
 
+  // ── Ref para evitar re-fetch quando apenas filterDay muda ─────────────────
+  const loadedPeriodRef = React.useRef<string>("")
   const tableContainerRef = React.useRef<HTMLDivElement>(null)
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
   const fetchData = React.useCallback(async (forceRefresh = false) => {
+    const periodKey = `${filterYear}-${filterMonth}`
+    // Se o período já está carregado em memória e não é forçado, não faz nada
+    if (!forceRefresh && loadedPeriodRef.current === periodKey) {
+      setLoading(false); return
+    }
+    if (forceRefresh) loadedPeriodRef.current = ""
     setLoading(true); setSelected(new Set())
     const cacheKey = getAnaliticaCacheKey(filterYear, filterMonth)
     if (!forceRefresh) {
       const cachedData = getFromCache<{ rows: Row[]; totalCount: number }>(cacheKey)
-      if (cachedData && Array.isArray(cachedData.rows)) {
+      if (cachedData && Array.isArray(cachedData.rows) && cachedData.rows.length > 0) {
         setRows(cachedData.rows); setTotalCount(cachedData.totalCount ?? 0)
+        loadedPeriodRef.current = periodKey
         toast({ description: `${cachedData.rows.length} registros carregados do cache.` })
         setLoading(false); return
       }
@@ -557,13 +566,15 @@ export function VisaoAnaliticaPage() {
       const newRows = items.map((r, idx) => ({ ...r, __rowIdx: idx })) as Row[]
       setRows(newRows)
       setInCache(cacheKey, { rows: newRows, totalCount: itemCount })
+      loadedPeriodRef.current = periodKey
       toast({ description: `${items.length} registros carregados.` })
     } catch (e: any) {
       toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message }); setRows([])
     } finally { setLoading(false) }
   }, [filterYear, filterMonth, toast])
 
-  React.useEffect(() => { fetchData() }, [fetchData])
+  // ✅ Só re-busca quando ano ou mês mudam — filterDay nunca dispara Firebase
+  React.useEffect(() => { fetchData() }, [filterYear, filterMonth]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filiais  = React.useMemo(() => [...new Set(rows.map(r => r["FILIAL"]).filter(Boolean))].sort(), [rows])
   const regioes  = React.useMemo(() => [...new Set(rows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rows])
@@ -757,14 +768,14 @@ export function VisaoAnaliticaPage() {
                         </span>
                       </th>
                       {/* ✅ MODELO e OPERAÇÃO */}
-                      {col === "AJUDANTE 2" && (
-                        <>
-                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
-                        </>
-                      )}
                       {col === "REGIÃO" && (
                         <>
                           <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
+                        </>
+                      )}
+                      {col === "AJUDANTE 2" && (
+                        <>
+                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
                         </>
                       )}
                     </React.Fragment>
@@ -788,14 +799,14 @@ export function VisaoAnaliticaPage() {
                             "min-w-[200px]": col === "AJUDANTE" || col === "AJUDANTE 2",
                           })}>{cellVal(row[col], col)}</td>
                           {/* ✅ MODELO e OPERAÇÃO */}
-                          {col === "AJUDANTE 2" && (
-                            <>
-                              <td className="px-3 py-2 text-center whitespace-nowrap">{modeloBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
-                            </>
-                          )}
                           {col === "REGIÃO" && (
                             <>
-                              <td className="px-3 py-2 text-center whitespace-nowrap">{operacaoBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
+                              <td className="px-3 py-2 whitespace-nowrap text-center">{operacaoBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
+                            </>
+                          )}
+                          {col === "AJUDANTE 2" && (
+                            <>
+                              <td className="px-3 py-2 whitespace-nowrap text-center">{modeloBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
                             </>
                           )}
                         </React.Fragment>

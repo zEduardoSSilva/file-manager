@@ -11,33 +11,23 @@ import { FuncionariosPipelineView } from '@/components/pipeline/funcionarios-pip
 import { IncentivoPipelineView } from '@/components/pipeline/incentivo-pipeline-view'
 import { MotivosDevPipelineView } from '@/components/pipeline/motivos-dev-pipeline-view'
 import FirebaseUsage from '@/pages/FirebaseUsage'
-import { LoginPage } from '@/pages/LoginPage' // Importe a página de login
-import { AdminDashboardPage } from '@/pages/AdminDashboardPage' // Importe a página de admin
-import { ProtectedRoute } from '@/components/ProtectedRoute' // Importe a rota protegida
+import { LoginPage } from '@/pages/LoginPage'
+import { AdminDashboardPage } from '@/pages/AdminDashboardPage'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
 
 export default function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
-        {/* Rota de login pública */}
         <Route path="/login" element={<LoginPage />} />
-
-        {/* Rotas protegidas */}
         <Route element={<ProtectedRoute />}>
           <Route element={<PipelineLayout />}>
-            {/* Rota principal para o Dashboard */}
             <Route path="/" element={<HomePage />} />
-
-            {/* Rota para a página de Admin Dashboard */}
             <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
-
-            {/* Rota para a página de Uso de Recursos */}
             <Route path="/usage" element={<FirebaseUsage />} />
-
-            {/* Redireciona /pipeline para a página inicial para evitar erros */}
             <Route path="/pipeline" element={<Navigate to="/" />} />
 
-            {/* Rotas de cadastros */}
+            {/* Rotas de cadastros e incentivos */}
             <Route path="/pipeline/veiculos" element={<VeiculosPipelineView />} />
             <Route path="/pipeline/funcionarios" element={<FuncionariosPipelineView />} />
             <Route path="/pipeline/incentivo" element={<IncentivoPipelineView />} />
@@ -48,7 +38,6 @@ export default function App() {
             <Route path="/visuais/entregas-acumulada" element={<VisaoAcumuladaPage  />} />
             <Route path="/visuais/status" element={<VisaoStatusPage />} />
 
-            {/* Rotas legadas */}
             <Route path="/pipeline/:pipelineId" element={<IndexPage />} />
           </Route>
         </Route>

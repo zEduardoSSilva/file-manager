@@ -319,6 +319,9 @@ export function VisaoAcumuladaPage() {
 
   const [veiculoMap, setVeiculoMap] = React.useState<Map<string, VeiculoInfo>>(new Map())
 
+  // ── Ref para evitar re-fetch quando apenas filterDay muda ─────────────────
+  const loadedPeriodRef = React.useRef<string>("")
+
   React.useEffect(() => {
     getDocs(collection(db, "docs_veiculos")).then(snap => {
       const map = new Map<string, VeiculoInfo>()
@@ -341,12 +344,19 @@ export function VisaoAcumuladaPage() {
   }, [veiculoMap])
 
   const fetchData = React.useCallback(async (forceRefresh = false) => {
+    const periodKey = `${filterYear}-${filterMonth}`
+    // Se o período já está carregado em memória e não é forçado, não faz nada
+    if (!forceRefresh && loadedPeriodRef.current === periodKey) {
+      setLoading(false); return
+    }
+    if (forceRefresh) loadedPeriodRef.current = ""
     setLoading(true)
     const cacheKey = getAcumuladaCacheKey(filterYear, filterMonth)
     if (!forceRefresh) {
       const cachedData = getFromCache<{ rows: RawRow[], totalCount: number }>(cacheKey)
-      if (cachedData && Array.isArray(cachedData.rows)) {
+      if (cachedData && Array.isArray(cachedData.rows) && cachedData.rows.length > 0) {
         setRawRows(cachedData.rows); setTotalCount(cachedData.totalCount ?? 0)
+        loadedPeriodRef.current = periodKey
         toast({ description: `${cachedData.rows.length} registros carregados do cache.` })
         setLoading(false); return
       }
@@ -367,6 +377,7 @@ export function VisaoAcumuladaPage() {
       const newRawRows = snap.docs.map(d => d.data() as RawRow)
       setRawRows(newRawRows)
       setInCache(cacheKey, { rows: newRawRows, totalCount: itemCount })
+      loadedPeriodRef.current = periodKey
       toast({ description: `${newRawRows.length} registros carregados.` })
     } catch (e: any) {
       toast({ variant: "destructive", title: "Erro", description: e.message })
@@ -374,7 +385,8 @@ export function VisaoAcumuladaPage() {
     } finally { setLoading(false) }
   }, [filterYear, filterMonth, toast])
 
-  React.useEffect(() => { fetchData() }, [fetchData])
+  // ✅ Só re-busca quando ano ou mês mudam — filterDay nunca dispara Firebase
+  React.useEffect(() => { fetchData() }, [filterYear, filterMonth]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filiais  = React.useMemo(() => [...new Set(rawRows.map(r => r["FILIAL"]).filter(Boolean))].sort(), [rawRows])
   const regioes  = React.useMemo(() => [...new Set(rawRows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rawRows])
@@ -536,10 +548,15 @@ export function VisaoAcumuladaPage() {
                           {col}{sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
                         </span>
                       </th>
+                      {/* ✅ MODELO e OPERAÇÃO */}
                       {col === "REGIÃO" && (
                         <>
-                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
                           <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
+                        </>
+                      )}
+                      {col === "AJUDANTE 2" && (
+                        <>
+                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
                         </>
                       )}
                       {col === "PESO" && (
@@ -574,10 +591,15 @@ export function VisaoAcumuladaPage() {
                             "min-w-[160px]": col === "AJUDANTE" || col === "AJUDANTE 2",
                             "min-w-[180px]": col === "VIAGENS" || col === "ROTA",
                           })}>{cellVal(row, col)}</td>
+                          {/* ✅ MODELO e OPERAÇÃO */}
                           {col === "REGIÃO" && (
                             <>
-                              <td className="px-3 py-2 text-center whitespace-nowrap">{modeloBadge(row["PLACA"], veiculoMap)}</td>
                               <td className="px-3 py-2 text-center whitespace-nowrap">{operacaoBadge(row["PLACA"], veiculoMap)}</td>
+                            </>
+                          )}
+                          {col === "AJUDANTE 2" && (
+                            <>
+                              <td className="px-3 py-2 text-center whitespace-nowrap">{modeloBadge(row["PLACA"], veiculoMap)}</td>
                             </>
                           )}
                           {col === "PESO" && (

@@ -28,7 +28,7 @@ const NAV_GROUPS = [
   {
     label: "INCENTIVOS",
     items: [
-      { id: 'incentivo', name: 'Incentivo (Mensal)', icon: BadgePercent, path: '/pipeline/incentivo' },
+      { id: 'incentivo_mensal', name: 'Incentivo (Mensal)', icon: BadgePercent, path: '/pipeline/incentivo' },
     ]
   },
   {

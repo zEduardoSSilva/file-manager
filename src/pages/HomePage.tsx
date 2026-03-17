@@ -25,7 +25,7 @@ interface LiveStats {
 
 // ─── Dados das seções ─────────────────────────────────────────────────────────
 const INCENTIVES = [
-  { id: "incentivo", name: "Incentivo (Mensal)", desc: "Cálculo e acompanhamento", icon: BadgePercent, color: "bg-violet-500/10 text-violet-500 border border-violet-500/20", path: "/pipeline/incentivo" },
+  { id: "incentivo_mensal", name: "Incentivo (Mensal)", desc: "Cálculo e acompanhamento", icon: BadgePercent, color: "bg-violet-500/10 text-violet-500 border border-violet-500/20", path: "/pipeline/incentivo" },
 ];
 
 const REGISTRATIONS = [
