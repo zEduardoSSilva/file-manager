@@ -7,7 +7,7 @@ import { VisaoAnaliticaPage } from '@/components/pipeline/entregas-analitica'
 import { VisaoAcumuladaPage } from '@/components/pipeline/entregas-acumulada'
 import { VeiculosPipelineView } from '@/components/pipeline/veiculos-pipeline-view'
 import { FuncionariosPipelineView } from '@/components/pipeline/funcionarios-pipeline-view'
-import { FaturamentoPipelineView } from '@/components/pipeline/faturamento-pipeline-view'
+import { IncentivoPipelineView } from '@/components/pipeline/incentivo-pipeline-view'
 import { MotivosDevPipelineView } from '@/components/pipeline/motivos-dev-pipeline-view'
 import FirebaseUsage from '@/pages/FirebaseUsage'
 import { LoginPage } from '@/pages/LoginPage' // Importe a página de login
@@ -39,7 +39,7 @@ export default function App() {
             {/* Rotas de cadastros */}
             <Route path="/pipeline/veiculos" element={<VeiculosPipelineView />} />
             <Route path="/pipeline/funcionarios" element={<FuncionariosPipelineView />} />
-            <Route path="/pipeline/faturamento" element={<FaturamentoPipelineView />} />
+            <Route path="/pipeline/incentivo" element={<IncentivoPipelineView />} />
             <Route path="/pipeline/motivos-dev" element={<MotivosDevPipelineView />} />
 
             {/* Rotas de visualização */}

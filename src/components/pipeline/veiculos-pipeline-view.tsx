@@ -36,51 +36,68 @@ import { collection, onSnapshot, updateDoc, deleteDoc, doc, setDoc } from "fireb
 import { db } from "@/lib/firebase"
 import { cn } from "@/lib/utils"
 
+// ─── Tipo alinhado com os campos reais do banco ───────────────────────────────
 type Veiculo = {
-  id: string
-  PLACA: string
-  MODELO: string
-  MARCA: string
-  ANO_MODELO: number
-  STATUS_VEICULO: string
-  TIPO_VINCULO: "Próprio" | "Terceiro" | "Agregado"
-  CAPACIDADE_KG: number
+  id:             string
+  PLACA:          string
+  MODELO:         string
+  MARCA:          string
+  ANO_FABRICACAO: number
+  ANO_MODELO:     number
+  FILIAL:         string
+  OPERACAO:       string   // ex: "FRETE", "FROTA"
+  CAPACIDADE:     number   // campo real no banco (não CAPACIDADE_KG)
+  TARA:           number
   [key: string]: any
 }
 
 type LogEntry = { time: string; message: string; type: "info" | "success" | "error" | "warn" | "step" }
 
-const searchableFields = ["PLACA", "MODELO", "MARCA", "STATUS_VEICULO"]
+// ─── Campos buscáveis ─────────────────────────────────────────────────────────
+const searchableFields = ["PLACA", "MODELO", "MARCA", "FILIAL", "OPERACAO"]
 
 const logColor: Record<LogEntry["type"], string> = {
-  info: "text-slate-400", success: "text-emerald-500",
-  error: "text-red-400 font-semibold", warn: "text-amber-400", step: "text-primary font-semibold",
+  info:    "text-slate-400",
+  success: "text-emerald-500",
+  error:   "text-red-400 font-semibold",
+  warn:    "text-amber-400",
+  step:    "text-primary font-semibold",
 }
 const logPrefix: Record<LogEntry["type"], string> = {
   info: "   ", success: "✅ ", error: "❌ ", warn: "⚠️  ", step: "▶  ",
 }
 
-const vinculoColor: Record<string, string> = {
-  "Próprio":   "bg-primary/10 text-primary",
-  "Terceiro":  "bg-amber-100 text-amber-700",
-  "Agregado":  "bg-emerald-100 text-emerald-700",
+const operacaoColor: Record<string, string> = {
+  "FRETE": "bg-blue-100 text-blue-700",
+  "FROTA": "bg-primary/10 text-primary",
+}
+
+const modeloColor: Record<string, string> = {
+  "TRUCK":      "bg-slate-100 text-slate-700",
+  "TOCO":       "bg-violet-100 text-violet-700",
+  "CARRETA":    "bg-amber-100 text-amber-700",
+  "BITRUCK":    "bg-orange-100 text-orange-700",
+  "TRUCKINHO":  "bg-teal-100 text-teal-700",
+  "VAN":        "bg-pink-100 text-pink-700",
 }
 
 export function VeiculosPipelineView() {
   const { toast } = useToast()
-  const [items, setItems] = React.useState<Veiculo[]>([])
-  const [loading, setLoading] = React.useState(true)
-  const [search, setSearch] = React.useState("")
-  const [isFormOpen, setFormOpen] = React.useState(false)
+  const [items,       setItems]       = React.useState<Veiculo[]>([])
+  const [loading,     setLoading]     = React.useState(true)
+  const [search,      setSearch]      = React.useState("")
+  const [filterFilial, setFilterFilial] = React.useState("all")
+  const [filterOp,    setFilterOp]    = React.useState("all")
+  const [isFormOpen,  setFormOpen]    = React.useState(false)
   const [editingItem, setEditingItem] = React.useState<Veiculo | null>(null)
-  const [formData, setFormData] = React.useState<Partial<Veiculo>>({})
-  const [isAlertOpen, setAlertOpen] = React.useState(false)
-  const [itemToDelete, setItemToDelete] = React.useState<Veiculo | null>(null)
-  const [isProcessing, setProcessing] = React.useState(false)
-  const [isImportOpen, setImportOpen] = React.useState(false)
-  const [isImporting, setImporting] = React.useState(false)
-  const [importFile, setImportFile] = React.useState<File | null>(null)
-  const [logs, setLogs] = React.useState<LogEntry[]>([])
+  const [formData,    setFormData]    = React.useState<Partial<Veiculo>>({})
+  const [isAlertOpen, setAlertOpen]   = React.useState(false)
+  const [itemToDelete,setItemToDelete]= React.useState<Veiculo | null>(null)
+  const [isProcessing,setProcessing]  = React.useState(false)
+  const [isImportOpen,setImportOpen]  = React.useState(false)
+  const [isImporting, setImporting]   = React.useState(false)
+  const [importFile,  setImportFile]  = React.useState<File | null>(null)
+  const [logs,        setLogs]        = React.useState<LogEntry[]>([])
   const logEndRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: "smooth" }) }, [logs])
@@ -105,6 +122,19 @@ export function VeiculosPipelineView() {
     return () => unsubscribe()
   }, [toast])
 
+  // ─── Opções de filtro ─────────────────────────────────────────────────────
+  const filiais  = React.useMemo(() => [...new Set(items.map(i => i.FILIAL).filter(Boolean))].sort(), [items])
+  const operacoes = React.useMemo(() => [...new Set(items.map(i => i.OPERACAO).filter(Boolean))].sort(), [items])
+
+  const filteredItems = React.useMemo(() => items.filter(item => {
+    if (filterFilial !== "all" && item.FILIAL !== filterFilial) return false
+    if (filterOp    !== "all" && item.OPERACAO !== filterOp)   return false
+    if (search) return searchableFields.some(f =>
+      String(item[f] ?? "").toLowerCase().includes(search.toLowerCase())
+    )
+    return true
+  }), [items, search, filterFilial, filterOp])
+
   const openForm = (item: Veiculo | null = null) => {
     setEditingItem(item)
     setFormData(item ? { ...item } : {})
@@ -115,7 +145,8 @@ export function VeiculosPipelineView() {
     setProcessing(true)
     try {
       const { id, ...dataToSave } = formData
-      if (dataToSave.CAPACIDADE_KG) dataToSave.CAPACIDADE_KG = Number(dataToSave.CAPACIDADE_KG)
+      if (dataToSave.CAPACIDADE) dataToSave.CAPACIDADE = Number(dataToSave.CAPACIDADE)
+      if (dataToSave.TARA)       dataToSave.TARA       = Number(dataToSave.TARA)
 
       if (editingItem) {
         await updateDoc(doc(db, "docs_veiculos", editingItem.id), dataToSave)
@@ -160,86 +191,50 @@ export function VeiculosPipelineView() {
     if (!importFile) return
     setImporting(true)
     addLog(`Lendo arquivo: ${importFile.name}...`, "step")
-
     const reader = new FileReader()
     reader.onload = async (e) => {
       try {
         const data = e.target?.result
         if (!data) throw new Error("Não foi possível ler o arquivo.")
         const workbook = XLSX.read(data, { type: "array" })
-        const sheetName = workbook.SheetNames[0]
-        const worksheet = workbook.Sheets[sheetName]
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]]
         const jsonData = XLSX.utils.sheet_to_json(worksheet)
         addLog(`${jsonData.length} registros encontrados na planilha.`, "info")
-
         const result = await importVeiculosAction(jsonData)
         if (result.success) {
           addLog(result.message, "success")
           toast({ title: "Sucesso!", description: result.message })
-          setImportOpen(false)
-          setImportFile(null)
+          setImportOpen(false); setImportFile(null)
         } else {
           addLog(`Erro na importação: ${result.message}`, "error")
           toast({ variant: "destructive", title: "Erro na importação", description: result.message })
         }
       } catch (err: any) {
-        addLog(`Erro ao processar arquivo: ${err.message}`, "error")
-        toast({ variant: "destructive", title: "Erro ao processar arquivo", description: err.message })
-      } finally {
-        setImporting(false)
-      }
+        addLog(`Erro ao processar: ${err.message}`, "error")
+        toast({ variant: "destructive", title: "Erro", description: err.message })
+      } finally { setImporting(false) }
     }
-    reader.onerror = () => {
-      addLog("Não foi possível ler o arquivo.", "error")
-      toast({ variant: "destructive", title: "Erro de leitura", description: "Não foi possível ler o arquivo." })
-      setImporting(false)
-    }
+    reader.onerror = () => { addLog("Falha na leitura do arquivo.", "error"); setImporting(false) }
     reader.readAsArrayBuffer(importFile)
   }
 
-  const handleInputChange = (name: string, value: any) => {
-    setFormData(prev => ({ ...prev, [name]: value }))
-  }
+  // ─── Stats ────────────────────────────────────────────────────────────────
+  const totalCap   = items.reduce((s, i) => s + (Number(i.CAPACIDADE) || 0), 0)
+  const comCap     = items.filter(i => Number(i.CAPACIDADE) > 0).length
+  const frete      = items.filter(i => i.OPERACAO === "FRETE").length
+  const frota      = items.filter(i => i.OPERACAO === "FROTA").length
 
-  // ✅ helper: badge de ocupação — vermelho < 85%, amarelo 85–99%, verde 100%+
-  const ocupacaoBadge = (pesoAtual: number, capacidade: number) => {
-    if (!capacidade || capacidade <= 0) return null
-    const pct = (pesoAtual / capacidade) * 100
-    const label = `${pct.toFixed(1)}%`
-    if (pct >= 100) return (
-      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-        {label}
-      </span>
-    )
-    if (pct >= 85) return (
-      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-        {label}
-      </span>
-    )
-    return (
-      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
-        {label}
-      </span>
-    )
-  }
-
-  const filteredItems = items.filter(item =>
-    search ? searchableFields.some(field =>
-      String(item[field] ?? "").toLowerCase().includes(search.toLowerCase())
-    ) : true
-  )
-
-  const proprios  = items.filter(i => i.TIPO_VINCULO === "Próprio").length
-  const terceiros = items.filter(i => i.TIPO_VINCULO === "Terceiro").length
-  const agregados = items.filter(i => i.TIPO_VINCULO === "Agregado").length
-
-  const fields = [
-    { name: "PLACA",          label: "Placa",           type: "text"   },
-    { name: "MODELO",         label: "Modelo",          type: "text"   },
-    { name: "TIPO_VINCULO",   label: "Vínculo",         type: "select", options: ["Próprio", "Terceiro", "Agregado"] },
-    { name: "CAPACIDADE_KG",  label: "Capacidade (kg)", type: "number" },
-    { name: "PESO_ATUAL_KG",  label: "Peso Atual (kg)", type: "number" },
-    { name: "STATUS_VEICULO", label: "Status",          type: "text"   },
+  // ─── Campos do formulário alinhados com o banco ───────────────────────────
+  const formFields = [
+    { name: "PLACA",          label: "Placa",            type: "text"   },
+    { name: "MODELO",         label: "Modelo",           type: "text"   },
+    { name: "MARCA",          label: "Marca",            type: "text"   },
+    { name: "ANO_FABRICACAO", label: "Ano Fabricação",   type: "number" },
+    { name: "ANO_MODELO",     label: "Ano Modelo",       type: "number" },
+    { name: "FILIAL",         label: "Filial",           type: "text"   },
+    { name: "OPERACAO",       label: "Operação",         type: "select", options: ["FRETE", "FROTA"] },
+    { name: "CAPACIDADE",     label: "Capacidade (kg)",  type: "number" },
+    { name: "TARA",           label: "Tara (kg)",        type: "number" },
   ]
 
   return (
@@ -250,8 +245,8 @@ export function VeiculosPipelineView() {
           <AlertTitle className="mb-0">Cadastro de Veículos</AlertTitle>
         </div>
         <AlertDescription className="text-sm mt-2">
-          Gerencie os dados mestres de veículos. O ID do documento é gerado a partir da <strong>Placa</strong>.
-          A coluna <strong>Ocupação</strong> calcula <em>Peso Atual ÷ Capacidade</em> — verde ≥ 100%, amarelo ≥ 85%, vermelho &lt; 85%.
+          Dados importados da planilha de veículos. Campos: <strong>PLACA, MODELO, MARCA, FILIAL, OPERACAO, CAPACIDADE, TARA</strong>.
+          O ID do documento é gerado a partir da <strong>Placa</strong>.
         </AlertDescription>
       </Alert>
 
@@ -262,21 +257,33 @@ export function VeiculosPipelineView() {
           <Card className="shadow-sm border-border/60">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Truck className="size-5 text-primary" />
-                Veículos
+                <Truck className="size-5 text-primary" /> Veículos
               </CardTitle>
-              <CardDescription>Coleção: docs_veiculos</CardDescription>
+              <CardDescription>Coleção: docs_veiculos · {filteredItems.length} de {items.length} exibidos</CardDescription>
             </CardHeader>
 
-            <CardContent className="space-y-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por Placa, Modelo, Marca..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8"
-                />
+            <CardContent className="space-y-3">
+              {/* Filtros */}
+              <div className="flex flex-wrap gap-2">
+                <div className="relative flex-1 min-w-[180px]">
+                  <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+                  <Input placeholder="Buscar placa, modelo, marca..."
+                    value={search} onChange={e => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
+                </div>
+                <Select value={filterFilial} onValueChange={setFilterFilial}>
+                  <SelectTrigger className="w-36 h-8 text-xs"><SelectValue placeholder="Todas filiais" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas filiais</SelectItem>
+                    {filiais.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={filterOp} onValueChange={setFilterOp}>
+                  <SelectTrigger className="w-32 h-8 text-xs"><SelectValue placeholder="Operação" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    {operacoes.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
 
               <ScrollArea className="h-[500px] rounded-md border">
@@ -286,13 +293,12 @@ export function VeiculosPipelineView() {
                       <TableHead>Placa</TableHead>
                       <TableHead>Modelo</TableHead>
                       <TableHead>Marca</TableHead>
+                      <TableHead>Filial</TableHead>
+                      <TableHead>Operação</TableHead>
+                      <TableHead className="text-right">Capacidade</TableHead>
+                      <TableHead className="text-right">Tara</TableHead>
                       <TableHead>Ano</TableHead>
-                      <TableHead>Vínculo</TableHead>
-                      {/* ✅ novas colunas */}
-                      <TableHead className="text-right">Cap. (kg)</TableHead>
-                      <TableHead className="text-center">Ocupação</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="w-[60px]" />
+                      <TableHead className="w-[50px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -306,45 +312,46 @@ export function VeiculosPipelineView() {
                       </TableRow>
                     ) : filteredItems.length > 0 ? (
                       filteredItems.map(item => {
-                        const cap   = Number(item.CAPACIDADE_KG  ?? 0)
-                        const peso  = Number(item.PESO_ATUAL_KG  ?? 0)
+                        const cap  = Number(item.CAPACIDADE ?? 0)
+                        const tara = Number(item.TARA ?? 0)
+                        const modelo = String(item.MODELO ?? "").toUpperCase().trim()
                         return (
                           <TableRow key={item.id}>
-                            <TableCell className="font-medium font-mono">{item.PLACA}</TableCell>
-                            <TableCell>{item.MODELO}</TableCell>
-                            <TableCell>{item.MARCA}</TableCell>
-                            <TableCell>{item.ANO_MODELO}</TableCell>
+                            <TableCell className="font-medium font-mono text-xs">{item.PLACA || item.id}</TableCell>
                             <TableCell>
-                              <span className={cn(
-                                "text-[10px] font-bold px-2 py-0.5 rounded-full",
-                                vinculoColor[item.TIPO_VINCULO] || "bg-slate-100 text-slate-600"
-                              )}>
-                                {item.TIPO_VINCULO}
-                              </span>
+                              {modelo && modelo !== "-" ? (
+                                <span className={cn(
+                                  "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                                  modeloColor[modelo] ?? "bg-slate-100 text-slate-600"
+                                )}>{modelo}</span>
+                              ) : <span className="text-muted-foreground/40 text-xs">—</span>}
                             </TableCell>
-                            {/* ✅ Capacidade */}
+                            <TableCell className="text-xs">
+                              {item.MARCA && item.MARCA !== "-" ? item.MARCA : <span className="text-muted-foreground/40">—</span>}
+                            </TableCell>
+                            <TableCell className="text-xs">{item.FILIAL || <span className="text-muted-foreground/40">—</span>}</TableCell>
+                            <TableCell>
+                              {item.OPERACAO ? (
+                                <span className={cn(
+                                  "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                                  operacaoColor[item.OPERACAO] ?? "bg-slate-100 text-slate-600"
+                                )}>{item.OPERACAO}</span>
+                              ) : <span className="text-muted-foreground/40 text-xs">—</span>}
+                            </TableCell>
                             <TableCell className="text-right tabular-nums text-xs">
                               {cap > 0
-                                ? cap.toLocaleString("pt-BR") + " kg"
+                                ? <span className="font-medium">{cap.toLocaleString("pt-BR")} kg</span>
                                 : <span className="text-muted-foreground/40">—</span>}
                             </TableCell>
-                            {/* ✅ Ocupação */}
-                            <TableCell className="text-center">
-                              {cap > 0 && peso > 0
-                                ? ocupacaoBadge(peso, cap)
-                                : <span className="text-muted-foreground/40 text-[10px]">—</span>}
+                            <TableCell className="text-right tabular-nums text-xs">
+                              {tara > 0
+                                ? tara.toLocaleString("pt-BR") + " kg"
+                                : <span className="text-muted-foreground/40">—</span>}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {item.ANO_MODELO || item.ANO_FABRICACAO || <span className="text-muted-foreground/40">—</span>}
                             </TableCell>
                             <TableCell>
-                              <span className={cn(
-                                "text-[10px] font-bold px-2 py-0.5 rounded-full",
-                                String(item.STATUS_VEICULO).toUpperCase().includes("ATIVO")
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-slate-100 text-slate-600"
-                              )}>
-                                {item.STATUS_VEICULO}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-right">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                   <Button variant="ghost" className="h-8 w-8 p-0">
@@ -366,7 +373,7 @@ export function VeiculosPipelineView() {
                       })
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
+                        <TableCell colSpan={9} className="h-24 text-center text-muted-foreground text-sm">
                           Nenhum veículo encontrado.
                         </TableCell>
                       </TableRow>
@@ -381,7 +388,7 @@ export function VeiculosPipelineView() {
                 onClick={() => setImportOpen(true)}>
                 <Upload className="mr-1.5 size-3.5" /> Importar Excel/CSV
               </Button>
-              <Button size="sm" className="flex-1 h-9 text-xs font-semibold bg-primary hover:bg-primary/90 shadow-sm"
+              <Button size="sm" className="flex-1 h-9 text-xs font-semibold"
                 onClick={() => openForm()}>
                 <PlusCircle className="mr-1.5 size-3.5" /> Novo Veículo
               </Button>
@@ -393,28 +400,20 @@ export function VeiculosPipelineView() {
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-2">
             {[
-              { label: "Total de Veículos", value: items.length.toLocaleString("pt-BR"),   icon: Car,          highlight: false },
-              { label: "Próprios",          value: proprios.toLocaleString("pt-BR"),        icon: CheckCircle2, highlight: true  },
-              { label: "Terceiros",         value: terceiros.toLocaleString("pt-BR"),       icon: Truck,        highlight: false },
-              { label: "Agregados",         value: agregados.toLocaleString("pt-BR"),       icon: Gauge,        highlight: false },
+              { label: "Total de Veículos",    value: items.length.toLocaleString("pt-BR"),                        icon: Car,          color: "text-foreground",    bg: "bg-muted/30"      },
+              { label: "Operação FRETE",        value: frete.toLocaleString("pt-BR"),                               icon: Truck,        color: "text-blue-600",      bg: "bg-blue-500/10"   },
+              { label: "Operação FROTA",        value: frota.toLocaleString("pt-BR"),                               icon: CheckCircle2, color: "text-primary",       bg: "bg-primary/10"    },
+              { label: "Com Capacidade",        value: comCap.toLocaleString("pt-BR"),                              icon: Gauge,        color: "text-emerald-600",   bg: "bg-emerald-500/10"},
+              { label: "Cap. Total (kg)",       value: totalCap > 0 ? totalCap.toLocaleString("pt-BR") + " kg" : "—", icon: Gauge,     color: "text-violet-600",    bg: "bg-violet-500/10" },
             ].map(stat => {
               const Icon = stat.icon
               return (
-                <div key={stat.label} className={cn(
-                  "rounded-xl border px-3 py-2.5 flex items-center gap-2 shadow-sm",
-                  stat.highlight ? "bg-primary/5 border-primary/20" : "bg-card border-border/60"
-                )}>
-                  <div className={cn(
-                    "size-7 rounded-lg flex items-center justify-center shrink-0",
-                    stat.highlight ? "bg-primary/10" : "bg-muted/30"
-                  )}>
-                    <Icon className={cn("size-3.5", stat.highlight ? "text-primary" : "text-muted-foreground")} />
+                <div key={stat.label} className="rounded-xl border border-border/60 bg-card px-3 py-2.5 flex items-center gap-2 shadow-sm">
+                  <div className={cn("size-7 rounded-lg flex items-center justify-center shrink-0", stat.bg)}>
+                    <Icon className={cn("size-3.5", stat.color)} />
                   </div>
                   <div>
-                    <p className={cn("text-sm font-bold leading-tight",
-                      stat.highlight ? "text-primary" : "text-foreground")}>
-                      {stat.value}
-                    </p>
+                    <p className={cn("text-sm font-bold leading-tight", stat.color)}>{stat.value}</p>
                     <p className="text-[10px] text-muted-foreground leading-tight">{stat.label}</p>
                   </div>
                 </div>
@@ -430,25 +429,23 @@ export function VeiculosPipelineView() {
                 <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Console</span>
               </div>
               {logs.length > 0 && (
-                <button onClick={() => setLogs([])}
-                  className="text-[9px] text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => setLogs([])} className="text-[9px] text-muted-foreground hover:text-foreground transition-colors">
                   limpar
                 </button>
               )}
             </div>
             <ScrollArea className="h-[200px] bg-slate-950">
               <div className="p-3 font-mono text-[10px] leading-relaxed space-y-0.5">
-                {logs.length === 0 ? (
-                  <span className="text-slate-500 italic">Aguardando operações...</span>
-                ) : (
-                  logs.map((log, i) => (
+                {logs.length === 0
+                  ? <span className="text-slate-500 italic">Aguardando operações...</span>
+                  : logs.map((log, i) => (
                     <div key={i} className={cn("flex gap-1.5", logColor[log.type])}>
                       <span className="text-slate-600 shrink-0">{log.time}</span>
                       <span className="shrink-0">{logPrefix[log.type]}</span>
                       <span className="break-all">{log.message}</span>
                     </div>
                   ))
-                )}
+                }
                 <div ref={logEndRef} />
               </div>
             </ScrollArea>
@@ -458,24 +455,24 @@ export function VeiculosPipelineView() {
 
       {/* ── Dialog Form ── */}
       <Dialog open={isFormOpen} onOpenChange={setFormOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingItem ? "Editar" : "Novo"} Veículo</DialogTitle>
             <DialogDescription>
-              {editingItem ? "Altere os dados do veículo abaixo." : "Preencha os dados do novo veículo."}
+              {editingItem ? "Altere os dados do veículo." : "Preencha os dados do novo veículo."}
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            {fields.map(field => (
-              <div key={field.name} className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor={field.name} className="text-right">{field.label}</Label>
+          <div className="grid gap-3 py-2">
+            {formFields.map(field => (
+              <div key={field.name} className="grid grid-cols-4 items-center gap-3">
+                <Label htmlFor={field.name} className="text-right text-xs">{field.label}</Label>
                 {field.type === "select" ? (
                   <Select
-                    value={formData[field.name as keyof Veiculo] ?? ""}
-                    onValueChange={(value) => handleInputChange(field.name, value)}
+                    value={String(formData[field.name] ?? "")}
+                    onValueChange={v => setFormData(p => ({ ...p, [field.name]: v }))}
                   >
-                    <SelectTrigger className="col-span-3">
-                      <SelectValue placeholder={`Selecione um ${field.label.toLowerCase()}`} />
+                    <SelectTrigger className="col-span-3 h-8 text-xs">
+                      <SelectValue placeholder="Selecionar..." />
                     </SelectTrigger>
                     <SelectContent>
                       {field.options?.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
@@ -485,9 +482,9 @@ export function VeiculosPipelineView() {
                   <Input
                     id={field.name}
                     type={field.type}
-                    value={formData[field.name as keyof Veiculo] ?? ""}
-                    onChange={(e) => handleInputChange(field.name, e.target.value)}
-                    className="col-span-3"
+                    value={String(formData[field.name] ?? "")}
+                    onChange={e => setFormData(p => ({ ...p, [field.name]: e.target.value }))}
+                    className="col-span-3 h-8 text-xs"
                     disabled={!!editingItem && field.name === "PLACA"}
                   />
                 )}
@@ -495,10 +492,9 @@ export function VeiculosPipelineView() {
             ))}
           </div>
           <DialogFooter>
-            <DialogClose asChild><Button variant="outline">Cancelar</Button></DialogClose>
-            <Button onClick={handleSave} disabled={isProcessing}>
-              {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Salvar
+            <DialogClose asChild><Button variant="outline" size="sm">Cancelar</Button></DialogClose>
+            <Button size="sm" onClick={handleSave} disabled={isProcessing}>
+              {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -514,17 +510,13 @@ export function VeiculosPipelineView() {
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="import-file" className="text-right">Arquivo</Label>
-              <Input
-                id="import-file"
-                type="file"
-                className="col-span-3"
+              <Input id="import-file" type="file" className="col-span-3"
                 accept=".xlsx,.xls,.csv"
-                onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-              />
+                onChange={e => setImportFile(e.target.files?.[0] ?? null)} />
             </div>
             <p className="text-xs text-muted-foreground px-4 text-center">
-              Cabeçalhos esperados: PLACA, MODELO, MARCA, ANO_MODELO, TIPO_VINCULO,
-              CAPACIDADE_KG, PESO_ATUAL_KG, STATUS_VEICULO.
+              Colunas esperadas: PLACA, MODELO, MARCA, ANO_FABRICACAO, ANO_MODELO,
+              FILIAL, OPERACAO, CAPACIDADE, TARA.
             </p>
           </div>
           <DialogFooter>
@@ -543,7 +535,7 @@ export function VeiculosPipelineView() {
           <AlertDialogHeader>
             <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. O item será excluído permanentemente.
+              Esta ação não pode ser desfeita. O veículo será excluído permanentemente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

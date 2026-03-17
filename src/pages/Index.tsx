@@ -16,7 +16,7 @@ import { RoadshowPipelineView } from '@/components/pipeline/roadshow-pipeline-vi
 import { VFleetPipelineView } from '@/components/pipeline/vfleet-pipeline-view';
 import { FuncionariosPipelineView } from '@/components/pipeline/funcionarios-pipeline-view';
 import { VeiculosPipelineView } from '@/components/pipeline/veiculos-pipeline-view';
-import { FaturamentoPipelineView } from '@/components/pipeline/faturamento-pipeline-view';
+import { IncentivoPipelineView } from '@/components/pipeline/incentivo-pipeline-view';
 import { MotivosDevPipelineView } from '@/components/pipeline/motivos-dev-pipeline-view';
 
 // Create a map to associate pipeline IDs with their components
@@ -36,7 +36,7 @@ const pipelineViewMap: { [key: string]: React.ComponentType } = {
   'vfleet': VFleetPipelineView,
   'funcionarios': FuncionariosPipelineView,
   'veiculos': VeiculosPipelineView,
-  'faturamento': FaturamentoPipelineView,
+  'incentivo': IncentivoPipelineView,
   'motivos-dev': MotivosDevPipelineView,
 };
 
