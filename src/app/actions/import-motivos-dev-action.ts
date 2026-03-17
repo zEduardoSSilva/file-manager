@@ -43,7 +43,7 @@ export async function importMotivosDevAction(file: File): Promise<{ success: boo
 
       const motivoData = {
         MOTIVO_DEV: motivoDev,
-        CONSIDERA: item.CONSIDERA
+        CONSIDERA: item.CONSIDERA ?? null
       };
 
       if (!querySnapshot.empty) {

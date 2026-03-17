@@ -75,26 +75,20 @@ export async function importFaturamentoAction(file: File): Promise<{ success: bo
       const querySnapshot = await getDocs(q);
       trackRead(querySnapshot.size); // RASTREAMENTO LEITURA
 
-      const faturamentoData: { [key: string]: any } = {
-        DM_FILIAL: item.DM_FILIAL,
-        DT_FATURAMENTO: item.DT_FATURAMENTO,
-        DT_RETORNO: item.DT_RETORNO,
-        DT_FECHAMENTO: item.DT_FECHAMENTO,
-        DIAS_ABERTO: item.DIAS_ABERTO,
+      const faturamentoData = {
+        DM_FILIAL: item.DM_FILIAL ?? null,
+        DT_FATURAMENTO: item.DT_FATURAMENTO ?? null,
+        DT_RETORNO: item.DT_RETORNO ?? null,
+        DT_FECHAMENTO: item.DT_FECHAMENTO ?? null,
+        DIAS_ABERTO: item.DIAS_ABERTO ?? null,
         VIAGEM: viagem,
-        ENTREGAS: item.ENTREGAS,
-        FATURAMENTO: item.FATURAMENTO,
-        FATURAMENTO_DEV: item.FATURAMENTO_DEV,
-        PESO: item.PESO,
-        PESO_DEV: item.PESO_DEV,
-        MOTIVO_DEV: item.MOTIVO_DEV
+        ENTREGAS: item.ENTREGAS ?? null,
+        FATURAMENTO: item.FATURAMENTO ?? null,
+        FATURAMENTO_DEV: item.FATURAMENTO_DEV ?? null,
+        PESO: item.PESO ?? null,
+        PESO_DEV: item.PESO_DEV ?? null,
+        MOTIVO_DEV: item.MOTIVO_DEV ?? null
       };
-
-      Object.keys(faturamentoData).forEach(key => {
-        if (faturamentoData[key] === null || faturamentoData[key] === undefined) {
-          delete faturamentoData[key];
-        }
-      });
 
       if (!querySnapshot.empty) {
         const faturamentoDoc = querySnapshot.docs[0];

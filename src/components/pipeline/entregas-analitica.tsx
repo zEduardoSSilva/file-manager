@@ -2,7 +2,7 @@ import * as React from "react"
 import {
   RefreshCw, Loader2, Edit2, X, Check, ChevronDown, ChevronUp,
   Search, Database, Trash2, ServerCrash, FileStack, CalendarDays,
-  Building2, Hash, FileDown, Columns3, Undo2,
+  Building2, Hash, FileDown, Columns3, Undo2, UserSearch, Truck, ChevronRight,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -47,6 +47,96 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp()
 const db  = getFirestore(app)
 
+// ─── Tipos cadastros ──────────────────────────────────────────────────────────
+interface Funcionario { id: string; NOME_COMPLETO: string; CARGO: string; STATUS: string }
+interface Veiculo     { id: string; PLACA: string; MODELO: string; CAPACIDADE_KG: number }
+
+// ─── SearchSelect: campo com busca dropdown ───────────────────────────────────
+function SearchSelect({ label, value, onChange, options, placeholder }: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string; sub?: string }[]
+  placeholder?: string
+}) {
+  const [open,   setOpen]   = React.useState(false)
+  const [search, setSearch] = React.useState("")
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", handler)
+    return () => document.removeEventListener("mousedown", handler)
+  }, [])
+
+  const filtered = options.filter(o =>
+    o.label.toLowerCase().includes(search.toLowerCase()) ||
+    (o.sub ?? "").toLowerCase().includes(search.toLowerCase())
+  ).slice(0, 30)
+
+  return (
+    <div className="space-y-1.5" ref={ref}>
+      <Label className="text-[11px] text-muted-foreground">{label}</Label>
+      <div className="relative">
+        <div
+          className="flex items-center h-8 rounded-md border border-input bg-background px-2 cursor-pointer gap-1.5 hover:border-primary/60 transition-colors"
+          onClick={() => { setOpen(o => !o); setSearch("") }}
+        >
+          <span className={cn("flex-1 text-xs truncate", !value && "text-muted-foreground/50")}>
+            {value || placeholder || "Selecionar..."}
+          </span>
+          {value && (
+            <button
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={e => { e.stopPropagation(); onChange("") }}
+            >
+              <X className="size-3" />
+            </button>
+          )}
+          <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+        </div>
+
+        {open && (
+          <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border border-border rounded-md shadow-lg overflow-hidden">
+            <div className="p-1.5 border-b">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+                <input
+                  autoFocus
+                  className="w-full pl-6 pr-2 py-1 text-xs bg-muted/20 rounded border-0 outline-none"
+                  placeholder="Buscar..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="max-h-[180px] overflow-y-auto">
+              {filtered.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground text-center py-3">Nenhum resultado</p>
+              ) : filtered.map(opt => (
+                <div
+                  key={opt.value}
+                  className={cn(
+                    "px-3 py-1.5 text-xs cursor-pointer hover:bg-accent flex items-center justify-between gap-2",
+                    value === opt.value && "bg-primary/10 text-primary font-medium"
+                  )}
+                  onClick={() => { onChange(opt.value); setOpen(false); setSearch("") }}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {opt.sub && <span className="text-[10px] text-muted-foreground shrink-0">{opt.sub}</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
 const INITIAL_GRID_COLS = [
   "DATA DE ENTREGA", "FILIAL", "REGIÃO", "ROTA",
   "MOTORISTA", "AJUDANTE", "AJUDANTE 2",
@@ -67,17 +157,32 @@ const ALL_FIELDS = [
 ]
 
 type Row = Record<string, any> & {
-  _itemId:  string  // ID do doc na subcoleção items/
+  _itemId:  string
   __rowIdx: number
+}
+
+function extractTempo(v: any): string | null {
+  if (!v) return null
+  const s = String(v).trim()
+  // já está no formato HH:MM ou HH:MM:SS
+  if (/^\d{1,3}:\d{2}(:\d{2})?$/.test(s)) return s.substring(0, 5)
+  // é uma string de data completa (ex: "Mon Jan 01 1900 03:02:00 GMT...")
+  const m = s.match(/(\d{2}:\d{2}:\d{2})/)
+  if (m) return m[1].substring(0, 5)
+  return null
 }
 
 function cellVal(v: any, col: string) {
   if (v == null || v === "") return <span className="text-muted-foreground/40 text-[10px]">—</span>
-  if (col === "TEMPO" && typeof v === "string" && v.includes("1899")) {
-    const m = v.match(/(\d{2}:\d{2}:\d{2})/)
-    if (m) return <span>{m[1]}</span>
+  if (col === "TEMPO") {
+    const t = extractTempo(v)
+    if (t) return <span>{t}</span>
   }
   return <span>{String(v)}</span>
+}
+
+function normalizarPlaca(placa: any): string {
+  return String(placa ?? "").trim().toUpperCase().replace(/[-\s]/g, "")
 }
 
 function extractDay(dateStr: any): number | null {
@@ -140,7 +245,6 @@ function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
 }
 
 // ── Gerenciar Importações ─────────────────────────────────────────────────────
-// Usa o doc determinístico — 1 doc por mês, sem query multi-doc
 function GerenciarImportacoesDialog({
   open, onClose, filterYear, filterMonth, onDeleted,
 }: {
@@ -229,7 +333,6 @@ function GerenciarImportacoesDialog({
       return result
     })()
   
-    // ✅ Ordena as datas em cada filial em ordem crescente (DD/MM/YYYY)
     const sorted: Record<string, Record<string, number>> = {}
     for (const [filial, diaMap] of Object.entries(source)) {
       sorted[filial] = Object.fromEntries(
@@ -436,7 +539,59 @@ export function VisaoAnaliticaPage() {
   const [showGerenciar,        setShowGerenciar]        = React.useState(false)
   const [showGerenciarColunas, setShowGerenciarColunas] = React.useState(false)
 
-  // ── Fetch: 1 leitura metadata + N leituras items ──────────────────────────
+  // ── Cadastros para lookup ─────────────────────────────────────────────────
+  const [funcionarios, setFuncionarios] = React.useState<Funcionario[]>([])
+  const [veiculos,     setVeiculos]     = React.useState<Veiculo[]>([])
+
+  React.useEffect(() => {
+    getDocs(collection(db, "docs_funcionarios")).then(snap => {
+      setFuncionarios(snap.docs.map(d => ({ id: d.id, ...d.data() } as Funcionario)))
+    }).catch(() => {})
+    getDocs(collection(db, "docs_veiculos")).then(snap => {
+      setVeiculos(snap.docs.map(d => ({ id: d.id, ...d.data() } as Veiculo)))
+    }).catch(() => {})
+  }, [])
+
+  const funcOptions = React.useMemo(() =>
+    funcionarios
+      .filter(f => String(f.STATUS ?? "").toUpperCase() === "ATIVO")
+      .map(f => ({ value: f.NOME_COMPLETO, label: f.NOME_COMPLETO, sub: f.CARGO }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [funcionarios]
+  )
+
+  const veiculoOptions = React.useMemo(() =>
+    veiculos.map(v => ({
+      value: String(v.id),
+      label: String(v.id),
+      sub: v.MODELO || "",
+    })).sort((a, b) => a.label.localeCompare(b.label)),
+    [veiculos]
+  )
+
+  // ── Mapa placa → modelo para lookup rápido nas células ──────────────────
+  const veiculoModeloMap = React.useMemo(() => {
+    const m = new Map<string, string>()
+    veiculos.forEach(v => {
+      if (v.MODELO && v.MODELO !== "-") m.set(normalizarPlaca(String(v.id)), v.MODELO)
+    })
+    return m
+  }, [veiculos])
+
+  const [filterModelo, setFilterModelo] = React.useState("all")
+
+  const modelos = React.useMemo(() => {
+    const s = new Set<string>()
+    rows.forEach(r => {
+      const m = veiculoModeloMap.get(normalizarPlaca(r["PLACA"] ?? ""))
+      if (m) s.add(m)
+    })
+    return [...s].sort()
+  }, [rows, veiculoModeloMap])
+
+
+  const tableContainerRef = React.useRef<HTMLDivElement>(null)
+
   const fetchData = React.useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setSelected(new Set());
@@ -500,6 +655,12 @@ export function VisaoAnaliticaPage() {
       const s = search.toLowerCase()
       r = r.filter(row => gridCols.some(col => String(row[col] ?? "").toLowerCase().includes(s)))
     }
+    if (filterModelo !== "all") {
+      r = r.filter(row => {
+        const m = veiculoModeloMap.get(normalizarPlaca(row["PLACA"] ?? "")) ?? ""
+        return m === filterModelo
+      })
+    }
     if (sortCol) {
       r = [...r].sort((a, b) => {
         const av = String(a[sortCol] ?? ""); const bv = String(b[sortCol] ?? "")
@@ -507,7 +668,7 @@ export function VisaoAnaliticaPage() {
       })
     }
     return r
-  }, [rows, filterDay, filterFilial, filterRegiao, hideRotaChao, search, sortCol, sortAsc, gridCols])
+  }, [rows, filterDay, filterFilial, filterRegiao, hideRotaChao, search, sortCol, sortAsc, gridCols, filterModelo, veiculoModeloMap])
 
   const filteredIdxs = filtered.map(r => r.__rowIdx)
   const allSelected  = filteredIdxs.length > 0 && filteredIdxs.every(i => selected.has(i))
@@ -557,7 +718,14 @@ export function VisaoAnaliticaPage() {
   const openEdit = (row: Row) => {
     setEditRow(row)
     const draft: Record<string, string> = {}
-    ALL_FIELDS.forEach(f => { draft[f] = String(row[f] ?? "") })
+    ALL_FIELDS.forEach(f => {
+      let val = String(row[f] ?? "")
+      if (f === "TEMPO") {
+        const t = extractTempo(row[f])
+        val = t ?? val
+      }
+      draft[f] = val
+    })
     setEditDraft(draft)
   }
 
@@ -589,8 +757,9 @@ export function VisaoAnaliticaPage() {
       const obj: Record<string, any> = {}
       gridCols.forEach(col => {
         let v = row[col]
-        if (col === "TEMPO" && typeof v === "string" && v.includes("1899")) {
-          const m = v.match(/(\d{2}:\d{2}:\d{2})/); if (m) v = m[1]
+        if (col === "TEMPO") {
+          const t = extractTempo(v)
+          if (t) v = t
         }
         obj[col] = v
       })
@@ -676,6 +845,16 @@ export function VisaoAnaliticaPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] uppercase tracking-wider">Modelo</Label>
+              <Select value={filterModelo} onValueChange={setFilterModelo}>
+                <SelectTrigger className="w-36 h-8 text-xs"><SelectValue placeholder="Todos" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  {modelos.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1 flex-1 min-w-[180px]">
               <Label className="text-[10px] uppercase tracking-wider">Busca geral</Label>
               <div className="relative">
@@ -734,56 +913,83 @@ export function VisaoAnaliticaPage() {
       )}
 
       {!loading && rows.length > 0 && (
-        <div className="rounded-xl border border-border/60 overflow-x-auto shadow-sm">
-          <table className="w-full text-[11px]">
-            <thead>
-              <tr className="bg-muted/30 border-b">
-                <th className="px-3 py-2.5 w-10">
-                  <Checkbox checked={allSelected} aria-checked={someSelected ? "mixed" : allSelected}
-                    onCheckedChange={toggleAll} className="size-3.5" />
-                </th>
-                {gridCols.map(col => (
-                  <th key={col}
-                    className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
-                    onClick={() => toggleSort(col)}>
-                    <span className="flex items-center justify-center gap-1">
-                      {col}
-                      {sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
-                    </span>
+        <div className="rounded-xl border border-border/60 shadow-sm overflow-hidden">
+          {/* ── Container único com scroll horizontal e vertical ── */}
+          <div
+            ref={tableContainerRef}
+            className="overflow-auto"
+            style={{ maxHeight: "calc(100vh - 320px)" }}
+          >
+            <table className="w-full text-[11px]">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b" style={{ backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.85)" }}>
+                  <th className="px-3 py-2.5 w-10" style={{ backgroundColor: "transparent" }}>
+                    <Checkbox checked={allSelected} aria-checked={someSelected ? "mixed" : allSelected}
+                      onCheckedChange={toggleAll} className="size-3.5" />
                   </th>
-                ))}
-                <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground w-14">Editar</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((row, i) => {
-                const isSelected = selected.has(row.__rowIdx)
-                return (
-                  <tr key={row._itemId ?? i} className={cn(
-                    "border-b transition-colors hover:bg-muted/10",
-                    isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/5"
-                  )}>
-                    <td className="px-3 py-2 text-center">
-                      <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(row.__rowIdx)} className="size-3.5" />
-                    </td>
-                    {gridCols.map(col => (
-                      <td key={col} className={cn("px-3 py-2 whitespace-nowrap text-center", {
-                        "min-w-[240px]": col === "MOTORISTA",
-                        "min-w-[200px]": col === "AJUDANTE" || col === "AJUDANTE 2",
-                      })}>
-                        {cellVal(row[col], col)}
+                  {gridCols.map(col => (
+                    <React.Fragment key={col}>
+                      {col === "PLACA" && (
+                        <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>
+                          MODELO
+                        </th>
+                      )}
+                      <th
+                        className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
+                        style={{ backgroundColor: "transparent" }}
+                        onClick={() => toggleSort(col)}>
+                        <span className="flex items-center justify-center gap-1">
+                          {col}
+                          {sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
+                        </span>
+                      </th>
+                    </React.Fragment>
+                  ))}
+                  <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground w-14" style={{ backgroundColor: "transparent" }}>Editar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((row, i) => {
+                  const isSelected = selected.has(row.__rowIdx)
+                  return (
+                    <tr key={row._itemId ?? i} className={cn(
+                      "border-b transition-colors hover:bg-muted/10",
+                      isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/5"
+                    )}>
+                      <td className="px-3 py-2 text-center">
+                        <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(row.__rowIdx)} className="size-3.5" />
                       </td>
-                    ))}
-                    <td className="px-3 py-2 text-center">
-                      <Button variant="ghost" size="icon" className="size-6" onClick={() => openEdit(row)}>
-                        <Edit2 className="size-3 text-primary" />
-                      </Button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      {gridCols.map(col => (
+                        <React.Fragment key={col}>
+                          {col === "PLACA" && (
+                            <td className="px-3 py-2 whitespace-nowrap text-center">
+                              {(() => {
+                                const m = veiculoModeloMap.get(normalizarPlaca(row["PLACA"] ?? ""))
+                                return m && m !== "-"
+                                  ? <span className="text-[11px] font-medium text-foreground/80">{m}</span>
+                                  : <span className="text-muted-foreground/40 text-[10px]">—</span>
+                              })()}
+                            </td>
+                          )}
+                          <td className={cn("px-3 py-2 whitespace-nowrap text-center", {
+                            "min-w-[240px]": col === "MOTORISTA",
+                            "min-w-[200px]": col === "AJUDANTE" || col === "AJUDANTE 2",
+                          })}>
+                            {cellVal(row[col], col)}
+                          </td>
+                        </React.Fragment>
+                      ))}
+                      <td className="px-3 py-2 text-center">
+                        <Button variant="ghost" size="icon" className="size-6" onClick={() => openEdit(row)}>
+                          <Edit2 className="size-3 text-primary" />
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -805,8 +1011,12 @@ export function VisaoAnaliticaPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── Modal de edição otimizado ── */}
       <Dialog open={!!editRow} onOpenChange={open => { if (!open) setEditRow(null) }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col gap-0 p-0">
+        <DialogContent className="max-w-4xl flex flex-col gap-0 p-0"
+          style={{ height: "min(90vh, 760px)", maxHeight: "90vh" }}>
+          
+          {/* Header fixo */}
           <DialogHeader className="px-7 pt-6 pb-4 border-b shrink-0">
             <DialogTitle className="flex items-center gap-2.5 text-base">
               <Edit2 className="size-4 text-primary" /> Editar registro
@@ -818,48 +1028,146 @@ export function VisaoAnaliticaPage() {
             </DialogTitle>
             <DialogDescription>Altere os dados e clique em Confirmar para salvar.</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="flex-1 px-7 py-5">
+
+          {/* Corpo rolável */}
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-7 py-5">
             <div className="space-y-7">
-              {[
-                { title: "Identificação", fields: [
-                  { field: "DATA DE ENTREGA", span: 1 }, { field: "DATA", span: 1 },
-                  { field: "FILIAL", span: 1 }, { field: "REGIÃO", span: 1 },
-                  { field: "ROTA", span: 2 }, { field: "VIAGENS", span: 1 }, { field: "STATUS", span: 1 },
-                ]},
-                { title: "Equipe e veículo", fields: [
-                  { field: "MOTORISTA", span: 2 }, { field: "AJUDANTE", span: 1 }, { field: "AJUDANTE 2", span: 1 },
-                  { field: "PLACA SISTEMA", span: 1 }, { field: "PLACA", span: 1 },
-                  { field: "MODELO", span: 1 }, { field: "OCP", span: 1 },
-                ]},
-                { title: "Operação", fields: [
-                  { field: "ENTREGAS", span: 1 }, { field: "PESO", span: 1 },
-                  { field: "TEMPO", span: 1 }, { field: "KM", span: 1 },
-                  { field: "SAÍDA", span: 1 }, { field: "OBSERVAÇÃO", span: 3 },
-                ]},
-                { title: "Financeiro", fields: [
-                  "VALOR", "CHAPA", "FRETE", "DESCARGA PALET",
-                  "HOSPEDAGEM", "DIARIA", "EXTRA", "CONTRATO",
-                  "PERFORMAXXI", "ENTREGAS DEV", "VALOR DEV",
-                ].map(f => ({ field: f, span: 1 })) },
-              ].map(section => (
-                <div key={section.title}>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-                    {section.title}
-                  </p>
-                  <div className="grid grid-cols-4 gap-x-4 gap-y-3">
-                    {section.fields.map(({ field, span }) => (
-                      <div key={field} className={cn("space-y-1.5", span > 1 && `col-span-${span}`)}>
-                        <Label className="text-[11px] text-muted-foreground">{field}</Label>
-                        <Input className="h-8 text-xs" value={editDraft[field] ?? ""}
-                          onChange={e => setEditDraft(p => ({ ...p, [field]: e.target.value }))} />
-                      </div>
-                    ))}
+
+              {/* ── Identificação ── */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Identificação</p>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+                  {(["DATA DE ENTREGA","DATA","FILIAL","REGIÃO"] as const).map(f => (
+                    <div key={f} className="space-y-1.5">
+                      <Label className="text-[11px] text-muted-foreground">{f}</Label>
+                      <Input className="h-8 text-xs" value={editDraft[f] ?? ""}
+                        onChange={e => setEditDraft(p => ({ ...p, [f]: e.target.value }))} />
+                    </div>
+                  ))}
+                  <div className="col-span-2 space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">ROTA</Label>
+                    <Input className="h-8 text-xs" value={editDraft["ROTA"] ?? ""}
+                      onChange={e => setEditDraft(p => ({ ...p, ROTA: e.target.value }))} />
                   </div>
-                  <div className="border-t border-border/50 mt-6" />
+                  {(["VIAGENS","STATUS"] as const).map(f => (
+                    <div key={f} className="space-y-1.5">
+                      <Label className="text-[11px] text-muted-foreground">{f}</Label>
+                      <Input className="h-8 text-xs" value={editDraft[f] ?? ""}
+                        onChange={e => setEditDraft(p => ({ ...p, [f]: e.target.value }))} />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              <div className="border-t border-border/50" />
+
+              {/* ── Equipe e Veículo — com SearchSelect ── */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Equipe e Veículo</p>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+                  <div className="col-span-2">
+                    <SearchSelect
+                      label="MOTORISTA"
+                      value={editDraft["MOTORISTA"] ?? ""}
+                      onChange={v => setEditDraft(p => ({ ...p, MOTORISTA: v }))}
+                      options={funcOptions}
+                      placeholder="Selecionar motorista..."
+                    />
+                  </div>
+                  <div>
+                    <SearchSelect
+                      label="AJUDANTE"
+                      value={editDraft["AJUDANTE"] ?? ""}
+                      onChange={v => setEditDraft(p => ({ ...p, AJUDANTE: v }))}
+                      options={funcOptions}
+                      placeholder="Selecionar..."
+                    />
+                  </div>
+                  <div>
+                    <SearchSelect
+                      label="AJUDANTE 2"
+                      value={editDraft["AJUDANTE 2"] ?? ""}
+                      onChange={v => setEditDraft(p => ({ ...p, ["AJUDANTE 2"]: v }))}
+                      options={funcOptions}
+                      placeholder="Selecionar..."
+                    />
+                  </div>
+
+                  {/* Placa Sistema (livre) */}
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">PLACA SISTEMA</Label>
+                    <Input className="h-8 text-xs" value={editDraft["PLACA SISTEMA"] ?? ""}
+                      onChange={e => setEditDraft(p => ({ ...p, ["PLACA SISTEMA"]: e.target.value }))} />
+                  </div>
+
+                  {/* Placa — SearchSelect com veículos */}
+                  <div>
+                    <SearchSelect
+                      label="PLACA"
+                      value={editDraft["PLACA"] ?? ""}
+                      onChange={v => {
+                        const vei = veiculos.find(x => String(x.id) === v)
+                        setEditDraft(p => ({
+                          ...p,
+                          PLACA: v,
+                          MODELO: vei?.MODELO ?? p["MODELO"] ?? "",
+                        }))
+                      }}
+                      options={veiculoOptions}
+                      placeholder="Selecionar placa..."
+                    />
+                  </div>
+
+                  {/* Modelo */}
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">MODELO</Label>
+                    <Input className="h-8 text-xs" value={editDraft["MODELO"] ?? ""}
+                      onChange={e => setEditDraft(p => ({ ...p, MODELO: e.target.value }))} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border/50" />
+
+              {/* ── Operação ── */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Operação</p>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+                  {(["ENTREGAS","PESO","TEMPO","KM","SAÍDA"] as const).map(f => (
+                    <div key={f} className="space-y-1.5">
+                      <Label className="text-[11px] text-muted-foreground">{f}</Label>
+                      <Input className="h-8 text-xs" value={editDraft[f] ?? ""}
+                        onChange={e => setEditDraft(p => ({ ...p, [f]: e.target.value }))} />
+                    </div>
+                  ))}
+                  <div className="col-span-3 space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">OBSERVAÇÃO</Label>
+                    <Input className="h-8 text-xs" value={editDraft["OBSERVAÇÃO"] ?? ""}
+                      onChange={e => setEditDraft(p => ({ ...p, OBSERVAÇÃO: e.target.value }))} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border/50" />
+
+              {/* ── Financeiro ── */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">Financeiro</p>
+                <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+                  {["VALOR","CHAPA","FRETE","DESCARGA PALET","HOSPEDAGEM","DIARIA","EXTRA","CONTRATO","PERFORMAXXI","ENTREGAS DEV","VALOR DEV"].map(f => (
+                    <div key={f} className="space-y-1.5">
+                      <Label className="text-[11px] text-muted-foreground">{f}</Label>
+                      <Input className="h-8 text-xs" value={editDraft[f] ?? ""}
+                        onChange={e => setEditDraft(p => ({ ...p, [f]: e.target.value }))} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
             </div>
-          </ScrollArea>
+          </div>
+
+          {/* Footer fixo */}
           <div className="flex items-center justify-end gap-2 px-7 py-4 border-t bg-muted/5 shrink-0">
             <DialogClose asChild>
               <Button variant="outline" size="sm" className="gap-1.5"><X className="size-3.5" /> Cancelar</Button>

@@ -2,32 +2,37 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // REGRAS MODIFICADAS PARA EXIGIR LOGIN
     match /docs_entregas/{docId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
     match /docs_funcionarios/{docId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
     match /docs_veiculos/{docId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
     match /docs_faturamento/{docId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
     match /docs_mot_devolucao/{docId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
     match /pipeline_results/{docId=**} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
 
-    // Permite a leitura da coleção 'usage' pelo frontend
+    // REGRA NOVA ACRESCENTADA PARA CORRIGIR O ERRO
+    match /motivos_devolucao/{docId} {
+        allow read, write: if request.auth != null;
+    }
+
+    // SUAS REGRAS ORIGINAIS MANTIDAS
     match /usage/{usageDoc} {
       allow read: if true;
       allow write: if false;
     }
 
-    // Permite que usuários autenticados leiam e escrevam os dados de uso
     match /_meta/{usageDoc} {
       allow read, write: if request.auth != null;
     }
