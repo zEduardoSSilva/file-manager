@@ -8,7 +8,7 @@ import {
   Truck, Database, LayoutDashboard, LogOut, ChevronRight, User,
   Zap, ZapOff, Clock, FileStack, FileSpreadsheet, Building2,
   TrendingUp, PackageX, BadgePercent, MapPin, GitMerge, Search,
-  LayoutGrid, Settings, Layers, FileX
+  LayoutGrid, Settings, Layers, FileX, BarChart
 } from "lucide-react"
 import { ModeToggle } from "@/components/mode-toggle"
 import { Button } from "@/components/ui/button"
@@ -22,6 +22,13 @@ const NAV_GROUPS = [
     items: [
       { id: 'entregas-analitica', name: 'Visão Analítica', icon: LayoutGrid, path: "/visuais/entregas-analitica" },
       { id: 'entregas-acumulada', name: 'Visão Acumulada', icon: Layers,     path: "/visuais/entregas-acumulada" },
+      { id: 'visao-status',       name: 'Visão Status',    icon: BarChart,   path: "/visuais/status" },
+    ]
+  },
+  {
+    label: "INCENTIVOS",
+    items: [
+      { id: 'incentivo', name: 'Incentivo (Mensal)', icon: BadgePercent, path: '/pipeline/incentivo' },
     ]
   },
   {
@@ -29,7 +36,6 @@ const NAV_GROUPS = [
     items: [
       { id: 'funcionarios', name: 'Funcionarios', icon: User,         path: '/pipeline/funcionarios' },
       { id: 'veiculos',     name: 'Veiculos',     icon: Truck,        path: '/pipeline/veiculos' },
-      { id: 'faturamento',  name: 'Faturamento',  icon: BadgePercent, path: '/pipeline/faturamento' },
       { id: 'motivos-dev',  name: 'Motivos Dev.', icon: FileX,        path: '/pipeline/motivos-dev' },
     ]
   },

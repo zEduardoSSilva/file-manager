@@ -24,16 +24,20 @@ interface LiveStats {
 }
 
 // ─── Dados das seções ─────────────────────────────────────────────────────────
+const INCENTIVES = [
+  { id: "incentivo", name: "Incentivo (Mensal)", desc: "Cálculo e acompanhamento", icon: BadgePercent, color: "bg-violet-500/10 text-violet-500 border border-violet-500/20", path: "/pipeline/incentivo" },
+];
+
 const REGISTRATIONS = [
   { id: "funcionarios",  name: "Funcionários",       desc: "Cadastro de pessoal",     icon: User,         color: "bg-blue-500/10 text-blue-500 border border-blue-500/20",   path: "/pipeline/funcionarios"  },
   { id: "veiculos",      name: "Veículos",            desc: "Gerenciamento de frota",  icon: Truck,        color: "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20", path: "/pipeline/veiculos" },
-  { id: "faturamento",   name: "Faturamento",         desc: "Lançamentos financeiros", icon: BadgePercent, color: "bg-violet-500/10 text-violet-500 border border-violet-500/20", path: "/pipeline/faturamento"  },
   { id: "motivos-dev",   name: "Motivos Devolução",   desc: "Causas e logística",      icon: PackageX,     color: "bg-rose-500/10 text-rose-500 border border-rose-500/20",     path: "/pipeline/motivos-dev"  },
 ]
 
 const VISUALS = [
   { id: "entregas-analitica", name: "Visão Analítica", desc: "Registros brutos por filial", icon: LayoutGrid, color: "bg-cyan-500/10 text-cyan-500 border border-cyan-500/20", path: "/visuais/entregas-analitica" },
   { id: "entregas-acumulada", name: "Visão Acumulada", desc: "Agrupamento de rotas",        icon: Layers,     color: "bg-sky-500/10 text-sky-500 border border-sky-500/20",   path: "/visuais/entregas-acumulada" },
+  { id: "visao-status",       name: "Visão de Status",   desc: "Monitoramento de pipelines",  icon: BarChart3,  color: "bg-orange-500/10 text-orange-500 border border-orange-500/20", path: "/visuais/status" },
 ]
 
 const ROUTINES = [
@@ -177,6 +181,7 @@ function Section({ title, desc, icon: Icon, iconColor, items, cols = 3 }: {
       <CardContent className="p-4 sm:p-5">
         <div className={cn(
           "grid gap-2",
+          cols === 1 && "grid-cols-1",
           cols === 2 && "grid-cols-1 sm:grid-cols-2",
           cols === 3 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
           cols === 4 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4",
@@ -286,7 +291,15 @@ export default function HomePage() {
           icon={BarChart3}
           iconColor="bg-cyan-500/10 text-cyan-500"
           items={VISUALS}
-          cols={2}
+          cols={3}
+        />
+        <Section
+          title="Incentivos"
+          desc="Cálculo de bônus e acompanhamento de performance"
+          icon={BadgePercent}
+          iconColor="bg-violet-500/10 text-violet-500"
+          items={INCENTIVES}
+          cols={1}
         />
         <Section
           title="Cadastros"
@@ -294,7 +307,7 @@ export default function HomePage() {
           icon={Database}
           iconColor="bg-blue-500/10 text-blue-500"
           items={REGISTRATIONS}
-          cols={4}
+          cols={3}
         />
         <Section
           title="Rotinas"

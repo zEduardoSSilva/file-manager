@@ -5,6 +5,7 @@ import HomePage from '@/pages/HomePage'
 import IndexPage from '@/pages/Index'
 import { VisaoAnaliticaPage } from '@/components/pipeline/entregas-analitica'
 import { VisaoAcumuladaPage } from '@/components/pipeline/entregas-acumulada'
+import { VisaoStatusPage } from '@/components/pipeline/visao-status'
 import { VeiculosPipelineView } from '@/components/pipeline/veiculos-pipeline-view'
 import { FuncionariosPipelineView } from '@/components/pipeline/funcionarios-pipeline-view'
 import { IncentivoPipelineView } from '@/components/pipeline/incentivo-pipeline-view'
@@ -45,6 +46,7 @@ export default function App() {
             {/* Rotas de visualização */}
             <Route path="/visuais/entregas-analitica" element={<VisaoAnaliticaPage />} />
             <Route path="/visuais/entregas-acumulada" element={<VisaoAcumuladaPage  />} />
+            <Route path="/visuais/status" element={<VisaoStatusPage />} />
 
             {/* Rotas legadas */}
             <Route path="/pipeline/:pipelineId" element={<IndexPage />} />
