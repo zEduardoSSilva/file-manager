@@ -2,7 +2,7 @@ import * as React from "react"
 import {
   RefreshCw, Loader2, ChevronDown, ChevronUp,
   Search, Database, FileDown, Columns3, Undo2,
-  Check, X, Layers,
+  Check, X, Layers, LayoutGrid, Table2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,6 +24,7 @@ import { initializeApp, getApps, getApp } from "firebase/app"
 import { trackRead } from "@/lib/firebaseUsageTracker"
 import { mainDocId } from "@/app/actions/actions-utils"
 import { getFromCache, setInCache, getAcumuladaCacheKey } from "@/lib/data-cache"
+import { VisaoAcumuladaCards } from "./entregas-acumulada-cards"
 
 const firebaseConfig = {
   apiKey:            "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
@@ -37,7 +38,7 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp()
 const db  = getFirestore(app)
 
 interface RawRow { [key: string]: any }
-interface VeiculoInfo { capacidade: number; modelo: string; operacao: string }
+export interface VeiculoInfo { capacidade: number; modelo: string; operacao: string }
 interface AccumulatedRow {
   "DATA DE ENTREGA": string; "FILIAL": string; "REGIÃO": string
   "MOTORISTA": string; "AJUDANTE": string; "AJUDANTE 2": string
@@ -297,6 +298,7 @@ export function VisaoAcumuladaPage() {
   const { toast } = useToast()
   const today = new Date()
 
+  const [viewMode,       setViewMode]       = React.useState<"tabela" | "cards">("tabela")
   const [filterYear,     setFilterYear]     = React.useState(today.getFullYear())
   const [filterMonth,    setFilterMonth]    = React.useState(today.getMonth() + 1)
   const [filterDay,      setFilterDay]      = React.useState<number>(today.getDate())
@@ -461,6 +463,12 @@ export function VisaoAcumuladaPage() {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <Button variant={viewMode === "tabela" ? "default" : "outline"} size="sm" className="h-8 gap-1.5" onClick={() => setViewMode("tabela")}>
+                <Table2 className="size-3.5" /> Tabela
+              </Button>
+              <Button variant={viewMode === "cards" ? "default" : "outline"} size="sm" className="h-8 gap-1.5" onClick={() => setViewMode("cards")}>
+                <LayoutGrid className="size-3.5" /> Cards
+              </Button>
               <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={() => setShowGerenciarColunas(true)}>
                 <Columns3 className="size-3.5 text-muted-foreground" /> Gerenciar Colunas
               </Button>
@@ -534,133 +542,139 @@ export function VisaoAcumuladaPage() {
       )}
 
       {!loading && acumulado.length > 0 && (
-        <div className="rounded-xl border border-border/60 shadow-sm overflow-hidden">
-          <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 320px)" }}>
-            <table className="w-full text-[11px]">
-              <thead className="sticky top-0 z-10">
-                <tr className="border-b" style={{ backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.85)" }}>
-                  <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap w-16" style={{ backgroundColor: "transparent" }}>CARGAS</th>
-                  {gridCols.map(col => (
-                    <React.Fragment key={col}>
-                      <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
-                        style={{ backgroundColor: "transparent" }} onClick={() => toggleSort(col)}>
-                        <span className="flex items-center justify-center gap-1">
-                          {col}{sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
-                        </span>
-                      </th>
-                      {/* ✅ MODELO e OPERAÇÃO */}
-                      {col === "REGIÃO" && (
-                        <>
-                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
-                        </>
-                      )}
-                      {col === "AJUDANTE 2" && (
-                        <>
-                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
-                        </>
-                      )}
-                      {col === "PESO" && (
-                        <>
-                          <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>CAPACIDADE</th>
-                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OCUPAÇÃO</th>
-                        </>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {acumulado.map((row, i) => {
-                  const multiRota = row.__cargas > 1
-                  return (
-                    <tr key={i} className={cn("border-b transition-colors",
-                      multiRota ? "bg-amber-50/40 hover:bg-amber-50/80" :
-                      i % 2 === 0 ? "bg-background hover:bg-muted/10" : "bg-muted/5 hover:bg-muted/10")}>
-                      <td className="px-3 py-2 text-center">
-                        {multiRota ? (
-                          <button onClick={() => setDetalheRow(row)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200 transition-colors">
-                            <Layers className="size-2.5" />{row.__cargas}
-                          </button>
-                        ) : <span className="text-[10px] text-muted-foreground/50">1</span>}
-                      </td>
+        <>
+          {viewMode === "tabela" && (
+            <div className="rounded-xl border border-border/60 shadow-sm overflow-hidden">
+              <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 320px)" }}>
+                <table className="w-full text-[11px]">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="border-b" style={{ backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.85)" }}>
+                      <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap w-16" style={{ backgroundColor: "transparent" }}>CARGAS</th>
                       {gridCols.map(col => (
                         <React.Fragment key={col}>
-                          <td className={cn("px-3 py-2 whitespace-nowrap text-center", {
-                            "min-w-[200px]": col === "MOTORISTA",
-                            "min-w-[160px]": col === "AJUDANTE" || col === "AJUDANTE 2",
-                            "min-w-[180px]": col === "VIAGENS" || col === "ROTA",
-                          })}>{cellVal(row, col)}</td>
+                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
+                            style={{ backgroundColor: "transparent" }} onClick={() => toggleSort(col)}>
+                            <span className="flex items-center justify-center gap-1">
+                              {col}{sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
+                            </span>
+                          </th>
                           {/* ✅ MODELO e OPERAÇÃO */}
                           {col === "REGIÃO" && (
                             <>
-                              <td className="px-3 py-2 text-center whitespace-nowrap">{operacaoBadge(row["PLACA"], veiculoMap)}</td>
+                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
                             </>
                           )}
                           {col === "AJUDANTE 2" && (
                             <>
-                              <td className="px-3 py-2 text-center whitespace-nowrap">{modeloBadge(row["PLACA"], veiculoMap)}</td>
+                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
                             </>
                           )}
                           {col === "PESO" && (
                             <>
-                              <td className="px-3 py-2 text-center whitespace-nowrap tabular-nums">
-                                {/* {(() => { const cap = capacidadeMap.get(normalizarPlaca(row["PLACA"])); return cap ? <span>{cap.toLocaleString("pt-BR")} kg</span> : <span className="text-muted-foreground/40">—</span> })()} */}
-                                {(() => { const cap = capacidadeMap.get(normalizarPlaca(row["PLACA"])); return cap ? <span>{cap.toLocaleString("pt-BR")}</span> : <span className="text-muted-foreground/40">—</span> })()}
-                              </td>
-                              <td className="px-3 py-2 text-center whitespace-nowrap">{ocupacaoBadge(row["PESO"], row["PLACA"], veiculoMap)}</td>
+                              <th className="px-3 py-2.5 text-right font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>CAPACIDADE</th>
+                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OCUPAÇÃO</th>
                             </>
                           )}
                         </React.Fragment>
                       ))}
                     </tr>
-                  )
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 border-border font-semibold sticky bottom-0" style={{ backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.85)" }}>
-                  <td className="px-3 py-2.5 text-[11px] text-muted-foreground text-center">Total</td>
-                  {gridCols.map(col => {
-                    let content: React.ReactNode = null
-                    if      (col === "ENTREGAS") content = <span className="tabular-nums">{totais.entregas.toLocaleString("pt-BR")}</span>
-                    else if (col === "PESO")     content = <span className="tabular-nums">{fmtNum(totais.peso)}</span>
-                    else if (col === "KM")       content = <span className="tabular-nums">{fmtNum(totais.km)}</span>
-                    else if (col === "TEMPO")    content = <span className="font-mono">{totais.tempo}</span>
-                    else if (col === "VALOR")    content = <span className="tabular-nums">{fmtNum(totais.valor)}</span>
-                    else if (col === "FRETE")    content = <span className="tabular-nums">{fmtNum(totais.frete)}</span>
-                    return (
-                      <React.Fragment key={col}>
-                        <td className="px-3 py-2.5 text-center text-[11px]">{content}</td>
-                        {col === "AJUDANTE 2" && <td className="px-3 py-2.5" />}
-                        {col === "REGIÃO" && <td className="px-3 py-2.5" />}
-                        {col === "PESO" && (
-                          <>
-                            <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
-                              {totais.totalCapacidade > 0
-                                ? <span>{totais.totalCapacidade.toLocaleString("pt-BR")}</span>
-                                : <span className="text-muted-foreground/40">—</span>}
-                            </td>
-                            <td className="px-3 py-2.5 text-center">
-                              {totais.pctOcupacao !== null ? (() => {
-                                const pct = totais.pctOcupacao!
-                                const label = `${pct.toFixed(1)}%`
-                                return pct >= 100
-                                  ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{label}</span>
-                                  : pct >= 85
-                                  ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{label}</span>
-                                  : <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">{label}</span>
-                              })() : <span className="text-muted-foreground/40 text-[10px]">—</span>}
-                            </td>
-                          </>
-                        )}
-                      </React.Fragment>
-                    )
-                  })}
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
+                  </thead>
+                  <tbody>
+                    {acumulado.map((row, i) => {
+                      const multiRota = row.__cargas > 1
+                      return (
+                        <tr key={i} className={cn("border-b transition-colors",
+                          multiRota ? "bg-amber-50/40 hover:bg-amber-50/80" :
+                          i % 2 === 0 ? "bg-background hover:bg-muted/10" : "bg-muted/5 hover:bg-muted/10")}>
+                          <td className="px-3 py-2 text-center">
+                            {multiRota ? (
+                              <button onClick={() => setDetalheRow(row)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200 hover:bg-amber-200 transition-colors">
+                                <Layers className="size-2.5" />{row.__cargas}
+                              </button>
+                            ) : <span className="text-[10px] text-muted-foreground/50">1</span>}
+                          </td>
+                          {gridCols.map(col => (
+                            <React.Fragment key={col}>
+                              <td className={cn("px-3 py-2 whitespace-nowrap text-center", {
+                                "min-w-[200px]": col === "MOTORISTA",
+                                "min-w-[160px]": col === "AJUDANTE" || col === "AJUDANTE 2",
+                                "min-w-[180px]": col === "VIAGENS" || col === "ROTA",
+                              })}>{cellVal(row, col)}</td>
+                              {/* ✅ MODELO e OPERAÇÃO */}
+                              {col === "REGIÃO" && (
+                                <>
+                                  <td className="px-3 py-2 text-center whitespace-nowrap">{operacaoBadge(row["PLACA"], veiculoMap)}</td>
+                                </>)}
+                              {col === "AJUDANTE 2" && (
+                                <>
+                                  <td className="px-3 py-2 text-center whitespace-nowrap">{modeloBadge(row["PLACA"], veiculoMap)}</td>
+                                </>)}
+                              {col === "PESO" && (
+                                <>
+                                  <td className="px-3 py-2 text-center whitespace-nowrap tabular-nums">
+                                    {/* {(() => { const cap = capacidadeMap.get(normalizarPlaca(row["PLACA"])); return cap ? <span>{cap.toLocaleString("pt-BR")} kg</span> : <span className="text-muted-foreground/40">—</span> })()} */}
+                                    {(() => { const cap = capacidadeMap.get(normalizarPlaca(row["PLACA"])); return cap ? <span>{cap.toLocaleString("pt-BR")}</span> : <span className="text-muted-foreground/40">—</span> })()}
+                                  </td>
+                                  <td className="px-3 py-2 text-center whitespace-nowrap">{ocupacaoBadge(row["PESO"], row["PLACA"], veiculoMap)}</td>
+                                </>)}
+                            </React.Fragment>))}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border font-semibold sticky bottom-0" style={{ backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.85)" }}>
+                      <td className="px-3 py-2.5 text-[11px] text-muted-foreground text-center">Total</td>
+                      {gridCols.map(col => {
+                        let content: React.ReactNode = null
+                        if      (col === "ENTREGAS") content = <span className="tabular-nums">{totais.entregas.toLocaleString("pt-BR")}</span>
+                        else if (col === "PESO")     content = <span className="tabular-nums">{fmtNum(totais.peso)}</span>
+                        else if (col === "KM")       content = <span className="tabular-nums">{fmtNum(totais.km)}</span>
+                        else if (col === "TEMPO")    content = <span className="font-mono">{totais.tempo}</span>
+                        else if (col === "VALOR")    content = <span className="tabular-nums">{fmtNum(totais.valor)}</span>
+                        else if (col === "FRETE")    content = <span className="tabular-nums">{fmtNum(totais.frete)}</span>
+                        return (
+                          <React.Fragment key={col}>
+                            <td className="px-3 py-2.5 text-center text-[11px]">{content}</td>
+                            {col === "AJUDANTE 2" && <td className="px-3 py-2.5" />}
+                            {col === "REGIÃO" && <td className="px-3 py-2.5" />}
+                            {col === "PESO" && (
+                              <>
+                                <td className="px-3 py-2.5 text-right text-[11px] tabular-nums">
+                                  {totais.totalCapacidade > 0
+                                    ? <span>{totais.totalCapacidade.toLocaleString("pt-BR")}</span>
+                                    : <span className="text-muted-foreground/40">—</span>}
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  {totais.pctOcupacao !== null ? (() => {
+                                    const pct = totais.pctOcupacao!
+                                    const label = `${pct.toFixed(1)}%`
+                                    return pct >= 100
+                                      ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{label}</span>
+                                      : pct >= 85
+                                      ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{label}</span>
+                                      : <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">{label}</span>
+                                  })() : <span className="text-muted-foreground/40 text-[10px]">—</span>}
+                                </td>
+                              </>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+          {viewMode === "cards" && acumulado.length > 0 && (
+            <VisaoAcumuladaCards
+              rows={acumulado}
+              veiculoMap={veiculoMap}
+            />
+          )}
+        </>
       )}
 
       <DetalheCargas row={detalheRow} open={!!detalheRow} onClose={() => setDetalheRow(null)} />

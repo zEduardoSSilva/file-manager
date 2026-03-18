@@ -1,5 +1,6 @@
 
 import { Timestamp } from "firebase/firestore";
+import { UserRole } from "./user-roles";
 
 /**
  * Representa um único registro de entrega, como lido da planilha e salvo no Firestore.
@@ -82,4 +83,16 @@ export interface Veiculo {
   tipo?: string;
   empresa?: string;
   ativo: boolean;
+}
+
+/**
+ * Representa um perfil de usuário no sistema.
+ */
+export interface UserProfile {
+  id?: string; // ID do documento no Firestore
+  nome: string;
+  email: string;
+  role: UserRole;
+  ativo: boolean;
+  empresa?: string;
 }

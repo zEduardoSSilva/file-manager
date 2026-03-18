@@ -4,7 +4,7 @@ import {
   RefreshCw, Loader2, Edit2, X, Check, ChevronDown, ChevronUp,
   Search, Database, Trash2, ServerCrash, FileStack, CalendarDays,
   Building2, Hash, FileDown, Columns3, Undo2, Truck, ChevronRight,
-  FileSpreadsheet, Zap,
+  FileSpreadsheet, Zap, ClipboardList,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,6 +36,7 @@ import { trackRead, trackWrite, trackDelete } from "@/lib/firebaseUsageTracker"
 import { mainDocId, loadItemsFromFirebase } from "@/app/actions/actions-utils"
 import { getAnaliticaCacheKey, getFromCache, setInCache, clearCacheEntry } from "@/lib/data-cache"
 import { updateEntregasFromFaturamentoAction } from "@/app/actions/update-faturamento-action"
+import { FechamentoDiario } from "./FechamentoDiario"
 
 const firebaseConfig = {
   apiKey:            "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
@@ -439,6 +440,7 @@ export function VisaoAnaliticaPage() {
   const { toast } = useToast()
   const today = new Date()
 
+  const [activeSubTab,   setActiveSubTab]   = React.useState<"tabela" | "fechamento">("tabela")
   const [filterYear,     setFilterYear]     = React.useState(today.getFullYear())
   const [filterMonth,    setFilterMonth]    = React.useState(today.getMonth() + 1)
   const [filterDay,      setFilterDay]      = React.useState<number>(today.getDate())
@@ -676,6 +678,14 @@ export function VisaoAnaliticaPage() {
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <Button variant={activeSubTab === "tabela" ? "default" : "outline"} size="sm"
+                className="h-8 text-xs gap-1.5" onClick={() => setActiveSubTab("tabela")}>
+                <Database className="size-3.5" /> Tabela
+              </Button>
+              <Button variant={activeSubTab === "fechamento" ? "default" : "outline"} size="sm"
+                className="h-8 text-xs gap-1.5" onClick={() => setActiveSubTab("fechamento")}>
+                <ClipboardList className="size-3.5" /> Fechamento Diário
+              </Button>
               <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0" onClick={() => setShowGerenciarColunas(true)}><Columns3 className="size-3.5 text-muted-foreground" /> Colunas</Button>
               <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0" onClick={exportXlsx}><FileDown className="size-3.5 text-muted-foreground" /> Exportar Excel</Button>
               <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0" onClick={() => { setFatFile(null); setFatLog([]); setShowFaturamento(true) }}><Zap className="size-3.5 text-amber-500" /> Atualizar Faturamento</Button>
@@ -751,76 +761,87 @@ export function VisaoAnaliticaPage() {
       )}
 
       {!loading && rows.length > 0 && (
-        <div className="rounded-xl border border-border/60 shadow-sm overflow-hidden">
-          <div ref={tableContainerRef} className="overflow-auto" style={{ maxHeight: "calc(100vh - 320px)" }}>
-            <table className="w-full text-[11px]">
-              <thead className="sticky top-0 z-10">
-                <tr className="border-b" style={{ backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.85)" }}>
-                  <th className="px-3 py-2.5 w-10" style={{ backgroundColor: "transparent" }}>
-                    <Checkbox checked={allSelected} aria-checked={someSelected ? "mixed" : allSelected} onCheckedChange={toggleAll} className="size-3.5" />
-                  </th>
-                  {gridCols.map(col => (
-                    <React.Fragment key={col}>
-                      <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
-                        style={{ backgroundColor: "transparent" }} onClick={() => toggleSort(col)}>
-                        <span className="flex items-center justify-center gap-1">
-                          {col}{sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
-                        </span>
+        <>
+          {activeSubTab === "fechamento" && (
+            <FechamentoDiario
+              rows={filtered}
+              filterDay={filterDay}
+              filterMonth={filterMonth}
+              filterYear={filterYear}
+              filial={filterFilial === "all" ? undefined : filterFilial}
+            />
+          )}
+          {activeSubTab === "tabela" && (
+            <div className="rounded-xl border border-border/60 shadow-sm overflow-hidden">
+              <div ref={tableContainerRef} className="overflow-auto" style={{ maxHeight: "calc(100vh - 320px)" }}>
+                <table className="w-full text-[11px]">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="border-b" style={{ backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.85)" }}>
+                      <th className="px-3 py-2.5 w-10" style={{ backgroundColor: "transparent" }}>
+                        <Checkbox checked={allSelected} aria-checked={someSelected ? "mixed" : allSelected} onCheckedChange={toggleAll} className="size-3.5" />
                       </th>
-                      {/* ✅ MODELO e OPERAÇÃO */}
-                      {col === "REGIÃO" && (
-                        <>
-                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
-                        </>
-                      )}
-                      {col === "AJUDANTE 2" && (
-                        <>
-                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
-                        </>
-                      )}
-                    </React.Fragment>
-                  ))}
-                  <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground w-14" style={{ backgroundColor: "transparent" }}>Editar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((row, i) => {
-                  const isSelected = selected.has(row.__rowIdx)
-                  return (
-                    <tr key={row._itemId ?? i} className={cn("border-b transition-colors hover:bg-muted/10",
-                      isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/5")}>
-                      <td className="px-3 py-2 text-center">
-                        <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(row.__rowIdx)} className="size-3.5" />
-                      </td>
                       {gridCols.map(col => (
                         <React.Fragment key={col}>
-                          <td className={cn("px-3 py-2 whitespace-nowrap text-center", {
-                            "min-w-[240px]": col === "MOTORISTA",
-                            "min-w-[200px]": col === "AJUDANTE" || col === "AJUDANTE 2",
-                          })}>{cellVal(row[col], col)}</td>
+                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
+                            style={{ backgroundColor: "transparent" }} onClick={() => toggleSort(col)}>
+                            <span className="flex items-center justify-center gap-1">
+                              {col}{sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
+                            </span>
+                          </th>
                           {/* ✅ MODELO e OPERAÇÃO */}
                           {col === "REGIÃO" && (
                             <>
-                              <td className="px-3 py-2 whitespace-nowrap text-center">{operacaoBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
+                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
                             </>
                           )}
                           {col === "AJUDANTE 2" && (
                             <>
-                              <td className="px-3 py-2 whitespace-nowrap text-center">{modeloBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
+                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
                             </>
                           )}
                         </React.Fragment>
                       ))}
-                      <td className="px-3 py-2 text-center">
-                        <Button variant="ghost" size="icon" className="size-6" onClick={() => openEdit(row)}><Edit2 className="size-3 text-primary" /></Button>
-                      </td>
+                      <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground w-14" style={{ backgroundColor: "transparent" }}>Editar</th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                  </thead>
+                  <tbody>
+                    {filtered.map((row, i) => {
+                      const isSelected = selected.has(row.__rowIdx)
+                      return (
+                        <tr key={row._itemId ?? i} className={cn("border-b transition-colors hover:bg-muted/10",
+                          isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/5")}>
+                          <td className="px-3 py-2 text-center">
+                            <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(row.__rowIdx)} className="size-3.5" />
+                          </td>
+                          {gridCols.map(col => (
+                            <React.Fragment key={col}>
+                              <td className={cn("px-3 py-2 whitespace-nowrap text-center", {
+                                "min-w-[240px]": col === "MOTORISTA",
+                                "min-w-[200px]": col === "AJUDANTE" || col === "AJUDANTE 2",
+                              })}>{cellVal(row[col], col)}</td>
+                              {/* ✅ MODELO e OPERAÇÃO */}
+                              {col === "REGIÃO" && (
+                                <>
+                                  <td className="px-3 py-2 whitespace-nowrap text-center">{operacaoBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
+                                </>)}
+                              {col === "AJUDANTE 2" && (
+                                <>
+                                  <td className="px-3 py-2 whitespace-nowrap text-center">{modeloBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
+                                </>)}
+                            </React.Fragment>
+                          ))}
+                          <td className="px-3 py-2 text-center">
+                            <Button variant="ghost" size="icon" className="size-6" onClick={() => openEdit(row)}><Edit2 className="size-3 text-primary" /></Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>

@@ -1,19 +1,19 @@
-
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { PipelineLayout } from '@/pages/Layout'
 import HomePage from '@/pages/HomePage'
 import IndexPage from '@/pages/Index'
 import { VisaoAnaliticaPage } from '@/components/pipeline/entregas-analitica'
 import { VisaoAcumuladaPage } from '@/components/pipeline/entregas-acumulada'
-import { VisaoStatusPage } from '@/components/pipeline/visao-status'
+import  VisaoStatusPage  from '@/components/pipeline/status-pipeline-view'
+import  VisaoComercialPage  from '@/components/pipeline/comercial-pipeline-view'
 import { VeiculosPipelineView } from '@/components/pipeline/veiculos-pipeline-view'
 import { FuncionariosPipelineView } from '@/components/pipeline/funcionarios-pipeline-view'
 import { IncentivoPipelineView } from '@/components/pipeline/incentivo-pipeline-view'
 import { MotivosDevPipelineView } from '@/components/pipeline/motivos-dev-pipeline-view'
 import FirebaseUsage from '@/pages/FirebaseUsage'
 import { LoginPage } from '@/pages/LoginPage'
-import { AdminDashboardPage } from '@/pages/AdminDashboardPage'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
+import UserManagementPage from '@/pages/UserManagementPage'
 
 export default function App() {
   return (
@@ -23,7 +23,7 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<PipelineLayout />}>
             <Route path="/" element={<HomePage />} />
-            <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
+            <Route path="/user-management" element={<UserManagementPage />} />
             <Route path="/usage" element={<FirebaseUsage />} />
             <Route path="/pipeline" element={<Navigate to="/" />} />
 
@@ -37,6 +37,7 @@ export default function App() {
             <Route path="/visuais/entregas-analitica" element={<VisaoAnaliticaPage />} />
             <Route path="/visuais/entregas-acumulada" element={<VisaoAcumuladaPage  />} />
             <Route path="/visuais/status" element={<VisaoStatusPage />} />
+            <Route path="/visuais/visao-comercial" element={<VisaoComercialPage />} />
 
             <Route path="/pipeline/:pipelineId" element={<IndexPage />} />
           </Route>

@@ -1,20 +1,21 @@
-import { Outlet, Link, useLocation, useParams, useNavigate } from "react-router-dom"
+import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import {
   SidebarProvider, Sidebar, SidebarContent, SidebarHeader,
   SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarGroup,
   SidebarGroupLabel, SidebarInset, SidebarTrigger, SidebarFooter
-} from "@/components/ui/sidebar"
+} from "@/components/ui/sidebar";
 import {
   Truck, Database, LayoutDashboard, LogOut, ChevronRight, User,
   Zap, ZapOff, Clock, FileStack, FileSpreadsheet, Building2,
   TrendingUp, PackageX, BadgePercent, MapPin, GitMerge, Search,
-  LayoutGrid, Settings, Layers, FileX, BarChart
-} from "lucide-react"
-import { ModeToggle } from "@/components/mode-toggle"
-import { Button } from "@/components/ui/button"
-import { useState } from "react"
-import { toggleFirebaseConnection, getFirebaseConnectionStatus } from "@/lib/firebase-connection"
-import { useAuth } from "@/contexts/AuthContext"
+  LayoutGrid, Settings, Layers, FileX, BarChart, ShieldCheck
+} from "lucide-react";
+import { ModeToggle } from "@/components/mode-toggle";
+import { Button } from "@/components/ui/button";
+import { useState } from "react";
+import { toggleFirebaseConnection, getFirebaseConnectionStatus } from "@/lib/firebase-connection";
+import { useAuth } from "@/contexts/AuthContext";
+import { UserRole } from "@/lib/user-roles";
 
 const NAV_GROUPS = [
   {
@@ -23,6 +24,7 @@ const NAV_GROUPS = [
       { id: 'entregas-analitica', name: 'Visão Analítica', icon: LayoutGrid, path: "/visuais/entregas-analitica" },
       { id: 'entregas-acumulada', name: 'Visão Acumulada', icon: Layers,     path: "/visuais/entregas-acumulada" },
       { id: 'visao-status',       name: 'Visão Status',    icon: BarChart,   path: "/visuais/status" },
+      { id: 'visao-comercial',    name: 'Visão Comercial', icon: TrendingUp, path: "/visuais/visao-comercial" },
     ]
   },
   {
@@ -34,9 +36,9 @@ const NAV_GROUPS = [
   {
     label: "CADASTROS",
     items: [
-      { id: 'funcionarios', name: 'Funcionarios', icon: User,         path: '/pipeline/funcionarios' },
-      { id: 'veiculos',     name: 'Veiculos',     icon: Truck,        path: '/pipeline/veiculos' },
-      { id: 'motivos-dev',  name: 'Motivos Dev.', icon: FileX,        path: '/pipeline/motivos-dev' },
+      { id: 'funcionarios', name: 'Funcionarios', icon: User,  path: '/pipeline/funcionarios' },
+      { id: 'veiculos',     name: 'Veiculos',     icon: Truck, path: '/pipeline/veiculos' },
+      { id: 'motivos-dev',  name: 'Motivos Dev.', icon: FileX, path: '/pipeline/motivos-dev' },
     ]
   },
   {
@@ -48,51 +50,55 @@ const NAV_GROUPS = [
   {
     label: "INDICADORES",
     items: [
-      { id: 'vfleet',        name: 'vFleet Pilot',  icon: Truck,        path: '/pipeline/vfleet' },
-      { id: 'performaxxi',   name: 'Performaxxi',   icon: Zap,          path: '/pipeline/performaxxi' },
-      { id: 'ponto',         name: 'Absenteísmo',   icon: Clock,        path: '/pipeline/ponto' },
-      { id: 'faturista',     name: 'Faturista',     icon: BadgePercent, path: '/pipeline/faturista' },
-      { id: 'roadshow',      name: 'Roadshow',      icon: MapPin,       path: '/pipeline/roadshow' },
-      { id: 'devolucoes',    name: 'Devoluções',    icon: PackageX,     path: '/pipeline/devolucoes' },
-      { id: 'coordenadores', name: 'Coordenadores', icon: Building2,    path: '/pipeline/coordenadores' },
-      { id: 'cco',           name: 'CCO Empresa',   icon: TrendingUp,   path: '/pipeline/cco' },
-      { id: 'consolidador',  name: 'Final',         icon: FileStack,    path: '/pipeline/consolidador' },
+      { id: 'vfleet', name: 'vFleet Pilot', icon: Truck, path: '/pipeline/vfleet' },
+      { id: 'performaxxi', name: 'Performaxxi', icon: Zap, path: '/pipeline/performaxxi' },
+      { id: 'ponto', name: 'Absenteísmo', icon: Clock, path: '/pipeline/ponto' },
+      { id: 'faturista', name: 'Faturista', icon: BadgePercent, path: '/pipeline/faturista' },
+      { id: 'roadshow', name: 'Roadshow', icon: MapPin, path: '/pipeline/roadshow' },
+      { id: 'devolucoes', name: 'Devoluções', icon: PackageX, path: '/pipeline/devolucoes' },
+      { id: 'coordenadores', name: 'Coordenadores', icon: Building2, path: '/pipeline/coordenadores' },
+      { id: 'cco', name: 'CCO Empresa', icon: TrendingUp, path: '/pipeline/cco' },
+      { id: 'consolidador', name: 'Final', icon: FileStack, path: '/pipeline/consolidador' },
     ]
   },
   {
     label: "TAREFAS",
     items: [
-      { id: 'retorno-pedidos',    name: 'Retorn. Pedidos TXT',  icon: Search,   path: '/pipeline/retorno-pedidos' },
-      { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL',   icon: MapPin,   path: '/pipeline/retorno-pedidos-ul' },
+      { id: 'retorno-pedidos', name: 'Retorn. Pedidos TXT', icon: Search, path: '/pipeline/retorno-pedidos' },
+      { id: 'retorno-pedidos-ul', name: 'Retorn. Pedidos UL', icon: MapPin, path: '/pipeline/retorno-pedidos-ul' },
       { id: 'mercanete-roadshow', name: 'Mercanete x Roadshow', icon: GitMerge, path: '/pipeline/mercanete-roadshow' },
     ]
   }
-]
+];
+
+const ADMIN_GROUP = {
+  label: "ADMINISTRAÇÃO",
+  items: [
+    { id: 'usage', name: 'Visão Administrativa', icon: ShieldCheck, path: "/usage" },
+    { id: 'user-management', name: 'Gerenciar Usuários', icon: User, path: "/user-management" },
+  ]
+};
 
 export function PipelineLayout() {
-  const { pathname }   = useLocation()
-  const { pipelineId } = useParams<{ pipelineId: string }>()
-  const navigate       = useNavigate()
-  const { currentUser, logout } = useAuth()
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const { currentUser, logout } = useAuth();
 
-  const [isFirebaseConnected, setFirebaseConnected] = useState(getFirebaseConnectionStatus())
+  const [isFirebaseConnected, setFirebaseConnected] = useState(getFirebaseConnectionStatus());
 
   const handleToggleFirebase = () => {
-    toggleFirebaseConnection()
-    setFirebaseConnected(getFirebaseConnectionStatus())
-  }
+    toggleFirebaseConnection();
+    setFirebaseConnected(getFirebaseConnectionStatus());
+  };
 
-  // ✅ Logout → redireciona para /login
   const handleLogout = async () => {
-    await logout()
-    navigate("/login", { replace: true })
-  }
+    await logout();
+    navigate("/login", { replace: true });
+  };
 
-  // ✅ Nome e email vindos do Firebase Auth
-  const displayName = currentUser?.displayName
-    ?? currentUser?.email?.split("@")[0]
-    ?? "Usuário"
-  const email = currentUser?.email ?? ""
+  const displayName = currentUser?.displayName ?? currentUser?.email?.split("@")[0] ?? "Usuário";
+  const email = currentUser?.email ?? "";
+  const isAdmin = currentUser?.role === UserRole.ADMINISTRADOR;
 
   return (
     <SidebarProvider>
@@ -136,7 +142,7 @@ export function PipelineLayout() {
               </SidebarGroupLabel>
               <SidebarMenu>
                 {group.items.map((p) => {
-                  const Icon = p.icon
+                  const Icon = p.icon;
                   return (
                     <SidebarMenuItem key={p.id}>
                       <SidebarMenuButton tooltip={p.name} isActive={pathname === p.path} asChild>
@@ -147,14 +153,38 @@ export function PipelineLayout() {
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
-                  )
+                  );
                 })}
               </SidebarMenu>
             </SidebarGroup>
           ))}
+          
+          {isAdmin && (
+             <SidebarGroup key={ADMIN_GROUP.label}>
+              <SidebarGroupLabel className="text-[10px] uppercase tracking-wider font-black text-muted-foreground/70">
+                {ADMIN_GROUP.label}
+              </SidebarGroupLabel>
+              <SidebarMenu>
+                {ADMIN_GROUP.items.map((p) => {
+                  const Icon = p.icon;
+                  return (
+                    <SidebarMenuItem key={p.id}>
+                      <SidebarMenuButton tooltip={p.name} isActive={pathname === p.path} asChild>
+                        <Link to={p.path}>
+                          <Icon className="size-4" />
+                          <span className="text-xs">{p.name}</span>
+                          <ChevronRight className="ml-auto size-3 opacity-50" />
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroup>
+          )}
+
         </SidebarContent>
 
-        {/* ✅ Footer com dados reais + logout */}
         <SidebarFooter className="border-t pt-2">
           <SidebarMenu>
             <SidebarMenuItem>
@@ -184,8 +214,8 @@ export function PipelineLayout() {
               title={isFirebaseConnected ? "Desconectar Firebase" : "Conectar Firebase"}
             >
               {isFirebaseConnected
-                ? <Zap    className="size-4 text-green-500" />
-                : <ZapOff className="size-4 text-red-500"  />}
+                ? <Zap className="size-4 text-green-500" />
+                : <ZapOff className="size-4 text-red-500" />}
             </Button>
             <Button variant="ghost" size="icon" asChild>
               <Link to="/usage"><Settings className="size-4" /></Link>
@@ -195,10 +225,10 @@ export function PipelineLayout() {
         </header>
         <main className="flex-1 overflow-x-hidden overflow-y-auto p-3 sm:p-6 min-w-0 scroll-smooth">
           <div className="max-w-full overflow-hidden min-w-0">
-            <Outlet context={{ pipelineId }} />
+            <Outlet />
           </div>
         </main>
       </SidebarInset>
     </SidebarProvider>
-  )
+  );
 }
