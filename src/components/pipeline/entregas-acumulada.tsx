@@ -2,7 +2,7 @@ import * as React from "react"
 import {
   RefreshCw, Loader2, ChevronDown, ChevronUp,
   Search, Database, FileDown, Columns3, Undo2,
-  Check, X, Layers, LayoutGrid, Table2,
+  Check, X, Layers, LayoutGrid, Table2, WifiOff,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -25,6 +25,8 @@ import { trackRead } from "@/lib/firebaseUsageTracker"
 import { mainDocId } from "@/app/actions/actions-utils"
 import { getFromCache, setInCache, getAcumuladaCacheKey } from "@/lib/data-cache"
 import { VisaoAcumuladaCards } from "./entregas-acumulada-cards"
+import { getFirebaseConnectionStatus } from "@/lib/firebase-connection"
+import { getStoragePayload } from "@/lib/analitica-storage"
 
 const firebaseConfig = {
   apiKey:            "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
@@ -95,6 +97,7 @@ function normalizarPlaca(placa: any): string {
   return String(placa ?? "").trim().toUpperCase().replace(/[-\s]/g, "")
 }
 
+// ─── Badges de Ocupação ────────────────────────────────────────────────────────
 function ocupacaoBadge(peso: number, placa: string, veiculoMap: Map<string, VeiculoInfo>): React.ReactNode {
   const info = veiculoMap.get(normalizarPlaca(placa))
   if (!normalizarPlaca(placa) || !info || info.capacidade <= 0)
@@ -140,7 +143,7 @@ function acumularLinhas(rows: RawRow[]): AccumulatedRow[] {
     const tipoCarga = classificarTipoCarga(row["OBSERVAÇÃO"])
     const chave = `${data}||${motorista}||${placa}||${tipoCarga}`
     const viagem = String(row["VIAGENS"] ?? "").trim()
-    const rota   = String(row["ROTA"]    ?? "").trim()
+    const rota   = String(row["ROTA"] ?? row["CATEGORIA_ORIGEM"] ?? "").trim()
     if (!grupos.has(chave)) {
       grupos.set(chave, {
         "DATA DE ENTREGA": data, "FILIAL": String(row["FILIAL"] ?? ""),
@@ -235,7 +238,7 @@ function DetalheCargas({ row, open, onClose }: { row: AccumulatedRow | null; ope
             <tbody>{row.__linhasOriginais.map((linha, i) => (
               <tr key={i} className={cn("border-b", i % 2 === 0 ? "bg-background" : "bg-muted/5")}>
                 <td className="px-3 py-2 font-semibold text-primary">{i + 1}</td>
-                <td className="px-3 py-2">{linha["ROTA"] ?? "—"}</td>
+                <td className="px-3 py-2">{linha["ROTA"] ?? linha["CATEGORIA_ORIGEM"] ?? "—"}</td>
                 <td className="px-3 py-2 font-mono">{linha["VIAGENS"] ?? "—"}</td>
                 <td className="px-3 py-2 tabular-nums">{numVal(linha["ENTREGAS"]) || "—"}</td>
                 <td className="px-3 py-2 tabular-nums">{fmtNum(numVal(linha["PESO"])) || "—"}</td>
@@ -298,6 +301,16 @@ export function VisaoAcumuladaPage() {
   const { toast } = useToast()
   const today = new Date()
 
+  // ── Firebase on/off (sincroniza com o Zap global) ─────────────────────────
+  const [firebaseOn, setFirebaseOn] = React.useState(getFirebaseConnectionStatus)
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      const current = getFirebaseConnectionStatus()
+      setFirebaseOn(prev => prev !== current ? current : prev)
+    }, 500)
+    return () => clearInterval(interval)
+  }, [])
+
   const [viewMode,       setViewMode]       = React.useState<"tabela" | "cards">("tabela")
   const [filterYear,     setFilterYear]     = React.useState(today.getFullYear())
   const [filterMonth,    setFilterMonth]    = React.useState(today.getMonth() + 1)
@@ -321,10 +334,11 @@ export function VisaoAcumuladaPage() {
 
   const [veiculoMap, setVeiculoMap] = React.useState<Map<string, VeiculoInfo>>(new Map())
 
-  // ── Ref para evitar re-fetch quando apenas filterDay muda ─────────────────
   const loadedPeriodRef = React.useRef<string>("")
 
+  // Só busca veículos quando Firebase ligado
   React.useEffect(() => {
+    if (!firebaseOn) return
     getDocs(collection(db, "docs_veiculos")).then(snap => {
       const map = new Map<string, VeiculoInfo>()
       for (const d of snap.docs) {
@@ -337,7 +351,7 @@ export function VisaoAcumuladaPage() {
       }
       setVeiculoMap(map)
     }).catch(() => {})
-  }, [])
+  }, [firebaseOn])
 
   const capacidadeMap = React.useMemo(() => {
     const m = new Map<string, number>()
@@ -347,7 +361,24 @@ export function VisaoAcumuladaPage() {
 
   const fetchData = React.useCallback(async (forceRefresh = false) => {
     const periodKey = `${filterYear}-${filterMonth}`
-    // Se o período já está carregado em memória e não é forçado, não faz nada
+
+    // ── MODO OFFLINE: lê do localStorage (mesmo buffer da Visão Analítica) ──
+    if (!firebaseOn) {
+      setLoading(true)
+      const payload = getStoragePayload(filterYear, filterMonth)
+      if (payload?.rows?.length) {
+        setRawRows(payload.rows as RawRow[])
+        setTotalCount(payload.rows.length)
+        toast({ description: `${payload.rows.length} registros do buffer local.` })
+      } else {
+        setRawRows([]); setTotalCount(0)
+        toast({ description: "Nenhum dado no buffer local. Importe um Excel na Visão Analítica." })
+      }
+      setLoading(false)
+      return
+    }
+
+    // ── MODO ONLINE: busca Firebase ──────────────────────────────────────────
     if (!forceRefresh && loadedPeriodRef.current === periodKey) {
       setLoading(false); return
     }
@@ -385,10 +416,10 @@ export function VisaoAcumuladaPage() {
       toast({ variant: "destructive", title: "Erro", description: e.message })
       setRawRows([]); setTotalCount(0)
     } finally { setLoading(false) }
-  }, [filterYear, filterMonth, toast])
+  }, [filterYear, filterMonth, firebaseOn, toast])
 
-  // ✅ Só re-busca quando ano ou mês mudam — filterDay nunca dispara Firebase
-  React.useEffect(() => { fetchData() }, [filterYear, filterMonth]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-busca quando período ou conexão mudam
+  React.useEffect(() => { fetchData() }, [filterYear, filterMonth, firebaseOn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filiais  = React.useMemo(() => [...new Set(rawRows.map(r => r["FILIAL"]).filter(Boolean))].sort(), [rawRows])
   const regioes  = React.useMemo(() => [...new Set(rawRows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rawRows])
@@ -408,7 +439,10 @@ export function VisaoAcumuladaPage() {
     if (filterDay > 0)          r = r.filter(row => extractDay(row["DATA DE ENTREGA"]) === filterDay)
     if (filterFilial !== "all") r = r.filter(row => row["FILIAL"] === filterFilial)
     if (filterRegiao !== "all") r = r.filter(row => row["REGIÃO"] === filterRegiao)
-    if (hideRotaChao)           r = r.filter(row => String(row["ROTA"] ?? "").toUpperCase().trim() !== "CHÃO")
+    if (hideRotaChao)           r = r.filter(row => {
+      const cat = String(row["ROTA"] ?? row["CATEGORIA_ORIGEM"] ?? "").toUpperCase().trim()
+      return cat !== "CHÃO" && cat !== "CHAO"
+    })
     if (search) { const s = search.toLowerCase(); r = r.filter(row => Object.values(row).some(v => String(v ?? "").toLowerCase().includes(s))) }
     let acc = acumularLinhas(r)
     if (filterModelo !== "all")   acc = acc.filter(row => (veiculoMap.get(normalizarPlaca(row["PLACA"]))?.modelo ?? "").trim() === filterModelo)
@@ -431,7 +465,6 @@ export function VisaoAcumuladaPage() {
     const tempo    = minutosParaTempo(acumulado.reduce((s, r) => s + r["TEMPO_MINUTOS"], 0))
     const valor    = acumulado.reduce((s, r) => s + r["VALOR"],    0)
     const frete    = acumulado.reduce((s, r) => s + r["FRETE"],    0)
-    // soma capacidade apenas das placas cadastradas (sem duplicar por viagem)
     const placasVistas = new Set<string>()
     let totalCapacidade = 0
     for (const r of acumulado) {
@@ -456,10 +489,13 @@ export function VisaoAcumuladaPage() {
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div>
-              <CardTitle className="flex items-center gap-2 text-base"><Layers className="size-4 text-primary" /> Visão Acumulada — Entregas</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Layers className="size-4 text-primary" /> Visão Acumulada — Entregas
+                {!firebaseOn && <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-300 gap-1"><WifiOff className="size-2.5" /> Offline</Badge>}
+              </CardTitle>
               <CardDescription className="mt-0.5">
                 Rotas de Entrega
-                {totalCount > 0 && <span className="ml-1 font-semibold text-foreground">· {totalCount.toLocaleString("pt-BR")} registros no banco.</span>}
+                {totalCount > 0 && <span className="ml-1 font-semibold text-foreground">· {totalCount.toLocaleString("pt-BR")} registros{firebaseOn ? " no banco" : " no buffer"}.</span>}
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -515,9 +551,14 @@ export function VisaoAcumuladaPage() {
               </div></div>
             <div className="flex items-center self-end pb-1 gap-2">
               <input type="checkbox" id="hide-chao-acum" checked={hideRotaChao} onChange={e => setHideRotaChao(e.target.checked)} className="size-3.5 accent-primary" />
-              <label htmlFor="hide-chao-acum" className="text-xs font-medium leading-none cursor-pointer">Ocultar CHÃO</label></div>
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fetchData(true)} disabled={loading}>
-              {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} Atualizar
+              <label htmlFor="hide-chao-acum" className="text-xs font-medium leading-none cursor-pointer">Ocultar CHÃO</label>
+            </div>
+            <Button size="sm" className="h-8 gap-1.5 text-xs"
+              onClick={() => fetchData(true)}
+              disabled={loading || !firebaseOn}
+              title={!firebaseOn ? "Firebase desconectado — dados vêm do buffer local" : undefined}>
+              {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+              {firebaseOn ? "Atualizar" : "Buffer Local"}
             </Button>
           </div>
           {acumulado.length > 0 && (
@@ -536,8 +577,18 @@ export function VisaoAcumuladaPage() {
 
       {!loading && acumulado.length === 0 && (
         <div className="rounded-xl border border-dashed border-border/60 py-16 text-center">
-          <Database className="size-8 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Nenhum dado para o período. Clique em <strong>Atualizar</strong>.</p>
+          {!firebaseOn ? (
+            <div className="space-y-3">
+              <WifiOff className="size-8 text-muted-foreground/30 mx-auto" />
+              <p className="text-sm text-muted-foreground">Firebase desconectado.</p>
+              <p className="text-xs text-muted-foreground">Importe um Excel na <strong>Visão Analítica</strong> para visualizar os dados aqui.</p>
+            </div>
+          ) : (
+            <div>
+              <Database className="size-8 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">Nenhum dado para o período. Clique em <strong>Atualizar</strong>.</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -558,16 +609,11 @@ export function VisaoAcumuladaPage() {
                               {col}{sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
                             </span>
                           </th>
-                          {/* ✅ MODELO e OPERAÇÃO */}
                           {col === "REGIÃO" && (
-                            <>
-                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
-                            </>
+                            <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
                           )}
                           {col === "AJUDANTE 2" && (
-                            <>
-                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
-                            </>
+                            <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
                           )}
                           {col === "PESO" && (
                             <>
@@ -601,24 +647,22 @@ export function VisaoAcumuladaPage() {
                                 "min-w-[160px]": col === "AJUDANTE" || col === "AJUDANTE 2",
                                 "min-w-[180px]": col === "VIAGENS" || col === "ROTA",
                               })}>{cellVal(row, col)}</td>
-                              {/* ✅ MODELO e OPERAÇÃO */}
                               {col === "REGIÃO" && (
-                                <>
-                                  <td className="px-3 py-2 text-center whitespace-nowrap">{operacaoBadge(row["PLACA"], veiculoMap)}</td>
-                                </>)}
+                                <td className="px-3 py-2 text-center whitespace-nowrap">{operacaoBadge(row["PLACA"], veiculoMap)}</td>
+                              )}
                               {col === "AJUDANTE 2" && (
-                                <>
-                                  <td className="px-3 py-2 text-center whitespace-nowrap">{modeloBadge(row["PLACA"], veiculoMap)}</td>
-                                </>)}
+                                <td className="px-3 py-2 text-center whitespace-nowrap">{modeloBadge(row["PLACA"], veiculoMap)}</td>
+                              )}
                               {col === "PESO" && (
                                 <>
                                   <td className="px-3 py-2 text-center whitespace-nowrap tabular-nums">
-                                    {/* {(() => { const cap = capacidadeMap.get(normalizarPlaca(row["PLACA"])); return cap ? <span>{cap.toLocaleString("pt-BR")} kg</span> : <span className="text-muted-foreground/40">—</span> })()} */}
                                     {(() => { const cap = capacidadeMap.get(normalizarPlaca(row["PLACA"])); return cap ? <span>{cap.toLocaleString("pt-BR")}</span> : <span className="text-muted-foreground/40">—</span> })()}
                                   </td>
                                   <td className="px-3 py-2 text-center whitespace-nowrap">{ocupacaoBadge(row["PESO"], row["PLACA"], veiculoMap)}</td>
-                                </>)}
-                            </React.Fragment>))}
+                                </>
+                              )}
+                            </React.Fragment>
+                          ))}
                         </tr>
                       )
                     })}
@@ -669,10 +713,7 @@ export function VisaoAcumuladaPage() {
             </div>
           )}
           {viewMode === "cards" && acumulado.length > 0 && (
-            <VisaoAcumuladaCards
-              rows={acumulado}
-              veiculoMap={veiculoMap}
-            />
+            <VisaoAcumuladaCards rows={acumulado} veiculoMap={veiculoMap} />
           )}
         </>
       )}

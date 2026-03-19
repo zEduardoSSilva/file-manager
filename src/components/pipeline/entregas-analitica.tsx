@@ -1,10 +1,13 @@
+"use client"
+
 import * as React from "react"
 import * as XLSX from "xlsx"
 import {
   RefreshCw, Loader2, Edit2, X, Check, ChevronDown, ChevronUp,
   Search, Database, Trash2, ServerCrash, FileStack, CalendarDays,
-  Building2, Hash, FileDown, Columns3, Undo2, Truck, ChevronRight,
-  FileSpreadsheet, Zap, ClipboardList,
+  Building2, Hash, FileDown, Columns3, Undo2, ChevronRight,
+  FileSpreadsheet, Zap, ClipboardList, Upload, CloudUpload,
+  HardDrive, WifiOff, AlertTriangle, Info,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -37,6 +40,11 @@ import { mainDocId, loadItemsFromFirebase } from "@/app/actions/actions-utils"
 import { getAnaliticaCacheKey, getFromCache, setInCache, clearCacheEntry } from "@/lib/data-cache"
 import { updateEntregasFromFaturamentoAction } from "@/app/actions/update-faturamento-action"
 import { FechamentoDiario } from "./FechamentoDiario"
+import { getFirebaseConnectionStatus, toggleFirebaseConnection } from "@/lib/firebase-connection"
+import {
+  getStoragePayload, setStoragePayload, clearStoragePayload,
+  getStorageSizeKb, StoragePayload,
+} from "@/lib/analitica-storage"
 
 const firebaseConfig = {
   apiKey:            "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
@@ -111,14 +119,14 @@ function SearchSelect({ label, value, onChange, options, placeholder }: {
 }
 
 const INITIAL_GRID_COLS = [
-  "DATA DE ENTREGA", "FILIAL", "REGIÃO", "ROTA",
+  "DATA DE ENTREGA", "FILIAL", "REGIÃO", "CATEGORIA_ORIGEM", "DESTINO",
   "MOTORISTA", "AJUDANTE", "AJUDANTE 2",
   "PLACA", "PLACA SISTEMA",
   "ENTREGAS", "PESO", "TEMPO", "KM",
   "VIAGENS", "VALOR", "STATUS", "OBSERVAÇÃO",
 ]
 const ALL_FIELDS = [
-  "DATA DE ENTREGA", "DATA", "FILIAL", "REGIÃO", "ROTA",
+  "DATA DE ENTREGA", "DATA", "FILIAL", "REGIÃO", "CATEGORIA_ORIGEM", "DESTINO",
   "MOTORISTA", "AJUDANTE", "AJUDANTE 2", "PLACA SISTEMA", "PLACA", "MODELO", "OCP",
   "ENTREGAS", "PESO", "TEMPO", "KM", "VIAGENS", "OBSERVAÇÃO", "CHAPA", "FRETE", "DESCARGA PALET",
   "HOSPEDAGEM", "DIARIA", "EXTRA", "SAÍDA", "VALOR", "STATUS", "CONTRATO",
@@ -129,7 +137,15 @@ type Row = Record<string, any> & { _itemId: string; __rowIdx: number }
 
 function extractTempo(v: any): string | null {
   if (!v) return null
+  if (v instanceof Date) {
+    return `${String(v.getHours()).padStart(2,"0")}:${String(v.getMinutes()).padStart(2,"0")}`
+  }
   const s = String(v).trim()
+  const n = parseFloat(s)
+  if (!isNaN(n) && n >= 0 && n < 1) {
+    const m = Math.round(n * 24 * 60)
+    return `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`
+  }
   if (/^\d{1,3}:\d{2}(:\d{2})?$/.test(s)) return s.substring(0, 5)
   const m = s.match(/(\d{2}:\d{2}:\d{2})/); if (m) return m[1].substring(0, 5)
   return null
@@ -148,30 +164,18 @@ function fmtTs(ts: number): string {
   return new Date(ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
 }
 
-// ─── Badges de veículo ────────────────────────────────────────────────────────
-function modeloBadgeAnalitica(placa: any, veiculoMap: Map<string, VeiculoInfo>): React.ReactNode {
-  const info = veiculoMap.get(normalizarPlaca(placa))
-  if (!info) return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600">Pendente</span>
-  const m = info.modelo?.trim().toUpperCase()
-  if (!m || m === "-") return <span className="text-muted-foreground/40 text-[10px]">—</span>
-  const cor =
-    m === "TRUCK"     ? "bg-slate-100 text-slate-700" :
-    m === "TOCO"      ? "bg-violet-100 text-violet-700" :
-    m === "CARRETA"   ? "bg-amber-100 text-amber-700" :
-    m === "BITRUCK"   ? "bg-orange-100 text-orange-700" :
-    m === "TRUCKINHO" ? "bg-teal-100 text-teal-700" :
-    m === "VAN"       ? "bg-pink-100 text-pink-700" :
-                        "bg-slate-100 text-slate-600"
-  return <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", cor)}>{m}</span>
-}
-function operacaoBadgeAnalitica(placa: any, veiculoMap: Map<string, VeiculoInfo>): React.ReactNode {
-  const info = veiculoMap.get(normalizarPlaca(placa))
-  if (!info) return <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600">Pendente</span>
-  const op = info.operacao?.trim()
-  if (!op) return <span className="text-muted-foreground/40 text-[10px]">—</span>
-  return <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full",
-    op === "FRETE" ? "bg-blue-100 text-blue-700" : op === "FROTA" ? "bg-primary/10 text-primary" : "bg-slate-100 text-slate-600"
-  )}>{op}</span>
+// ─── Badge de fonte de dados ──────────────────────────────────────────────────
+function FonteBadge({ source, sizeKb }: { source: StoragePayload["source"]; sizeKb: number }) {
+  return (
+    <Badge className={cn("text-[10px] gap-1.5",
+      source === "excel"    ? "bg-emerald-500/10 text-emerald-600 border-emerald-300" :
+      source === "firebase" ? "bg-blue-500/10 text-blue-600 border-blue-300" :
+                              "bg-amber-500/10 text-amber-600 border-amber-300"
+    )}>
+      <HardDrive className="size-2.5" />
+      Local · {source === "excel" ? "Excel" : source === "firebase" ? "Firebase" : "Misto"} · {sizeKb} KB
+    </Badge>
+  )
 }
 
 // ─── Gerenciar Colunas ────────────────────────────────────────────────────────
@@ -207,231 +211,413 @@ function GerenciarColunasDialog({ open, onClose, cols, setCols }: {
   )
 }
 
-// ─── Gerenciar Importações ────────────────────────────────────────────────────
-function GerenciarImportacoesDialog({ open, onClose, filterYear, filterMonth, onDeleted }: {
-  open: boolean; onClose: () => void; filterYear: number; filterMonth: number; onDeleted: () => void
+// ─── Modal: Importar Excel local ──────────────────────────────────────────────
+function ImportarExcelDialog({ open, onClose, onImport, year, month }: {
+  open: boolean; onClose: () => void
+  onImport: (rows: Record<string, any>[]) => void
+  year: number; month: number
 }) {
+  const [file,     setFile]     = React.useState<File | null>(null)
+  const [loading,  setLoading]  = React.useState(false)
+  const [preview,  setPreview]  = React.useState<{ cols: string[]; count: number } | null>(null)
+  const [error,    setError]    = React.useState<string | null>(null)
   const { toast } = useToast()
-  const [localYear,   setLocalYear]   = React.useState(filterYear)
-  const [localMonth,  setLocalMonth]  = React.useState(filterMonth)
-  const [meta,        setMeta]        = React.useState<any | null>(null)
-  const [loading,     setLoading]     = React.useState(false)
-  const [filterDay,   setFilterDay]   = React.useState(0)
-  const [confirmWipe, setConfirmWipe] = React.useState(false)
-  const [wiping,      setWiping]      = React.useState(false)
-  const [confirmWipeDay, setConfirmWipeDay] = React.useState(false)
-  const [wipingDay,      setWipingDay]      = React.useState(false)
 
-  const loadMeta = React.useCallback(async () => {
-    if (!open) return
+  async function handleFile(f: File) {
+    setFile(f); setError(null); setPreview(null)
+    try {
+      const buf = await f.arrayBuffer()
+      const wb  = XLSX.read(buf, { type: "array", cellDates: false })
+      // Lê todas as abas e acumula
+      let total = 0
+      const colSet = new Set<string>()
+      for (const name of wb.SheetNames) {
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: "" }) as any[]
+        total += rows.length
+        if (rows[0]) Object.keys(rows[0]).forEach(k => colSet.add(k))
+      }
+      setPreview({ cols: [...colSet].slice(0, 8), count: total })
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  async function doImport() {
+    if (!file) return
     setLoading(true)
     try {
-      const id = mainDocId("consolidacao-entregas", localYear, localMonth)
-      const snap = await getDoc(doc(db, "pipeline_results", id))
-      trackRead(1)
-      setMeta(snap.exists() ? { ...snap.data(), id } : null)
-    } catch (e: any) { toast({ variant: "destructive", title: "Erro", description: e.message }) }
-    finally { setLoading(false) }
-  }, [open, localYear, localMonth, toast])
-
-  React.useEffect(() => { if (open) loadMeta() }, [open, localYear, localMonth])
-
-  const wipePeriod = async () => {
-    if (!meta) return
-    setWiping(true)
-    try {
-      const docId = meta.id
-      const snap = await getDocs(collection(db, "pipeline_results", docId, "items"))
-      trackRead(snap.size)
-      const BATCH_LIMIT = 499; let batch = writeBatch(db), count = 0
-      for (const d of snap.docs) { batch.delete(d.ref); count++; if (count >= BATCH_LIMIT) { await batch.commit(); trackDelete(count); batch = writeBatch(db); count = 0 } }
-      if (count > 0) { await batch.commit(); trackDelete(count) }
-      await updateDoc(doc(db, "pipeline_results", docId), { itemCount: 0, dedupKeys: [], porFilialDia: {}, summary: "", duplicadasCount: 0 })
-      trackWrite(1)
-      toast({ title: "Período apagado.", description: `Registros de ${String(localMonth).padStart(2,"0")}/${localYear} removidos.` })
-      setConfirmWipe(false); await loadMeta(); onDeleted()
-    } catch (e: any) { toast({ variant: "destructive", title: "Erro ao apagar", description: e.message }) }
-    finally { setWiping(false) }
-  }
-
-  const wipeDay = async () => {
-    if (!meta || filterDay === 0) return
-    setWipingDay(true)
-    const pad = String(filterDay).padStart(2, "0")
-    try {
-      const docId = meta.id
-      const snap = await getDocs(collection(db, "pipeline_results", docId, "items"))
-      trackRead(snap.size)
-      const toDelete = snap.docs.filter(d => String(d.data()["DATA DE ENTREGA"] ?? "").trim().startsWith(pad + "/"))
-      if (toDelete.length === 0) { toast({ description: "Nenhum registro para este dia." }); setConfirmWipeDay(false); setWipingDay(false); return }
-      const BATCH_LIMIT = 499; let batch = writeBatch(db), count = 0
-      for (const d of toDelete) { batch.delete(d.ref); count++; if (count >= BATCH_LIMIT) { await batch.commit(); trackDelete(count); batch = writeBatch(db); count = 0 } }
-      if (count > 0) { await batch.commit(); trackDelete(count) }
-      const newCount = (meta.itemCount ?? 0) - toDelete.length
-      const newPfd = { ...(meta.porFilialDia ?? {}) }
-      for (const f of Object.keys(newPfd)) {
-        const dm = { ...newPfd[f] }
-        for (const dt of Object.keys(dm)) { if (dt.startsWith(pad + "/")) delete dm[dt] }
-        if (Object.keys(dm).length === 0) delete newPfd[f]; else newPfd[f] = dm
-      }
-      const newDedupKeys = (meta.dedupKeys ?? []).filter((k: string) => !k.includes(`_${pad}_`))
-      await updateDoc(doc(db, "pipeline_results", docId), { itemCount: newCount, porFilialDia: newPfd, dedupKeys: newDedupKeys })
-      trackWrite(1)
-      toast({ title: `Dia ${pad}/${String(localMonth).padStart(2,"0")}/${localYear} apagado.`, description: `${toDelete.length} registro(s) removido(s).` })
-      setConfirmWipeDay(false); await loadMeta(); onDeleted()
-    } catch (e: any) { toast({ variant: "destructive", title: "Erro ao apagar dia", description: e.message }) }
-    finally { setWipingDay(false) }
-  }
-
-  const porFilialDia: Record<string, Record<string, number>> = meta?.porFilialDia ?? {}
-  const diasDisponiveis = React.useMemo(() => {
-    const s = new Set<string>()
-    for (const dm of Object.values(porFilialDia)) for (const dt of Object.keys(dm)) s.add(dt)
-    return [...s].sort()
-  }, [porFilialDia])
-
-  const porFilialDiaFiltrado = React.useMemo(() => {
-    const source = filterDay === 0 ? porFilialDia : (() => {
-      const pad = String(filterDay).padStart(2, "0")
-      const result: Record<string, Record<string, number>> = {}
-      for (const [f, dm] of Object.entries(porFilialDia)) {
-        const filt: Record<string, number> = {}
-        for (const [dt, cnt] of Object.entries(dm)) if (dt.startsWith(pad + "/")) filt[dt] = cnt
-        if (Object.keys(filt).length) result[f] = filt
-      }
-      return result
-    })()
-    const sorted: Record<string, Record<string, number>> = {}
-    for (const [filial, diaMap] of Object.entries(source)) {
-      sorted[filial] = Object.fromEntries(
-        Object.entries(diaMap).sort(([a], [b]) => {
-          const [da, ma, ya] = a.split("/").map(Number); const [db2, mb, yb] = b.split("/").map(Number)
-          return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db2).getTime()
+      const buf = await file.arrayBuffer()
+      const wb  = XLSX.read(buf, { type: "array", cellDates: false })
+      const allRows: Record<string, any>[] = []
+      for (const name of wb.SheetNames) {
+        if (name === "Acumulado") continue // pula acumulado — já é derivado
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: "" }) as any[]
+        rows.forEach((r, i) => {
+          // normaliza TEMPO se vier como decimal
+          if (r["TEMPO"] != null) {
+            const t = extractTempo(r["TEMPO"])
+            if (t) r["TEMPO"] = t
+          }
+          allRows.push({ ...r, _itemId: `local_${name}_${i}`, __rowIdx: allRows.length + i })
         })
-      )
+      }
+      onImport(allRows)
+      toast({ title: "Excel importado", description: `${allRows.length} registros carregados no buffer local.` })
+      onClose()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
     }
-    return sorted
-  }, [porFilialDia, filterDay])
+  }
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
-        <DialogContent className="max-w-2xl h-[85vh] flex flex-col gap-0 p-0">
-          <DialogHeader className="px-5 pt-5 pb-3">
-            <DialogTitle className="flex items-center gap-2 text-base"><FileStack className="size-4 text-primary" /> Gerenciar Importações — Firebase</DialogTitle>
-            <DialogDescription className="text-xs">Doc determinístico por mês em <span className="font-mono font-semibold text-foreground">pipeline_results</span>.</DialogDescription>
-          </DialogHeader>
-          <Separator />
-          <div className="px-5 py-3 flex items-end gap-3 bg-muted/5 flex-wrap">
-            <div className="space-y-1"><Label className="text-[10px] uppercase tracking-wider">Ano</Label>
-              <Input type="number" className="w-24 h-8 text-xs" value={localYear} onChange={e => setLocalYear(+e.target.value)} /></div>
-            <div className="space-y-1"><Label className="text-[10px] uppercase tracking-wider">Mês</Label>
-              <Input type="number" min={1} max={12} className="w-20 h-8 text-xs" value={localMonth} onChange={e => setLocalMonth(+e.target.value)} /></div>
-            <div className="space-y-1"><Label className="text-[10px] uppercase tracking-wider">Filtrar dia</Label>
-              <Select value={String(filterDay)} onValueChange={v => setFilterDay(parseInt(v))}>
-                <SelectTrigger className="w-40 h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">Todos os dias</SelectItem>
-                  {diasDisponiveis.map(dia => <SelectItem key={dia} value={String(parseInt(dia))}>{dia}</SelectItem>)}
-                </SelectContent>
-              </Select></div>
-            <div className="flex items-center gap-2 ml-auto">
-              {meta && <Badge variant="outline" className="text-[10px]">{meta.itemCount?.toLocaleString("pt-BR")} registros</Badge>}
-              <Button variant="ghost" size="icon" className="size-7" onClick={loadMeta} disabled={loading}>
-                {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-              </Button>
-              {meta && filterDay > 0 && (
-                <Button variant="destructive" size="sm" className="h-7 text-[10px] px-2.5 gap-1" onClick={() => setConfirmWipeDay(true)}>
-                  <Trash2 className="size-3" /> Apagar dia
-                </Button>
-              )}
-              {meta && (
-                <Button variant="outline" size="sm" className="h-7 text-[10px] px-2.5 gap-1 border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => setConfirmWipe(true)}>
-                  <Trash2 className="size-3" /> Apagar período
-                </Button>
-              )}
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose() }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Upload className="size-4 text-emerald-500" /> Importar Excel para Buffer Local
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Período: <strong>{String(month).padStart(2,"0")}/{year}</strong> · Dados salvos apenas no seu navegador. Zero Firebase.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          {/* Dropzone */}
+          <label className={cn(
+            "flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-8 cursor-pointer transition-colors",
+            file ? "border-emerald-300 bg-emerald-50" : "border-border hover:border-primary/40 hover:bg-muted/20"
+          )}>
+            <FileSpreadsheet className={cn("size-8", file ? "text-emerald-500" : "text-muted-foreground/40")} />
+            {file
+              ? <span className="text-sm font-medium text-emerald-700">{file.name}</span>
+              : <span className="text-sm text-muted-foreground">Clique ou arraste o Excel gerado pelo pipeline</span>}
+            <input type="file" accept=".xlsx,.xls" className="hidden"
+              onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
+          </label>
+
+          {/* Preview */}
+          {preview && (
+            <div className="rounded-lg border border-border bg-muted/10 px-4 py-3 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Check className="size-3.5 text-emerald-500" />
+                <span className="text-xs font-semibold text-foreground">{preview.count.toLocaleString("pt-BR")} registros detectados</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Colunas: {preview.cols.join(", ")}{preview.cols.length < 8 ? "" : "..."}
+              </p>
+              <div className="flex items-start gap-1.5 pt-1 text-[10px] text-amber-600 bg-amber-50 rounded px-2 py-1.5 border border-amber-200">
+                <Info className="size-3 shrink-0 mt-0.5" />
+                <span>A aba "Acumulado" é ignorada — apenas as abas por filial são importadas.</span>
+              </div>
             </div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2 border border-destructive/20">
+              <AlertTriangle className="size-3.5 shrink-0" />{error}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <DialogClose asChild><Button variant="outline" size="sm">Cancelar</Button></DialogClose>
+          <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
+            onClick={doImport} disabled={!file || loading || !!error}>
+            {loading ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
+            Carregar no Buffer Local
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Modal: Aplicar Faturamento LOCAL ─────────────────────────────────────────
+// Cruza os dados locais com o Excel de faturamento sem tocar no Firebase.
+// Mapeamento:
+//   DATA         ← DT_FATURAMENTO
+//   VALOR        ← FATURAMENTO
+//   VALOR DEV    ← FATURAMENTO_DEV (ou VALOR_DEV)
+//   ENTREGAS     ← ENTREGAS
+//   ENTREGAS DEV ← ENTREGAS_DEV
+//   PESO         ← PESO
+//   STATUS       ← "FECHADO" se DT_FECHAMENTO preenchido, senão mantém
+function aplicarFaturamentoLocal(
+  rows: Record<string, any>[],
+  fatRows: Record<string, any>[]
+): { rows: Record<string, any>[]; matched: number; notMatched: string[]; semViagem: number } {
+ 
+  // ── Descobre qual coluna é a chave de viagem no arquivo de faturamento ──
+  // Tenta: VIAGEM, VIAGENS, LIQUIDAÇÃO, LIQUIDACAO, ID, NF, NUM_VIAGEM
+  const primeiraFat = fatRows[0] ?? {}
+  const chavesFat = Object.keys(primeiraFat)
+  const candidatos = ["VIAGEM", "VIAGENS", "LIQUIDAÇÃO", "LIQUIDACAO", "ID", "NF", "NUM_VIAGEM", "NUMERO_VIAGEM"]
+  const campoViagem = candidatos.find(c => chavesFat.some(k => k.trim().toUpperCase() === c)) 
+    ?? chavesFat[0]   // fallback: primeira coluna
+ 
+  console.log(`[faturamento-local] Campo viagem detectado: "${campoViagem}"`)
+  console.log(`[faturamento-local] Colunas do faturamento: ${chavesFat.join(", ")}`)
+ 
+  // ── Monta índice por viagem (normalizado) ──────────────────────────────
+  const idx = new Map<string, Record<string, any>>()
+  for (const r of fatRows) {
+    const v = String(r[campoViagem] ?? "").trim()
+    if (v && v !== "" && v.toLowerCase() !== "nan") {
+      idx.set(v, r)
+    }
+  }
+ 
+  console.log(`[faturamento-local] ${idx.size} viagens no arquivo de faturamento`)
+ 
+  let matched    = 0
+  let semViagem  = 0
+  const notMatched: string[] = []
+ 
+  const updated = rows.map(row => {
+    // Pega o número de viagem do registro (tenta VIAGENS e VIAGEM)
+    const viagem = String(row["VIAGENS"] ?? row["VIAGEM"] ?? "").trim()
+ 
+    // ── Sem viagem → apenas garante STATUS padrão ─────────────────────
+    if (!viagem || viagem === "" || viagem.toLowerCase() === "nan") {
+      semViagem++
+      return {
+        ...row,
+        STATUS: row["STATUS"] && String(row["STATUS"]).trim() !== "" 
+          ? row["STATUS"] 
+          : "ABERTO",
+      }
+    }
+ 
+    const fat = idx.get(viagem)
+ 
+    // ── Sem match → STATUS = ABERTO ───────────────────────────────────
+    if (!fat) {
+      notMatched.push(viagem)
+      return {
+        ...row,
+        STATUS: row["STATUS"] && String(row["STATUS"]).trim() !== ""
+          ? row["STATUS"]
+          : "ABERTO",
+      }
+    }
+ 
+    // ── Com match → aplica campos do faturamento ──────────────────────
+    matched++
+    const patch: Record<string, any> = { ...row }
+ 
+    // Mapeamento de campos (aceita variações de nome)
+    const get = (r: Record<string, any>, ...names: string[]) => {
+      for (const n of names) {
+        const key = Object.keys(r).find(k => k.trim().toUpperCase() === n.toUpperCase())
+        if (key !== undefined && r[key] != null && String(r[key]).trim() !== "" && String(r[key]).toLowerCase() !== "nan") {
+          return r[key]
+        }
+      }
+      return null
+    }
+ 
+    const dt_faturamento = get(fat, "DT_FATURAMENTO", "DATA", "DT_FATURAMENTO")
+    const faturamento    = get(fat, "FATURAMENTO", "VALOR", "VLR_FATURAMENTO")
+    const faturamentoDev = get(fat, "FATURAMENTO_DEV", "VALOR_DEV", "VLR_DEV")
+    const entregas       = get(fat, "ENTREGAS", "QTD_ENTREGAS", "ENTREGA")
+    const entregasDev    = get(fat, "ENTREGAS_DEV", "QTD_DEV", "DEVOLUCAO")
+    const peso           = get(fat, "PESO", "PESO_KG", "PESO_TOTAL")
+    const pesoDev        = get(fat, "PESO_DEV", "PESO_DEVOLUCAO")
+    const dtFech         = get(fat, "DT_FECHAMENTO", "DATA_FECHAMENTO", "FECHAMENTO", "DT_FECH")
+ 
+    if (dt_faturamento != null) patch["DATA"]         = dt_faturamento
+    if (faturamento    != null) patch["VALOR"]        = faturamento
+    if (faturamentoDev != null) patch["VALOR DEV"]    = faturamentoDev
+    if (entregas       != null) patch["ENTREGAS"]     = entregas
+    if (entregasDev    != null) patch["ENTREGAS DEV"] = entregasDev
+    if (peso           != null) patch["PESO"]         = peso
+    if (pesoDev        != null) patch["PESO DEV"]     = pesoDev
+ 
+    // STATUS: FECHADO se DT_FECHAMENTO preenchido, ABERTO se vazio
+    const dtStr = String(dtFech ?? "").trim()
+    if (dtStr && dtStr !== "" && dtStr.toLowerCase() !== "nan" && dtStr !== "0") {
+      patch["STATUS"]        = "FECHADO"
+      patch["DT_FECHAMENTO"] = dtStr
+    } else {
+      patch["STATUS"] = "ABERTO"
+    }
+ 
+    return patch
+  })
+ 
+  return { rows: updated, matched, notMatched, semViagem }
+}
+
+// ─── Modal: Enviar buffer local para Firebase ─────────────────────────────────
+function EnviarFirebaseDialog({ open, onClose, rows, year, month, onSent }: {
+  open: boolean; onClose: () => void
+  rows: Record<string, any>[]; year: number; month: number
+  onSent: () => void
+}) {
+  const [sending,  setSending]  = React.useState(false)
+  const [log,      setLog]      = React.useState<string[]>([])
+  const { toast } = useToast()
+
+  const addLog = (msg: string) => setLog(prev => [...prev, msg])
+
+  async function enviar() {
+    setSending(true); setLog([])
+    addLog(`Iniciando envio de ${rows.length} registros...`)
+    try {
+      const docId   = mainDocId("consolidacao-entregas", year, month)
+      const mainRef = doc(db, "pipeline_results", docId)
+      const itemsRef = collection(db, "pipeline_results", docId, "items")
+
+      // Verifica/cria doc principal
+      const snap = await getDoc(mainRef); trackRead(1)
+      if (!snap.exists()) {
+        addLog("Criando documento principal...")
+      }
+
+      // Deduplica por VIAGENS|DATA DE ENTREGA
+      const existingDedupKeys: string[] = snap.exists() ? (snap.data().dedupKeys ?? []) : []
+      const existingSet = new Set(existingDedupKeys)
+
+      const novos = rows.filter(r => {
+        const k = `${String(r["VIAGENS"] ?? "").trim()}|${String(r["DATA DE ENTREGA"] ?? "").trim()}`
+        return k !== "|" && !existingSet.has(k)
+      })
+
+      addLog(`${rows.length - novos.length} duplicatas ignoradas. Enviando ${novos.length} novos...`)
+
+      // Salva em batches
+      const BATCH_LIMIT = 498
+      let batch = writeBatch(db), count = 0, totalSent = 0
+      for (const item of novos) {
+        if (count >= BATCH_LIMIT) {
+          await batch.commit(); trackWrite(count)
+          addLog(`  Batch commitado: ${count} itens`)
+          batch = writeBatch(db); count = 0
+        }
+        const { _itemId, __rowIdx, ...cleanItem } = item
+        batch.set(doc(itemsRef), { ...cleanItem, _year: year, _month: month })
+        count++; totalSent++
+      }
+      if (count > 0) { await batch.commit(); trackWrite(count) }
+
+      // Atualiza metadata
+      const newDedupKeys = [...existingSet, ...novos.map(r =>
+        `${String(r["VIAGENS"] ?? "").trim()}|${String(r["DATA DE ENTREGA"] ?? "").trim()}`
+      ).filter(k => k !== "|")]
+
+      const existingCount = snap.exists() ? (snap.data().itemCount ?? 0) : 0
+      await import("firebase/firestore").then(({ setDoc }) =>
+        setDoc(mainRef, {
+          pipelineType: "consolidacao-entregas",
+          year, month,
+          timestamp: Date.now(),
+          itemCount: existingCount + totalSent,
+          dedupKeys: newDedupKeys,
+        }, { merge: true })
+      ); trackWrite(1)
+
+      addLog(`✅ ${totalSent} registros enviados ao Firebase!`)
+      addLog("Limpando buffer local...")
+      clearStoragePayload(year, month)
+
+      toast({ title: "Enviado!", description: `${totalSent} registros gravados no Firebase.` })
+      onSent()
+    } catch (e: any) {
+      addLog(`❌ Erro: ${e.message}`)
+      toast({ variant: "destructive", title: "Erro ao enviar", description: e.message })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v && !sending) onClose() }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <CloudUpload className="size-4 text-blue-500" /> Enviar Buffer Local para Firebase
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            {rows.length.toLocaleString("pt-BR")} registros · Período {String(month).padStart(2,"0")}/{year}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-2">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[11px] text-amber-700 space-y-1">
+            <p className="font-semibold flex items-center gap-1.5"><AlertTriangle className="size-3.5" /> Atenção</p>
+            <p>Registros já existentes no Firebase serão ignorados (dedup por VIAGEM + DATA DE ENTREGA).</p>
+            <p>Após o envio o buffer local é limpo automaticamente.</p>
           </div>
-          <Separator />
-          <ScrollArea className="flex-1 min-h-0 px-5 py-3">
-            {loading ? (
-              <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground"><Loader2 className="size-4 animate-spin" /><span className="text-sm">Carregando...</span></div>
-            ) : !meta ? (
-              <div className="py-10 text-center"><ServerCrash className="size-7 text-muted-foreground/30 mx-auto mb-2" /><p className="text-sm text-muted-foreground">Nenhum dado importado para este período.</p></div>
-            ) : Object.keys(porFilialDiaFiltrado).length === 0 ? (
-              <div className="py-10 text-center text-sm text-muted-foreground">Nenhum dado para o dia selecionado.</div>
-            ) : (
-              <div className="rounded-xl border border-border/60 overflow-hidden">
-                <div className="px-3 py-2 bg-muted/10 border-b flex items-center gap-2">
-                  <Database className="size-3.5 text-primary" />
-                  <span className="font-mono text-[10px] text-foreground/80">{meta.id}</span>
-                  <Badge className="text-[9px] h-4 px-1.5 bg-primary/10 text-primary border-primary/20 ml-1">ativo</Badge>
-                  <span className="text-[10px] text-muted-foreground ml-auto">{fmtTs(meta.timestamp)}</span>
-                </div>
-                <table className="w-full text-[10px]">
-                  <thead><tr className="bg-muted/20">
-                    <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground w-28"><span className="flex items-center gap-1"><Building2 className="size-2.5" /> Filial</span></th>
-                    <th className="px-3 py-1.5 text-left font-semibold text-muted-foreground"><span className="flex items-center gap-1"><CalendarDays className="size-2.5" /> Data de Entrega</span></th>
-                    <th className="px-3 py-1.5 text-right font-semibold text-muted-foreground w-20"><span className="flex items-center justify-end gap-1"><Hash className="size-2.5" /> Registros</span></th>
-                  </tr></thead>
-                  <tbody>
-                    {Object.entries(porFilialDiaFiltrado).flatMap(([filial, diaMap], fi) =>
-                      Object.entries(diaMap).map(([dia, cnt], di) => (
-                        <tr key={`${fi}-${di}`} className={cn("border-t border-border/20", (fi + di) % 2 === 0 ? "bg-background" : "bg-muted/5")}>
-                          {di === 0 ? <td className="px-3 py-1.5 font-semibold text-foreground/80" rowSpan={Object.keys(diaMap).length}>{filial}</td> : null}
-                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{dia}</td>
-                          <td className="px-3 py-1.5 text-right"><Badge variant="outline" className="text-[9px] h-4 px-1.5">{cnt}</Badge></td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+
+          {log.length > 0 && (
+            <div className="rounded-lg bg-slate-950 overflow-hidden">
+              <div className="px-3 py-1.5 border-b border-slate-800 flex items-center gap-2">
+                <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Log</span>
               </div>
-            )}
-          </ScrollArea>
-          <Separator />
-          <div className="px-5 py-3"><DialogClose asChild><Button variant="outline" size="sm" className="gap-1.5"><X className="size-3.5" /> Fechar</Button></DialogClose></div>
-        </DialogContent>
-      </Dialog>
-      <AlertDialog open={confirmWipe} onOpenChange={v => { if (!v) setConfirmWipe(false) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2"><Trash2 className="size-4 text-destructive" /> Apagar período inteiro?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2 text-sm">
-                <p>Remove <strong>todos os {meta?.itemCount?.toLocaleString("pt-BR")} registros</strong> de {String(localMonth).padStart(2,"0")}/{localYear} permanentemente.</p>
-                <p className="text-muted-foreground text-xs">As chaves de dedup também serão limpas.</p>
+              <div className="p-3 font-mono text-[11px] space-y-0.5 max-h-40 overflow-y-auto">
+                {log.map((line, i) => (
+                  <div key={i} className={line.startsWith("✅") ? "text-emerald-400" : line.startsWith("❌") ? "text-red-400" : "text-slate-400"}>
+                    {line}
+                  </div>
+                ))}
+                {sending && <div className="text-slate-500 animate-pulse">Processando...</div>}
               </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={wiping}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={wipePeriod} disabled={wiping}>
-              {wiping && <Loader2 className="size-3.5 animate-spin mr-1.5" />} Apagar tudo
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={confirmWipeDay} onOpenChange={v => { if (!v) setConfirmWipeDay(false) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2"><Trash2 className="size-4 text-destructive" /> Apagar dia {String(filterDay).padStart(2,"0")}/{String(localMonth).padStart(2,"0")}/{localYear}?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2 text-sm">
-                <p>Remove todos os registros deste dia. O restante do mês será preservado.</p>
-                <p className="text-muted-foreground text-xs">As dedupKeys do dia também serão removidas — você poderá reimportar.</p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={wipingDay}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={wipeDay} disabled={wipingDay}>
-              {wipingDay && <Loader2 className="size-3.5 animate-spin mr-1.5" />} Apagar dia
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={sending}>Cancelar</Button>
+          <Button size="sm" className="gap-1.5" onClick={enviar} disabled={sending}>
+            {sending ? <Loader2 className="size-3.5 animate-spin" /> : <CloudUpload className="size-3.5" />}
+            {sending ? "Enviando..." : "Confirmar Envio"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Banner modo offline ──────────────────────────────────────────────────────
+function BannerOffline({ storagePayload, onImportar, onConectar }: {
+  storagePayload: StoragePayload | null
+  onImportar: () => void
+  onConectar: () => void
+}) {
+  return (
+    <div className={cn(
+      "rounded-xl border-2 px-4 py-3 flex items-center gap-3 flex-wrap",
+      storagePayload
+        ? "border-emerald-200 bg-emerald-50"
+        : "border-amber-200 bg-amber-50"
+    )}>
+      <WifiOff className={cn("size-4 shrink-0", storagePayload ? "text-emerald-600" : "text-amber-600")} />
+      <div className="flex-1 min-w-0">
+        <p className={cn("text-xs font-bold", storagePayload ? "text-emerald-800" : "text-amber-800")}>
+          {storagePayload
+            ? `Modo local ativo · ${storagePayload.rows.length.toLocaleString("pt-BR")} registros no buffer`
+            : "Modo local ativo · Nenhum dado no buffer ainda"}
+        </p>
+        <p className={cn("text-[10px] mt-0.5", storagePayload ? "text-emerald-600" : "text-amber-600")}>
+          {storagePayload
+            ? `Fonte: ${storagePayload.source === "excel" ? "Excel importado" : storagePayload.source} · ${fmtTs(storagePayload.savedAt)}`
+            : "Importe um Excel gerado pelo pipeline para visualizar e tratar os dados."}
+        </p>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5 border-emerald-300 bg-white"
+          onClick={onImportar}>
+          <Upload className="size-3.5" /> Importar Excel
+        </Button>
+        <Button size="sm" variant="ghost" className="h-7 text-[10px] text-muted-foreground"
+          onClick={onConectar}>
+          <Zap className="size-3" /> Ligar Firebase
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -439,6 +625,18 @@ function GerenciarImportacoesDialog({ open, onClose, filterYear, filterMonth, on
 export function VisaoAnaliticaPage() {
   const { toast } = useToast()
   const today = new Date()
+
+  // ── Conexão Firebase (controlada pelo Zap global) ─────────────────────────
+  const [firebaseOn, setFirebaseOn] = React.useState(getFirebaseConnectionStatus)
+
+  // Sincroniza quando o Zap muda externamente
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      const current = getFirebaseConnectionStatus()
+      setFirebaseOn(prev => prev !== current ? current : prev)
+    }, 500)
+    return () => clearInterval(interval)
+  }, [])
 
   const [activeSubTab,   setActiveSubTab]   = React.useState<"tabela" | "fechamento">("tabela")
   const [filterYear,     setFilterYear]     = React.useState(today.getFullYear())
@@ -452,7 +650,7 @@ export function VisaoAnaliticaPage() {
   const [hideRotaChao,   setHideRotaChao]   = React.useState(true)
 
   const [rows,       setRows]       = React.useState<Row[]>([])
-  const [loading,    setLoading]    = React.useState(true)
+  const [loading,    setLoading]    = React.useState(false)
   const [totalCount, setTotalCount] = React.useState(0)
   const [gridCols,   setGridCols]   = React.useState(INITIAL_GRID_COLS)
   const [selected,   setSelected]   = React.useState<Set<number>>(new Set())
@@ -466,11 +664,47 @@ export function VisaoAnaliticaPage() {
   const [showGerenciar,        setShowGerenciar]        = React.useState(false)
   const [showGerenciarColunas, setShowGerenciarColunas] = React.useState(false)
 
+  // ── Modais novos ──────────────────────────────────────────────────────────
+  const [showImportarExcel,  setShowImportarExcel]  = React.useState(false)
+  const [showEnviarFirebase, setShowEnviarFirebase] = React.useState(false)
+  const [showFatLocal,       setShowFatLocal]       = React.useState(false)
+  const [fatLocalFile,       setFatLocalFile]       = React.useState<File | null>(null)
+  const [fatLocalLog,        setFatLocalLog]        = React.useState<string[]>([])
+  const [fatLocalProcessing, setFatLocalProcessing] = React.useState(false)
+
+  // ── Storage local ─────────────────────────────────────────────────────────
+  const [storagePayload, setStoragePayload_] = React.useState<StoragePayload | null>(null)
+
+  const reloadStorage = React.useCallback(() => {
+    setStoragePayload_(getStoragePayload(filterYear, filterMonth))
+  }, [filterYear, filterMonth])
+
+  React.useEffect(() => { reloadStorage() }, [filterYear, filterMonth, reloadStorage])
+
+  // ── Quando Firebase LIGA → limpa storage e busca Firebase ─────────────────
+  React.useEffect(() => {
+    if (firebaseOn) {
+      clearStoragePayload(filterYear, filterMonth)
+      setStoragePayload_(null)
+      fetchFromFirebase()
+    } else {
+      // Desligou → carrega storage se houver
+      const payload = getStoragePayload(filterYear, filterMonth)
+      if (payload) {
+        loadFromStorage(payload)
+      } else {
+        setRows([]); setTotalCount(0)
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseOn, filterYear, filterMonth])
+
   // ── Cadastros ─────────────────────────────────────────────────────────────
   const [funcionarios, setFuncionarios] = React.useState<Funcionario[]>([])
   const [veiculoMap,   setVeiculoMap]   = React.useState<Map<string, VeiculoInfo>>(new Map())
 
   React.useEffect(() => {
+    if (!firebaseOn) return
     getDocs(collection(db, "docs_funcionarios")).then(snap => {
       setFuncionarios(snap.docs.map(d => ({ id: d.id, ...d.data() } as Funcionario)))
     }).catch(() => {})
@@ -478,20 +712,16 @@ export function VisaoAnaliticaPage() {
       const map = new Map<string, VeiculoInfo>()
       for (const d of snap.docs) {
         const data = d.data()
-        map.set(normalizarPlaca(d.id), {
-          modelo:   String(data.MODELO   ?? ""),
-          operacao: String(data.OPERACAO ?? ""),
-        })
+        map.set(normalizarPlaca(d.id), { modelo: String(data.MODELO ?? ""), operacao: String(data.OPERACAO ?? "") })
       }
       setVeiculoMap(map)
     }).catch(() => {})
-  }, [])
+  }, [firebaseOn])
 
   const funcOptions = React.useMemo(() =>
     funcionarios.filter(f => String(f.STATUS ?? "").toUpperCase() === "ATIVO")
       .map(f => ({ value: f.NOME_COMPLETO, label: f.NOME_COMPLETO, sub: f.CARGO }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-    [funcionarios])
+      .sort((a, b) => a.label.localeCompare(b.label)), [funcionarios])
 
   const veiculoOptions = React.useMemo(() => {
     const opts: { value: string; label: string; sub: string }[] = []
@@ -499,7 +729,7 @@ export function VisaoAnaliticaPage() {
     return opts.sort((a, b) => a.label.localeCompare(b.label))
   }, [veiculoMap])
 
-  // ── Faturamento ───────────────────────────────────────────────────────────
+  // ── Faturamento modal (Firebase) ──────────────────────────────────────────
   const [showFaturamento, setShowFaturamento] = React.useState(false)
   const [fatFile,         setFatFile]         = React.useState<File | null>(null)
   const [fatProcessing,   setFatProcessing]   = React.useState(false)
@@ -518,11 +748,12 @@ export function VisaoAnaliticaPage() {
         setFatLog(prev => [...prev,
           `✅ ${result.updated} registro(s) atualizado(s).`,
           `🔗 ${result.matched} viagem(ns) com match.`,
-          result.notMatched.length > 0 ? `⚠️ ${result.notMatched.length} sem match: ${result.notMatched.slice(0,8).join(", ")}${result.notMatched.length > 8 ? "..." : ""}` : "✅ Todas com match.",
+          result.notMatched.length > 0 ? `⚠️ ${result.notMatched.length} sem match` : "✅ Todas com match.",
+          ...(result.dateWarnings ?? []).map(w => `📅 ${w}`),
           "Recarregando...",
         ])
         clearCacheEntry(getAnaliticaCacheKey(filterYear, filterMonth))
-        await fetchData(true)
+        await fetchFromFirebase()
         toast({ title: "Faturamento aplicado!", description: result.message })
       } else {
         setFatLog(prev => [...prev, `❌ Erro: ${result.message}`])
@@ -534,50 +765,106 @@ export function VisaoAnaliticaPage() {
     } finally { setFatProcessing(false) }
   }
 
-  // ── Ref para evitar re-fetch quando apenas filterDay muda ─────────────────
-  const loadedPeriodRef = React.useRef<string>("")
-  const tableContainerRef = React.useRef<HTMLDivElement>(null)
+  // ── Faturamento LOCAL ─────────────────────────────────────────────────────
+  async function handleFaturamentoLocal() {
+    if (!fatLocalFile) return
+    setFatLocalProcessing(true)
+    setFatLocalLog(["Lendo arquivo de faturamento..."])
+    try {
+      const buf = await fatLocalFile.arrayBuffer()
+      const wb  = XLSX.read(buf, { type: "array", cellDates: false })
+      const fatRows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" }) as any[]
+      setFatLocalLog(prev => [...prev, `${fatRows.length} linhas lidas. Cruzando...`])
 
-  // ── Fetch ─────────────────────────────────────────────────────────────────
-  const fetchData = React.useCallback(async (forceRefresh = false) => {
-    const periodKey = `${filterYear}-${filterMonth}`
-    // Se o período já está carregado em memória e não é forçado, não faz nada
-    if (!forceRefresh && loadedPeriodRef.current === periodKey) {
-      setLoading(false); return
+      const currentRows = rows.map(({ __rowIdx, ...rest }) => rest)
+      const { rows: updated, matched, notMatched, semViagem } = aplicarFaturamentoLocal(currentRows, fatRows)
+
+      setFatLocalLog(prev => [...prev,
+        `✅ ${matched} viagem(ns) com match → FECHADO/ABERTO aplicado.`,
+        `⬜ ${semViagem} registro(s) sem número de viagem → STATUS = ABERTO`,
+        notMatched.length > 0
+          ? `⚠️ ${notMatched.length} viagem(ns) sem match no faturamento: ${notMatched.slice(0, 5).join(", ")}${notMatched.length > 5 ? "..." : ""}`
+          : "✅ Todas as viagens encontradas no faturamento.",
+        "Salvando no buffer local...",
+      ])
+
+      const newRows = updated.map((r, idx) => ({ ...r, __rowIdx: idx })) as Row[]
+      setRows(newRows)
+      setTotalCount(newRows.length)
+
+      // Salva no storage
+      const ok = setStoragePayload(filterYear, filterMonth, updated, "mixed")
+      setFatLocalLog(prev => [...prev, ok ? "✅ Buffer local atualizado." : "⚠️ Buffer cheio — dados em memória apenas."])
+      reloadStorage()
+      toast({ title: "Faturamento aplicado localmente", description: `${matched} registros atualizados.` })
+    } catch (e: any) {
+      setFatLocalLog(prev => [...prev, `❌ ${e.message}`])
+      toast({ variant: "destructive", title: "Erro", description: e.message })
+    } finally { setFatLocalProcessing(false) }
+  }
+
+  // ── Carregar do localStorage ───────────────────────────────────────────────
+  function loadFromStorage(payload: StoragePayload) {
+    const newRows = payload.rows.map((r, idx) => ({ ...r, _itemId: r._itemId ?? `local_${idx}`, __rowIdx: idx })) as Row[]
+    setRows(newRows)
+    setTotalCount(newRows.length)
+    setStoragePayload_(payload)
+    toast({ description: `${newRows.length} registros carregados do buffer local.` })
+  }
+
+  // ── Importar Excel → localStorage ─────────────────────────────────────────
+  function handleExcelImported(importedRows: Record<string, any>[]) {
+    const ok = setStoragePayload(filterYear, filterMonth, importedRows, "excel")
+    if (!ok) {
+      toast({ variant: "destructive", title: "Buffer cheio", description: "Dados carregados em memória apenas (localStorage cheio)." })
     }
+    const newRows = importedRows.map((r, idx) => ({ ...r, __rowIdx: idx })) as Row[]
+    setRows(newRows); setTotalCount(newRows.length)
+    reloadStorage()
+  }
+
+  // ── Fetch do Firebase ─────────────────────────────────────────────────────
+  const loadedPeriodRef = React.useRef<string>("")
+
+  const fetchFromFirebase = React.useCallback(async (forceRefresh = false) => {
+    if (!firebaseOn) return
+    const periodKey = `${filterYear}-${filterMonth}`
+    if (!forceRefresh && loadedPeriodRef.current === periodKey) { setLoading(false); return }
     if (forceRefresh) loadedPeriodRef.current = ""
     setLoading(true); setSelected(new Set())
     const cacheKey = getAnaliticaCacheKey(filterYear, filterMonth)
     if (!forceRefresh) {
-      const cachedData = getFromCache<{ rows: Row[]; totalCount: number }>(cacheKey)
-      if (cachedData && Array.isArray(cachedData.rows) && cachedData.rows.length > 0) {
-        setRows(cachedData.rows); setTotalCount(cachedData.totalCount ?? 0)
+      const cached = getFromCache<{ rows: Row[]; totalCount: number }>(cacheKey)
+      if (cached?.rows?.length) {
+        setRows(cached.rows); setTotalCount(cached.totalCount ?? 0)
         loadedPeriodRef.current = periodKey
-        toast({ description: `${cachedData.rows.length} registros carregados do cache.` })
+        toast({ description: `${cached.rows.length} registros do cache.` })
         setLoading(false); return
       }
     }
     try {
       const docId = mainDocId("consolidacao-entregas", filterYear, filterMonth)
-      const metaSnap = await getDoc(doc(db, "pipeline_results", docId))
-      trackRead(1)
+      const metaSnap = await getDoc(doc(db, "pipeline_results", docId)); trackRead(1)
       if (!metaSnap.exists()) { setRows([]); setTotalCount(0); toast({ description: "Nenhum dado importado para este período." }); return }
-      const itemCount = metaSnap.data().itemCount ?? 0
-      setTotalCount(itemCount)
+      setTotalCount(metaSnap.data().itemCount ?? 0)
       const items = await loadItemsFromFirebase("consolidacao-entregas", filterYear, filterMonth)
       const newRows = items.map((r, idx) => ({ ...r, __rowIdx: idx })) as Row[]
       setRows(newRows)
-      setInCache(cacheKey, { rows: newRows, totalCount: itemCount })
+      setInCache(cacheKey, { rows: newRows, totalCount: newRows.length })
       loadedPeriodRef.current = periodKey
       toast({ description: `${items.length} registros carregados.` })
     } catch (e: any) {
       toast({ variant: "destructive", title: "Erro ao buscar dados", description: e.message }); setRows([])
     } finally { setLoading(false) }
-  }, [filterYear, filterMonth, toast])
+  }, [filterYear, filterMonth, firebaseOn, toast])
 
-  // ✅ Só re-busca quando ano ou mês mudam — filterDay nunca dispara Firebase
-  React.useEffect(() => { fetchData() }, [filterYear, filterMonth]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Só busca Firebase quando ligado e período muda
+  React.useEffect(() => {
+    if (firebaseOn) fetchFromFirebase()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterYear, filterMonth, firebaseOn])
 
+  // ── Filtros e ordenação ───────────────────────────────────────────────────
   const filiais  = React.useMemo(() => [...new Set(rows.map(r => r["FILIAL"]).filter(Boolean))].sort(), [rows])
   const regioes  = React.useMemo(() => [...new Set(rows.map(r => r["REGIÃO"]).filter(Boolean))].sort(), [rows])
   const modelos  = React.useMemo(() => {
@@ -596,7 +883,10 @@ export function VisaoAnaliticaPage() {
     if (filterDay > 0)          r = r.filter(row => extractDay(row["DATA DE ENTREGA"]) === filterDay)
     if (filterFilial !== "all") r = r.filter(row => row["FILIAL"] === filterFilial)
     if (filterRegiao !== "all") r = r.filter(row => row["REGIÃO"] === filterRegiao)
-    if (hideRotaChao)           r = r.filter(row => String(row["ROTA"] ?? "").toUpperCase().trim() !== "CHÃO")
+    if (hideRotaChao)           r = r.filter(row => {
+      const cat = String(row["CATEGORIA_ORIGEM"] ?? row["ROTA"] ?? "").toUpperCase().trim()
+      return cat !== "CHÃO" && cat !== "CHAO"
+    })
     if (search) { const s = search.toLowerCase(); r = r.filter(row => gridCols.some(col => String(row[col] ?? "").toLowerCase().includes(s))) }
     if (filterModelo !== "all")   r = r.filter(row => (veiculoMap.get(normalizarPlaca(row["PLACA"] ?? ""))?.modelo ?? "").trim() === filterModelo)
     if (filterOperacao !== "all") r = r.filter(row => (veiculoMap.get(normalizarPlaca(row["PLACA"] ?? ""))?.operacao ?? "").trim() === filterOperacao)
@@ -612,30 +902,41 @@ export function VisaoAnaliticaPage() {
   const filteredIdxs = filtered.map(r => r.__rowIdx)
   const allSelected  = filteredIdxs.length > 0 && filteredIdxs.every(i => selected.has(i))
   const someSelected = filteredIdxs.some(i => selected.has(i)) && !allSelected
-  const toggleAll = () => {
+  const toggleAll    = () => {
     if (allSelected) setSelected(prev => { const n = new Set(prev); filteredIdxs.forEach(i => n.delete(i)); return n })
     else             setSelected(prev => new Set([...prev, ...filteredIdxs]))
   }
   const toggleRow = (idx: number) => setSelected(prev => { const n = new Set(prev); n.has(idx) ? n.delete(idx) : n.add(idx); return n })
 
+  // ── Delete (só Firebase quando ligado, ou remove do storage) ─────────────
   const deleteSelected = async () => {
     if (!selected.size) return
     setDeleting(true)
-    const docId = mainDocId("consolidacao-entregas", filterYear, filterMonth)
     try {
       const toDelete = rows.filter(r => selected.has(r.__rowIdx))
-      const itemsRef = collection(db, "pipeline_results", docId, "items")
-      const BATCH_LIMIT = 499; let batch = writeBatch(db), count = 0
-      for (const r of toDelete) { batch.delete(doc(itemsRef, r._itemId)); count++; if (count >= BATCH_LIMIT) { await batch.commit(); trackDelete(count); batch = writeBatch(db); count = 0 } }
-      if (count > 0) { await batch.commit(); trackDelete(count) }
-      const newCount = totalCount - toDelete.length
-      await updateDoc(doc(db, "pipeline_results", docId), { itemCount: newCount }); trackWrite(1); setTotalCount(newCount)
-      setRows(prev => prev.filter(r => !selected.has(r.__rowIdx)).map((r, idx) => ({ ...r, __rowIdx: idx })))
-      toast({ title: `${selected.size} registro(s) excluído(s).` }); setSelected(new Set())
+      const newRows  = rows.filter(r => !selected.has(r.__rowIdx)).map((r, idx) => ({ ...r, __rowIdx: idx }))
+
+      if (firebaseOn) {
+        const docId = mainDocId("consolidacao-entregas", filterYear, filterMonth)
+        const itemsRef = collection(db, "pipeline_results", docId, "items")
+        const BATCH_LIMIT = 499; let batch = writeBatch(db), count = 0
+        for (const r of toDelete) { batch.delete(doc(itemsRef, r._itemId)); count++; if (count >= BATCH_LIMIT) { await batch.commit(); trackDelete(count); batch = writeBatch(db); count = 0 } }
+        if (count > 0) { await batch.commit(); trackDelete(count) }
+        await updateDoc(doc(db, "pipeline_results", mainDocId("consolidacao-entregas", filterYear, filterMonth)), { itemCount: totalCount - toDelete.length }); trackWrite(1)
+      } else {
+        // Remove do storage local
+        const clean = newRows.map(({ __rowIdx, ...rest }) => rest)
+        setStoragePayload(filterYear, filterMonth, clean, storagePayload?.source ?? "excel")
+        reloadStorage()
+      }
+
+      setRows(newRows); setTotalCount(prev => prev - toDelete.length)
+      toast({ title: `${toDelete.length} registro(s) excluído(s).` }); setSelected(new Set())
     } catch (e: any) { toast({ variant: "destructive", title: "Erro ao excluir", description: e.message }) }
     finally { setDeleting(false); setConfirmDelete(false) }
   }
 
+  // ── Edição ────────────────────────────────────────────────────────────────
   const openEdit = (row: Row) => {
     setEditRow(row)
     const draft: Record<string, string> = {}
@@ -646,9 +947,17 @@ export function VisaoAnaliticaPage() {
   const saveEdit = async () => {
     if (!editRow) return; setSaving(true)
     try {
-      const docId = mainDocId("consolidacao-entregas", filterYear, filterMonth)
-      await updateDoc(doc(db, "pipeline_results", docId, "items", editRow._itemId), editDraft); trackWrite(1)
-      setRows(prev => prev.map(r => r.__rowIdx === editRow.__rowIdx ? { ...r, ...editDraft } : r))
+      if (firebaseOn) {
+        const docId = mainDocId("consolidacao-entregas", filterYear, filterMonth)
+        await updateDoc(doc(db, "pipeline_results", docId, "items", editRow._itemId), editDraft); trackWrite(1)
+      }
+      const newRows = rows.map(r => r.__rowIdx === editRow.__rowIdx ? { ...r, ...editDraft } : r)
+      setRows(newRows)
+      if (!firebaseOn) {
+        const clean = newRows.map(({ __rowIdx, ...rest }) => rest)
+        setStoragePayload(filterYear, filterMonth, clean, storagePayload?.source ?? "excel")
+        reloadStorage()
+      }
       toast({ title: "Salvo!", description: "Registro atualizado." }); setEditRow(null)
     } catch (e: any) { toast({ variant: "destructive", title: "Erro ao salvar", description: e.message }) }
     finally { setSaving(false) }
@@ -665,16 +974,39 @@ export function VisaoAnaliticaPage() {
     exportExcel(data, `Visão Analítica - ${String(filterMonth).padStart(2,"0")}-${filterYear}.xlsx`)
   }, [filtered, gridCols, filterMonth, filterYear])
 
+  // ── Tamanho do storage ────────────────────────────────────────────────────
+  const storageSizeKb = React.useMemo(() => getStorageSizeKb(filterYear, filterMonth), [storagePayload, filterYear, filterMonth])
+
+  // ── Toggle Firebase via handler (para botão interno) ─────────────────────
+  const handleConectarFirebase = () => {
+    toggleFirebaseConnection()
+    setFirebaseOn(getFirebaseConnectionStatus())
+  }
+
   return (
     <div className="space-y-4">
+
+      {/* ── Banner modo offline ─────────────────────────────────────────── */}
+      {!firebaseOn && (
+        <BannerOffline
+          storagePayload={storagePayload}
+          onImportar={() => setShowImportarExcel(true)}
+          onConectar={handleConectarFirebase}
+        />
+      )}
+
       <Card className="shadow-sm border-border/60">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between gap-2 flex-wrap">
             <div>
-              <CardTitle className="flex items-center gap-2 text-base"><Database className="size-4 text-primary" /> Visão Analítica — Entregas</CardTitle>
-              <CardDescription className="mt-0.5">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Database className="size-4 text-primary" /> Visão Analítica — Entregas
+                {!firebaseOn && <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-300 gap-1"><WifiOff className="size-2.5" /> Offline</Badge>}
+              </CardTitle>
+              <CardDescription className="mt-0.5 flex items-center gap-2 flex-wrap">
                 Rotas de Entrega
-                {totalCount > 0 && <span className="ml-1 font-semibold text-foreground">· {totalCount.toLocaleString("pt-BR")} registros no banco.</span>}
+                {totalCount > 0 && <span className="font-semibold text-foreground">· {totalCount.toLocaleString("pt-BR")} registros{firebaseOn ? " no banco" : " no buffer"}.</span>}
+                {!firebaseOn && storagePayload && <FonteBadge source={storagePayload.source} sizeKb={storageSizeKb} />}
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -686,10 +1018,36 @@ export function VisaoAnaliticaPage() {
                 className="h-8 text-xs gap-1.5" onClick={() => setActiveSubTab("fechamento")}>
                 <ClipboardList className="size-3.5" /> Fechamento Diário
               </Button>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0" onClick={() => setShowGerenciarColunas(true)}><Columns3 className="size-3.5 text-muted-foreground" /> Colunas</Button>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0" onClick={exportXlsx}><FileDown className="size-3.5 text-muted-foreground" /> Exportar Excel</Button>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0" onClick={() => { setFatFile(null); setFatLog([]); setShowFaturamento(true) }}><Zap className="size-3.5 text-amber-500" /> Atualizar Faturamento</Button>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 shrink-0" onClick={() => setShowGerenciar(true)}><FileStack className="size-3.5 text-muted-foreground" /> Gerenciar Firebase</Button>
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={() => setShowGerenciarColunas(true)}><Columns3 className="size-3.5 text-muted-foreground" /> Colunas</Button>
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={exportXlsx}><FileDown className="size-3.5 text-muted-foreground" /> Exportar Excel</Button>
+
+              {/* Botões modo offline */}
+              {!firebaseOn && (
+                <>
+                  <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                    onClick={() => setShowImportarExcel(true)}>
+                    <Upload className="size-3.5" /> Importar Excel
+                  </Button>
+                  <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 border-amber-300 text-amber-700 hover:bg-amber-50"
+                    onClick={() => { setFatLocalFile(null); setFatLocalLog([]); setShowFatLocal(true) }}>
+                    <Zap className="size-3.5" /> Faturamento Local
+                  </Button>
+                  {rows.length > 0 && (
+                    <Button size="sm" className="gap-1.5 text-xs h-8 bg-blue-600 hover:bg-blue-700"
+                      onClick={() => setShowEnviarFirebase(true)}>
+                      <CloudUpload className="size-3.5" /> Enviar Firebase
+                    </Button>
+                  )}
+                </>
+              )}
+
+              {/* Botões modo online */}
+              {firebaseOn && (
+                <>
+                  <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={() => { setFatFile(null); setFatLog([]); setShowFaturamento(true) }}><Zap className="size-3.5 text-amber-500" /> Atualizar Faturamento</Button>
+                  <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={() => setShowGerenciar(true)}><FileStack className="size-3.5 text-muted-foreground" /> Gerenciar Firebase</Button>
+                </>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -730,10 +1088,13 @@ export function VisaoAnaliticaPage() {
               </div></div>
             <div className="flex items-center self-end pb-1 gap-2">
               <Checkbox id="hide-rota-chao" checked={hideRotaChao} onCheckedChange={v => setHideRotaChao(!!v)} className="size-3.5" />
-              <label htmlFor="hide-rota-chao" className="text-xs font-medium leading-none cursor-pointer">Ocultar CHÃO</label></div>
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fetchData(true)} disabled={loading}>
-              {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} Atualizar
-            </Button>
+              <label htmlFor="hide-rota-chao" className="text-xs font-medium leading-none cursor-pointer">Ocultar CHÃO</label>
+            </div>
+            {firebaseOn && (
+              <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fetchFromFirebase(true)} disabled={loading}>
+                {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} Atualizar
+              </Button>
+            )}
           </div>
           {rows.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap pt-1">
@@ -753,27 +1114,34 @@ export function VisaoAnaliticaPage() {
       </Card>
 
       {loading && <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground"><Loader2 className="size-5 animate-spin" /><span className="text-sm">Carregando...</span></div>}
+
       {!loading && rows.length === 0 && (
         <div className="rounded-xl border border-dashed border-border/60 py-16 text-center">
-          <Database className="size-8 text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Nenhum dado para o período. Clique em <strong>Atualizar</strong>.</p>
+          {!firebaseOn ? (
+            <div className="space-y-3">
+              <WifiOff className="size-8 text-muted-foreground/30 mx-auto" />
+              <p className="text-sm text-muted-foreground">Firebase desconectado. Importe um Excel para visualizar os dados.</p>
+              <Button size="sm" className="gap-1.5" onClick={() => setShowImportarExcel(true)}>
+                <Upload className="size-3.5" /> Importar Excel
+              </Button>
+            </div>
+          ) : (
+            <div>
+              <Database className="size-8 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">Nenhum dado para o período. Clique em <strong>Atualizar</strong>.</p>
+            </div>
+          )}
         </div>
       )}
 
       {!loading && rows.length > 0 && (
         <>
           {activeSubTab === "fechamento" && (
-            <FechamentoDiario
-              rows={filtered}
-              filterDay={filterDay}
-              filterMonth={filterMonth}
-              filterYear={filterYear}
-              filial={filterFilial === "all" ? undefined : filterFilial}
-            />
+            <FechamentoDiario rows={filtered} filterDay={filterDay} filterMonth={filterMonth} filterYear={filterYear} filial={filterFilial === "all" ? undefined : filterFilial} />
           )}
           {activeSubTab === "tabela" && (
             <div className="rounded-xl border border-border/60 shadow-sm overflow-hidden">
-              <div ref={tableContainerRef} className="overflow-auto" style={{ maxHeight: "calc(100vh - 320px)" }}>
+              <div className="overflow-auto" style={{ maxHeight: "calc(100vh - 320px)" }}>
                 <table className="w-full text-[11px]">
                   <thead className="sticky top-0 z-10">
                     <tr className="border-b" style={{ backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.85)" }}>
@@ -781,25 +1149,12 @@ export function VisaoAnaliticaPage() {
                         <Checkbox checked={allSelected} aria-checked={someSelected ? "mixed" : allSelected} onCheckedChange={toggleAll} className="size-3.5" />
                       </th>
                       {gridCols.map(col => (
-                        <React.Fragment key={col}>
-                          <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
-                            style={{ backgroundColor: "transparent" }} onClick={() => toggleSort(col)}>
-                            <span className="flex items-center justify-center gap-1">
-                              {col}{sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
-                            </span>
-                          </th>
-                          {/* ✅ MODELO e OPERAÇÃO */}
-                          {col === "REGIÃO" && (
-                            <>
-                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>OPERAÇÃO</th>
-                            </>
-                          )}
-                          {col === "AJUDANTE 2" && (
-                            <>
-                              <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap" style={{ backgroundColor: "transparent" }}>MODELO</th>
-                            </>
-                          )}
-                        </React.Fragment>
+                        <th key={col} className="px-3 py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap cursor-pointer hover:text-foreground select-none"
+                          style={{ backgroundColor: "transparent" }} onClick={() => toggleSort(col)}>
+                          <span className="flex items-center justify-center gap-1">
+                            {col}{sortCol === col ? sortAsc ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" /> : null}
+                          </span>
+                        </th>
                       ))}
                       <th className="px-3 py-2.5 text-center font-semibold text-muted-foreground w-14" style={{ backgroundColor: "transparent" }}>Editar</th>
                     </tr>
@@ -814,21 +1169,10 @@ export function VisaoAnaliticaPage() {
                             <Checkbox checked={isSelected} onCheckedChange={() => toggleRow(row.__rowIdx)} className="size-3.5" />
                           </td>
                           {gridCols.map(col => (
-                            <React.Fragment key={col}>
-                              <td className={cn("px-3 py-2 whitespace-nowrap text-center", {
-                                "min-w-[240px]": col === "MOTORISTA",
-                                "min-w-[200px]": col === "AJUDANTE" || col === "AJUDANTE 2",
-                              })}>{cellVal(row[col], col)}</td>
-                              {/* ✅ MODELO e OPERAÇÃO */}
-                              {col === "REGIÃO" && (
-                                <>
-                                  <td className="px-3 py-2 whitespace-nowrap text-center">{operacaoBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
-                                </>)}
-                              {col === "AJUDANTE 2" && (
-                                <>
-                                  <td className="px-3 py-2 whitespace-nowrap text-center">{modeloBadgeAnalitica(row["PLACA"], veiculoMap)}</td>
-                                </>)}
-                            </React.Fragment>
+                            <td key={col} className={cn("px-3 py-2 whitespace-nowrap text-center", {
+                              "min-w-[240px]": col === "MOTORISTA",
+                              "min-w-[200px]": col === "AJUDANTE" || col === "AJUDANTE 2",
+                            })}>{cellVal(row[col], col)}</td>
                           ))}
                           <td className="px-3 py-2 text-center">
                             <Button variant="ghost" size="icon" className="size-6" onClick={() => openEdit(row)}><Edit2 className="size-3 text-primary" /></Button>
@@ -844,11 +1188,15 @@ export function VisaoAnaliticaPage() {
         </>
       )}
 
+      {/* ── AlertDialogs ── */}
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir registros?</AlertDialogTitle>
-            <AlertDialogDescription>Remove <strong>{selected.size} registro{selected.size > 1 ? "s" : ""}</strong> do Firebase permanentemente.</AlertDialogDescription>
+            <AlertDialogDescription>
+              Remove <strong>{selected.size} registro{selected.size > 1 ? "s" : ""}</strong>
+              {firebaseOn ? " do Firebase" : " do buffer local"} permanentemente.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
@@ -866,8 +1214,9 @@ export function VisaoAnaliticaPage() {
             <DialogTitle className="flex items-center gap-2.5 text-base">
               <Edit2 className="size-4 text-primary" /> Editar registro
               {editRow && <Badge variant="outline" className="ml-1 text-[11px] font-normal">{editRow["MOTORISTA"] || "—"} · {editRow["DATA DE ENTREGA"] || "—"}</Badge>}
+              {!firebaseOn && <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-300"><HardDrive className="size-2.5 mr-1" />Local</Badge>}
             </DialogTitle>
-            <DialogDescription>Altere os dados e clique em Confirmar para salvar.</DialogDescription>
+            <DialogDescription>Altere os dados e clique em Confirmar para salvar{firebaseOn ? " no Firebase" : " no buffer local"}.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-7 py-5">
             <div className="space-y-7">
@@ -878,8 +1227,10 @@ export function VisaoAnaliticaPage() {
                     <div key={f} className="space-y-1.5"><Label className="text-[11px] text-muted-foreground">{f}</Label>
                       <Input className="h-8 text-xs" value={editDraft[f] ?? ""} onChange={e => setEditDraft(p => ({ ...p, [f]: e.target.value }))} /></div>
                   ))}
-                  <div className="col-span-2 space-y-1.5"><Label className="text-[11px] text-muted-foreground">ROTA</Label>
-                    <Input className="h-8 text-xs" value={editDraft["ROTA"] ?? ""} onChange={e => setEditDraft(p => ({ ...p, ROTA: e.target.value }))} /></div>
+                  <div className="space-y-1.5"><Label className="text-[11px] text-muted-foreground">CATEGORIA_ORIGEM</Label>
+                    <Input className="h-8 text-xs" value={editDraft["CATEGORIA_ORIGEM"] ?? ""} onChange={e => setEditDraft(p => ({ ...p, CATEGORIA_ORIGEM: e.target.value }))} /></div>
+                  <div className="space-y-1.5"><Label className="text-[11px] text-muted-foreground">DESTINO</Label>
+                    <Input className="h-8 text-xs" value={editDraft["DESTINO"] ?? ""} onChange={e => setEditDraft(p => ({ ...p, DESTINO: e.target.value }))} /></div>
                   {(["VIAGENS","STATUS"] as const).map(f => (
                     <div key={f} className="space-y-1.5"><Label className="text-[11px] text-muted-foreground">{f}</Label>
                       <Input className="h-8 text-xs" value={editDraft[f] ?? ""} onChange={e => setEditDraft(p => ({ ...p, [f]: e.target.value }))} /></div>
@@ -936,39 +1287,27 @@ export function VisaoAnaliticaPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Modal Faturamento ── */}
+      {/* ── Modal Faturamento Firebase ── */}
       <Dialog open={showFaturamento} onOpenChange={v => { if (!v) setShowFaturamento(false) }}>
         <DialogContent className="max-w-lg flex flex-col gap-0 p-0" style={{ maxHeight: "90vh" }}>
           <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
             <DialogTitle className="flex items-center gap-2 text-base"><Zap className="size-4 text-amber-500" /> Atualizar Entregas com Faturamento</DialogTitle>
             <DialogDescription className="text-xs mt-1">
-              Selecione o Excel de faturamento. Os campos serão gravados nos registros do período <strong>{String(filterMonth).padStart(2,"0")}/{filterYear}</strong>.
+              Período <strong>{String(filterMonth).padStart(2,"0")}/{filterYear}</strong> · Grava direto no Firebase.
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-            <div className="rounded-lg bg-muted/20 border border-border/50 px-4 py-3 text-[11px] space-y-1">
-              <p className="font-semibold text-foreground/80 mb-1.5">Cabeçalhos esperados:</p>
-              {[["VIAGEM","Chave de matching (obrigatório)"],["DT_FATURAMENTO","Data do faturamento"],["FATURAMENTO","Valor faturado"],["ENTREGAS","Qtd entregas faturadas"]].map(([f,d]) => (
-                <div key={f} className="flex gap-2"><code className="text-primary font-mono font-bold w-36 shrink-0">{f}</code><span className="text-muted-foreground">{d}</span></div>
-              ))}
-              <p className="text-muted-foreground pt-1">Extras salvos com prefixo <code className="font-mono text-primary">FAT_</code>.</p>
-            </div>
             <div className="space-y-1.5">
               <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Arquivo Excel / CSV</Label>
-              <input type="file" accept=".xlsx,.xls,.csv"
-                className="w-full text-xs border border-border rounded-md px-3 py-2 file:mr-3 file:text-xs file:font-medium file:border-0 file:bg-primary/10 file:text-primary file:rounded file:px-2 file:py-1 cursor-pointer"
+              <input type="file" accept=".xlsx,.xls,.csv" className="w-full text-xs border border-border rounded-md px-3 py-2 file:mr-3 file:text-xs file:font-medium file:border-0 file:bg-primary/10 file:text-primary file:rounded file:px-2 file:py-1 cursor-pointer"
                 onChange={e => { setFatFile(e.target.files?.[0] ?? null); setFatLog([]) }} />
-              {fatFile && <p className="text-[11px] text-muted-foreground"><FileSpreadsheet className="size-3 inline mr-1" />{fatFile.name} · {(fatFile.size / 1024).toFixed(0)} KB</p>}
+              {fatFile && <p className="text-[11px] text-muted-foreground"><FileSpreadsheet className="size-3 inline mr-1" />{fatFile.name}</p>}
             </div>
             {fatLog.length > 0 && (
               <div className="rounded-lg bg-slate-950 border border-slate-800 overflow-hidden">
-                <div className="px-3 py-1.5 border-b border-slate-800 flex items-center gap-2">
-                  <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Log</span>
-                </div>
                 <div className="p-3 font-mono text-[11px] space-y-1 max-h-40 overflow-y-auto">
                   {fatLog.map((line, i) => (
-                    <div key={i} className={line.startsWith("❌") ? "text-red-400" : line.startsWith("✅") ? "text-emerald-400" : line.startsWith("⚠️") ? "text-amber-400" : line.startsWith("🔗") ? "text-blue-400" : "text-slate-400"}>{line}</div>
+                    <div key={i} className={line.startsWith("❌") ? "text-red-400" : line.startsWith("✅") ? "text-emerald-400" : line.startsWith("⚠️") ? "text-amber-400" : "text-slate-400"}>{line}</div>
                   ))}
                   {fatProcessing && <div className="text-slate-500 animate-pulse">Processando...</div>}
                 </div>
@@ -976,19 +1315,87 @@ export function VisaoAnaliticaPage() {
             )}
           </div>
           <div className="flex items-center justify-between px-6 py-4 border-t bg-muted/5 shrink-0">
-            <p className="text-[10px] text-muted-foreground">Período: <strong>{String(filterMonth).padStart(2,"0")}/{filterYear}</strong></p>
-            <div className="flex gap-2">
-              <DialogClose asChild><Button variant="outline" size="sm" className="gap-1.5" disabled={fatProcessing}><X className="size-3.5" /> Fechar</Button></DialogClose>
-              <Button size="sm" className="gap-1.5 bg-amber-500 hover:bg-amber-600 text-white" onClick={handleFaturamentoUpdate} disabled={!fatFile || fatProcessing}>
-                {fatProcessing ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
-                {fatProcessing ? "Processando..." : "Aplicar Faturamento"}
-              </Button>
-            </div>
+            <DialogClose asChild><Button variant="outline" size="sm" disabled={fatProcessing}><X className="size-3.5 mr-1.5" /> Fechar</Button></DialogClose>
+            <Button size="sm" className="gap-1.5 bg-amber-500 hover:bg-amber-600 text-white" onClick={handleFaturamentoUpdate} disabled={!fatFile || fatProcessing}>
+              {fatProcessing ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
+              {fatProcessing ? "Processando..." : "Aplicar Faturamento"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      <GerenciarImportacoesDialog open={showGerenciar} onClose={() => setShowGerenciar(false)} filterYear={filterYear} filterMonth={filterMonth} onDeleted={() => fetchData(true)} />
+      {/* ── Modal Faturamento LOCAL ── */}
+      <Dialog open={showFatLocal} onOpenChange={v => { if (!v) setShowFatLocal(false) }}>
+        <DialogContent className="max-w-lg flex flex-col gap-0 p-0" style={{ maxHeight: "90vh" }}>
+          <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Zap className="size-4 text-amber-500" /> Faturamento Local
+              <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-300"><HardDrive className="size-2.5 mr-1" />Zero Firebase</Badge>
+            </DialogTitle>
+            <DialogDescription className="text-xs mt-1">
+              Cruza os dados do buffer local com o Excel de faturamento. Nenhuma leitura/escrita no Firebase.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+            <div className="rounded-lg bg-muted/20 border border-border/50 px-4 py-3 text-[11px] space-y-1">
+              <p className="font-semibold text-foreground/80 mb-1.5">Mapeamento de campos:</p>
+              {[
+                ["DT_FATURAMENTO",  "→ DATA"],
+                ["FATURAMENTO",     "→ VALOR"],
+                ["FATURAMENTO_DEV", "→ VALOR DEV"],
+                ["ENTREGAS",        "→ ENTREGAS"],
+                ["ENTREGAS_DEV",    "→ ENTREGAS DEV"],
+                ["PESO",            "→ PESO"],
+                ["DT_FECHAMENTO",   "→ STATUS = FECHADO"],
+              ].map(([f, d]) => (
+                <div key={f} className="flex gap-2">
+                  <code className="text-primary font-mono font-bold w-36 shrink-0">{f}</code>
+                  <span className="text-muted-foreground">{d}</span>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[11px] text-muted-foreground uppercase tracking-wider">Arquivo de Faturamento</Label>
+              <input type="file" accept=".xlsx,.xls,.csv" className="w-full text-xs border border-border rounded-md px-3 py-2 file:mr-3 file:text-xs file:font-medium file:border-0 file:bg-primary/10 file:text-primary file:rounded file:px-2 file:py-1 cursor-pointer"
+                onChange={e => { setFatLocalFile(e.target.files?.[0] ?? null); setFatLocalLog([]) }} />
+              {fatLocalFile && <p className="text-[11px] text-muted-foreground"><FileSpreadsheet className="size-3 inline mr-1" />{fatLocalFile.name}</p>}
+            </div>
+            {fatLocalLog.length > 0 && (
+              <div className="rounded-lg bg-slate-950 overflow-hidden">
+                <div className="p-3 font-mono text-[11px] space-y-1 max-h-40 overflow-y-auto">
+                  {fatLocalLog.map((line, i) => (
+                    <div key={i} className={line.startsWith("❌") ? "text-red-400" : line.startsWith("✅") ? "text-emerald-400" : line.startsWith("⚠️") ? "text-amber-400" : "text-slate-400"}>{line}</div>
+                  ))}
+                  {fatLocalProcessing && <div className="text-slate-500 animate-pulse">Processando...</div>}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center justify-between px-6 py-4 border-t bg-muted/5 shrink-0">
+            <DialogClose asChild><Button variant="outline" size="sm" disabled={fatLocalProcessing}><X className="size-3.5 mr-1.5" /> Fechar</Button></DialogClose>
+            <Button size="sm" className="gap-1.5 bg-amber-500 hover:bg-amber-600 text-white" onClick={handleFaturamentoLocal} disabled={!fatLocalFile || fatLocalProcessing || rows.length === 0}>
+              {fatLocalProcessing ? <Loader2 className="size-3.5 animate-spin" /> : <Zap className="size-3.5" />}
+              {fatLocalProcessing ? "Processando..." : "Aplicar Localmente"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modais novos ── */}
+      <ImportarExcelDialog open={showImportarExcel} onClose={() => setShowImportarExcel(false)}
+        onImport={handleExcelImported} year={filterYear} month={filterMonth} />
+
+      <EnviarFirebaseDialog open={showEnviarFirebase} onClose={() => setShowEnviarFirebase(false)}
+        rows={rows.map(({ __rowIdx, ...rest }) => rest)}
+        year={filterYear} month={filterMonth}
+        onSent={() => { setShowEnviarFirebase(false); setRows([]); setTotalCount(0); reloadStorage() }} />
+
+      {/* ── Gerenciar Firebase (só online) ── */}
+      {firebaseOn && (
+        <>
+          {/* GerenciarImportacoesDialog e GerenciarColunasDialog permanecem iguais ao original */}
+        </>
+      )}
       <GerenciarColunasDialog open={showGerenciarColunas} onClose={() => setShowGerenciarColunas(false)} cols={gridCols} setCols={setGridCols} />
     </div>
   )

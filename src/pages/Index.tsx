@@ -1,4 +1,4 @@
-import { useOutletContext } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 
 // Import all the pipeline view components
 import { ConsolidacaoEntregasPipelineView } from '@/components/pipeline/entregas-pipeline-view';
@@ -40,21 +40,18 @@ const pipelineViewMap: { [key: string]: React.ComponentType } = {
   'motivos-dev': MotivosDevPipelineView,
 };
 
-interface PipelineContext {
-  pipelineId: string;
-}
-
 export default function IndexPage() {
-  const { pipelineId } = useOutletContext<PipelineContext>();
+  // ✅ Corrigido: usa useParams para ler o :pipelineId da URL
+  // (antes usava useOutletContext, que retornava undefined pois nenhum pai passava contexto)
+  const { pipelineId } = useParams<{ pipelineId: string }>();
 
-  // Find the component that corresponds to the pipelineId
   const PipelineViewComponent = pipelineId ? pipelineViewMap[pipelineId] : null;
 
   if (!PipelineViewComponent) {
     return (
       <div>
         <h1 className="text-2xl font-bold">Pipeline não encontrado</h1>
-        <p>O pipeline com o ID '{pipelineId}' não foi encontrado.</p>
+        <p>O pipeline com o ID &apos;{pipelineId}&apos; não foi encontrado.</p>
       </div>
     );
   }
