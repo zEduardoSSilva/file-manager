@@ -6,12 +6,16 @@
  * Aba "Visão"    → KPIs, cards por filial, distribuição por status/tipo carga
  * Aba "Detalhes" → Tabela editável inline com exportação Excel + HTML
  *
- * LÓGICA DE COMPLEMENTAR COM DIAS ANTERIORES (atualizada):
- *   1. Complementa campos em branco dos registros ATUAIS com dados do anterior
- *      (comportamento original mantido).
- *   2. NOVO: Adiciona ao relatório as linhas do dia anterior cujo STATUS
- *      NÃO é "FECHADO" (em branco ou PENDENTE) e que não existem já no
- *      relatório atual (dedup por VIAGEM ou PLACA).
+ * EXPORTAÇÃO EXCEL:
+ *   Gera uma aba por REGIÃO (RK01, RK03, BV01…) + aba "Todos" ao final.
+ *
+ * IMPORTAÇÃO DE EXCELS ANTERIORES:
+ *   Lê TODAS as abas do arquivo carregado (uma por região) e mescla as linhas.
+ *
+ * LÓGICA DE COMPLEMENTAR COM DIAS ANTERIORES:
+ *   1. Complementa campos em branco dos registros ATUAIS com dados do anterior.
+ *   2. Adiciona ao relatório as linhas do dia anterior cujo STATUS não é
+ *      "FECHADO" e que não existem no relatório atual (dedup por VIAGEM/PLACA).
  *      Essas linhas aparecem marcadas como _vindoAnterior: true.
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -138,14 +142,14 @@ const CARGA_STYLE: Record<string, { text: string; chip: string }> = {
 // ─────────────────────────────────────────────────────────────────────────────
 const LABEL_TO_KEY: Record<string, string> = Object.fromEntries(
   TABLE_COLS.map(({ key, label }) => [label, key as string])
-)
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STATUS_MAP: Record<string, string> = {
-  OK:"FECHADO",FINALIZADO:"FECHADO",FINALIZADA:"FECHADO",CONCLUIDO:"FECHADO",
+  OK: "FECHADO",FINALIZADO:"FECHADO",FINALIZADA:"FECHADO",CONCLUIDO:"FECHADO",
   "CONCLUÍDA":"FECHADO",ENTREGUE:"FECHADO",ENTREGUES:"FECHADO",FECHADO:"FECHADO",
   FECHADA:"FECHADO",ENCERRADO:"FECHADO",ENCERRADA:"FECHADO",LIQUIDADO:"FECHADO",LIQUIDADA:"FECHADO",
   PENDENTE:"PENDENTE",PEND:"PENDENTE",PENDENCIA:"PENDENTE","PENDÊNCIAS":"PENDENTE",
@@ -156,23 +160,19 @@ const STATUS_MAP: Record<string, string> = {
 
 function extractTempo(v: any): string {
   if (v == null || String(v).trim() === "") return "";
-
   if (v instanceof Date) {
     const h = v.getHours().toString().padStart(2, "0");
     const m = v.getMinutes().toString().padStart(2, "0");
     return `${h}:${m}`;
   }
-
   const s = String(v).trim();
   const n = parseFloat(s);
   if (!isNaN(n) && n >= 0 && n < 1) {
     const totalMin = Math.round(n * 24 * 60);
     return `${Math.floor(totalMin / 60).toString().padStart(2, "0")}:${(totalMin % 60).toString().padStart(2, "0")}`;
   }
-
   const m = s.match(/(\d{1,2}):(\d{2})/);
   if (m) return `${m[1].padStart(2, "0")}:${m[2]}`;
-
   return s;
 }
 
@@ -243,12 +243,51 @@ function rowToFechRow(row: AnyRow, idx: number): FechRow {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MESCLAGEM COM DIAS ANTERIORES (LÓGICA ATUALIZADA)
-//
-// Fase 1 — Complementa campos vazios dos registros ATUAIS (igual antes)
-// Fase 2 — NOVO: adiciona linhas do anterior que:
-//           a) não estão FECHADAS (STATUS vazio ou PENDENTE)
-//           b) não existem no relatório atual (dedup por VIAGEM ou PLACA)
+// EXPORTAÇÃO EXCEL POR REGIÃO
+// Gera uma aba por REGIÃO (ex: RK01, RK03, BV01…) + aba "Todos" ao final.
+// Cada aba recebe apenas as linhas daquela região.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildExcelWorkbook(rows: FechRow[], colDefs: typeof TABLE_COLS): XLSX.WorkBook {
+  const wb = XLSX.utils.book_new();
+
+  // Ordena regiões para ordem consistente
+  const regioes = [...new Set(rows.map(r => r.REGIÃO || "SEM REGIÃO"))].sort();
+
+  const toPlainObj = (r: FechRow) => {
+    const obj: Record<string, any> = {};
+    colDefs.forEach(({ key, label }) => { obj[label] = (r as any)[key] ?? ""; });
+    obj["ARQUIVO_ORIGEM"] = r.ARQUIVO_ORIGEM;
+    obj["ABA_ORIGEM"]     = r.ABA_ORIGEM;
+    return obj;
+  };
+
+  const autoColWidths = (data: Record<string, any>[]): XLSX.ColInfo[] =>
+    data.length === 0 ? [] :
+      Object.keys(data[0]).map(k => ({
+        wch: Math.max(k.length, ...data.slice(0, 50).map(r => String(r[k] ?? "").length)) + 2,
+      }));
+
+  // Uma aba por região
+  for (const regiao of regioes) {
+    const linhas = rows.filter(r => (r.REGIÃO || "SEM REGIÃO") === regiao).map(toPlainObj);
+    const ws = XLSX.utils.json_to_sheet(linhas);
+    ws["!cols"] = autoColWidths(linhas);
+    // Nome da aba = código da região (max 31 chars — limite do Excel)
+    XLSX.utils.book_append_sheet(wb, ws, regiao.slice(0, 31));
+  }
+
+  // Aba "Todos" com todas as linhas
+  const todos = rows.map(toPlainObj);
+  const wsTodos = XLSX.utils.json_to_sheet(todos);
+  wsTodos["!cols"] = autoColWidths(todos);
+  XLSX.utils.book_append_sheet(wb, wsTodos, "Todos");
+
+  return wb;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MESCLAGEM COM DIAS ANTERIORES
 // ─────────────────────────────────────────────────────────────────────────────
 
 function mesclarComAnterior(fechRows: FechRow[], anteriorRows: AnyRow[]): FechRow[] {
@@ -283,21 +322,17 @@ function mesclarComAnterior(fechRows: FechRow[], anteriorRows: AnyRow[]): FechRo
     if (score > existingScore) idxPlaca[placa] = r;
   }
 
-  // ── FASE 1: complementa campos dos atuais ────────────────────────────────
+  // Fase 1: complementa campos dos atuais
   const fase1 = fechRows.map(row => {
     const viagem   = String(row.VIAGENS ?? row.VIAGEM ?? "").trim();
     const placaNorm = (row.PLACA ?? "").toUpperCase().replace(/[-\s]/g, "")
       || String(row["PLACA SISTEMA"] ?? "").toUpperCase().replace(/[-\s]/g, "");
-
     const fonte = (viagem && idxViagem[viagem]) || (placaNorm && idxPlaca[placaNorm]);
     if (!fonte) return row;
-
     const merged: FechRow = { ...row, _preenchidoAnterior: true };
-
     for (const campo of CAMPOS_FECHAMENTO) {
       const valorFonte = String(fonte[campo as string] ?? "").trim();
       if (vazio(valorFonte)) continue;
-
       if (campo === "STATUS") {
         const statusFonte = normalizarStatus(valorFonte);
         const statusAtual = String(row[campo] ?? "").trim();
@@ -311,14 +346,11 @@ function mesclarComAnterior(fechRows: FechRow[], anteriorRows: AnyRow[]): FechRo
         (merged as any)[campo] = valorFonte;
       }
     }
-
     return merged;
   });
 
-  // ── FASE 2: adiciona linhas do anterior que não estão FECHADAS ────────────
-  // Monta conjunto de chaves de dedup dos registros atuais
+  // Fase 2: adiciona linhas não-fechadas do anterior que não existem no atual
   const chaveAtual = new Set(fase1.map(r => dedupKey(r)).filter(Boolean));
-
   const linhasParaAdicionar: FechRow[] = [];
   let idxExtra = fase1.length;
 
@@ -341,20 +373,16 @@ function mesclarComAnterior(fechRows: FechRow[], anteriorRows: AnyRow[]): FechRo
     // Marca como vindo do dia anterior
     fr._vindoAnterior = true;
     fr._preenchidoAnterior = false;
-
     linhasParaAdicionar.push(fr);
-    if (chave) chaveAtual.add(chave); // evita duplicatas entre múltiplos arquivos
+    if (chave) chaveAtual.add(chave);
     idxExtra++;
   }
 
-  // Renumera _idx para não ter colisões
-  const resultado = [...fase1, ...linhasParaAdicionar].map((r, i) => ({ ...r, _idx: i }));
-
-  return resultado;
+  return [...fase1, ...linhasParaAdicionar].map((r, i) => ({ ...r, _idx: i }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GERADOR HTML (para exportar)
+// GERADOR HTML
 // ─────────────────────────────────────────────────────────────────────────────
 
 function gerarHtml(rows: FechRow[], dia: string): string {
@@ -420,7 +448,6 @@ function gerarHtml(rows: FechRow[], dia: string): string {
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>RFK — Fechamento Diário ${dia}</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -446,7 +473,6 @@ body{font-family:'IBM Plex Sans',sans-serif;background:#eef2f0;color:#1a2e26;fon
 .page{display:none;}.page.active{display:block;}
 .kpi-strip{background:#fff;border-bottom:1px solid #c8e6dc;padding:14px 24px;display:flex;gap:12px;flex-wrap:wrap;}
 .kpi{flex:1;min-width:130px;padding:14px 18px;border-radius:10px;display:flex;flex-direction:column;gap:4px;position:relative;overflow:hidden;}
-.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:currentColor;opacity:.35;border-radius:10px 10px 0 0;}
 .kpi-lbl{font-size:.68em;font-weight:700;text-transform:uppercase;letter-spacing:.8px;font-family:'IBM Plex Mono',monospace;opacity:.8;}
 .kpi-val{font-size:2em;font-weight:700;font-family:'IBM Plex Mono',monospace;line-height:1;}
 .kpi-sub{font-size:.7em;opacity:.65;font-family:'IBM Plex Mono',monospace;}
@@ -567,9 +593,18 @@ function resumoTabela(id,map,total){
     +'<tr class="tr-tot"><td>Total</td><td style="text-align:center;">'+total+'</td><td></td></tr>';
 }
 function exportar(){
-  const wb=XLSX.utils.book_new(),ws=XLSX.utils.json_to_sheet(DADOS);
-  ws['!cols']=Object.keys(DADOS[0]||{}).map(k=>({wch:Math.max(k.length,14)}));
-  XLSX.utils.book_append_sheet(wb,ws,"Fechamento");
+  const wb=XLSX.utils.book_new();
+  // Agrupa por Região
+  const regioes=[...new Set(DADOS.map(d=>d['Região']||'SEM REGIÃO'))].sort();
+  regioes.forEach(reg=> {
+    const linhas=DADOS.filter(d=>(d['Região']||'SEM REGIÃO')===reg);
+    const ws=XLSX.utils.json_to_sheet(linhas);
+    ws['!cols']=Object.keys(linhas[0]||{}).map(k=>({wch:Math.max(k.length,14)}));
+    XLSX.utils.book_append_sheet(wb,ws,reg.slice(0,31));
+  });
+  const wsTodos=XLSX.utils.json_to_sheet(DADOS);
+  wsTodos['!cols']=Object.keys(DADOS[0]||{}).map(k=>({wch:Math.max(k.length,14)}));
+  XLSX.utils.book_append_sheet(wb,wsTodos,'Todos');
   XLSX.writeFile(wb,'RFK_Fechamento_${dia.replace(/\//g,"-")}.xlsx');
 }
 window.onload=()=>{
@@ -618,7 +653,7 @@ const ProgressBar: FC<{ pct: number }> = ({ pct }) => (
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CARD POR FILIAL (aba Visão)
+// CARD POR FILIAL
 // ─────────────────────────────────────────────────────────────────────────────
 
 const FilialCard: FC<{ filial: string; rows: FechRow[] }> = ({ filial, rows }) => {
@@ -663,7 +698,7 @@ const FilialCard: FC<{ filial: string; rows: FechRow[] }> = ({ filial, rows }) =
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RESUMO TABLE (aba Visão)
+// RESUMO TABLE
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ResumoBox: FC<{ title: string; items: { label: string; count: number }[]; total: number }> = ({
@@ -738,7 +773,7 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
   const [editingCell, setEditingCell] = useState<{ row: number; col: keyof FechRow } | null>(null);
   const [editValue,   setEditValue]   = useState("");
   const [localRows,   setLocalRows]   = useState<FechRow[]>([]);
-  const [filtroStatus, setFiltroStatus] = useState<string>(""); // "" = todos
+  const [filtroStatus, setFiltroStatus] = useState<string>("");
 
   const anteriorRows = useMemo(
     () => arquivosAnteriores.flatMap((a) => a.linhas),
@@ -749,16 +784,16 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
     () => rows.map((r, i) => rowToFechRow(r, i)),
     [rows]
   );
- 
+
   const fechRowsMesclados = useMemo(
     () => mesclarComAnterior(fechRowsBase, anteriorRows),
     [fechRowsBase, anteriorRows]
   );
- 
+
   useEffect(() => {
     setLocalRows(fechRowsMesclados);
   }, [fechRowsMesclados]); // eslint-disable-line react-hooks/exhaustive-deps
- 
+
   const rowsExibidos = localRows.length > 0 ? localRows : fechRowsMesclados;
 
   // rows da aba detalhes (filtro de status aplicado)
@@ -815,7 +850,11 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
     ? `${String(filterDay).padStart(2,"0")}/${String(filterMonth).padStart(2,"0")}/${filterYear}`
     : `${String(filterMonth).padStart(2,"0")}/${filterYear}`;
 
-  // ── upload anteriores ─────────────────────────────────────────────────────
+  // ── UPLOAD DE EXCELS ANTERIORES ───────────────────────────────────────────
+  // Lê TODAS as abas do arquivo (uma por região) e mescla todas as linhas.
+  // Remapeia label → key em cada linha para compatibilidade com FechRow.
+  // ─────────────────────────────────────────────────────────────────────────
+
   async function handleAnteriorUpload(e: ChangeEvent<HTMLInputElement>): Promise<void> {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
@@ -826,32 +865,52 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
     }
     setLoadingAnt(true); setErroAnt(null);
     const novos: ArquivoAnterior[] = [];
+
     try {
       for (const file of files) {
         const buffer = await file.arrayBuffer();
         const wb     = XLSX.read(buffer, { type: "array" });
-        const sheet  = wb.Sheets[wb.SheetNames[0]];
-        const data   = XLSX.utils.sheet_to_json<AnyRow>(sheet, { defval: "", cellDates: false } as any);
 
-        // Remapeia label → key para cada linha
-        const remapeado = data.map(row => {
-          const novo: AnyRow = {};
-          for (const [col, val] of Object.entries(row)) {
-            const key = LABEL_TO_KEY[col] ?? col;
-            novo[key] = val;
-          }
-          if (novo["STATUS"]) {
-            novo["STATUS"] = normalizarStatus(String(novo["STATUS"]));
-          }
-          return novo;
-        });
+        // ── Lê TODAS as abas e mescla as linhas ──────────────────────────
+        // Filtra a aba "Todos" para evitar duplicatas (ela contém tudo já).
+        // Se não houver aba "Todos", lê todas mesmo.
+        const abasParaLer = wb.SheetNames.includes("Todos")
+          ? ["Todos"]                           // basta ler a aba consolidada
+          : wb.SheetNames;                      // sem aba Todos → lê todas
 
-        novos.push({ nome: file.name, linhas: remapeado });
+        const todasLinhas: AnyRow[] = [];
+
+        for (const nomAba of abasParaLer) {
+          const sheet = wb.Sheets[nomAba];
+          if (!sheet) continue;
+
+          const linhasAba = XLSX.utils.sheet_to_json<AnyRow>(sheet, {
+            defval: "",
+            cellDates: false,
+          } as any);
+
+          // Remapeia label (coluna do Excel) → key interno (FechRow)
+          for (const row of linhasAba) {
+            const novo: AnyRow = {};
+            for (const [col, val] of Object.entries(row)) {
+              const key = LABEL_TO_KEY[col] ?? col;
+              novo[key] = val;
+            }
+            if (novo["STATUS"]) {
+              novo["STATUS"] = normalizarStatus(String(novo["STATUS"]));
+            }
+            todasLinhas.push(novo);
+          }
+        }
+
+        novos.push({ nome: file.name, linhas: todasLinhas });
       }
+
       setArquivosAnteriores((prev) => {
         const nomesNovos = new Set(novos.map((n) => n.nome));
         return [...prev.filter((a) => !nomesNovos.has(a.nome)), ...novos];
       });
+
     } catch (err) {
       setErroAnt(err instanceof Error ? err.message : "Erro ao ler arquivo.");
     } finally {
@@ -864,7 +923,8 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
     setArquivosAnteriores((prev) => prev.filter((a) => a.nome !== nome));
   }
 
-  // ── edição inline ─────────────────────────────────────────────────────────
+  // ── EDIÇÃO INLINE ─────────────────────────────────────────────────────────
+
   function startEdit(ri: number, col: keyof FechRow): void {
     setEditingCell({ row: ri, col });
     setEditValue(String((rowsExibidos[ri] as any)[col] ?? ""));
@@ -877,22 +937,13 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
     setEditingCell(null);
   }
 
-  // ── exportações ───────────────────────────────────────────────────────────
+  // ── EXPORTAÇÕES ───────────────────────────────────────────────────────────
+  // exportarExcel: gera aba por REGIÃO + aba "Todos"
+  // ─────────────────────────────────────────────────────────────────────────
+
   function exportarExcel(): void {
     if (!rowsExibidos.length) return;
-    const data = rowsExibidos.map((r) => {
-      const obj: Record<string, any> = {};
-      TABLE_COLS.forEach(({ key, label }) => { obj[label] = (r as any)[key] ?? ""; });
-      obj["ARQUIVO_ORIGEM"] = r.ARQUIVO_ORIGEM;
-      obj["ABA_ORIGEM"]     = r.ABA_ORIGEM;
-      return obj;
-    });
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(data);
-    ws["!cols"] = Object.keys(data[0] ?? {}).map((k) => ({
-      wch: Math.max(k.length, ...data.slice(0,50).map((r) => String(r[k] ?? "").length)) + 2,
-    }));
-    XLSX.utils.book_append_sheet(wb, ws, "Fechamento");
+    const wb = buildExcelWorkbook(rowsExibidos, TABLE_COLS);
     XLSX.writeFile(wb, `RFK_Fechamento_${diaLabel.replace(/\//g, "-")}.xlsx`);
   }
 
@@ -905,6 +956,14 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
     a.download = `RFK_Fechamento_${diaLabel.replace(/\//g, "-")}.html`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  // Exportação filtrada (aba Detalhes) — também usa abas por região
+  function exportarExcelFiltrado(): void {
+    if (!rowsFiltradosDetalhes.length) return;
+    const wb = buildExcelWorkbook(rowsFiltradosDetalhes, TABLE_COLS);
+    const sufixo = filtroStatus ? `_${filtroStatus}` : "";
+    XLSX.writeFile(wb, `RFK_Fechamento_${diaLabel.replace(/\//g, "-")}${sufixo}.xlsx`);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1056,13 +1115,13 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
           {/* KPI strip */}
           <div className="flex gap-2 flex-wrap">
             {[
-              { label: "Total",       v: totalRows,                            sub: "registros",      cn: "border-primary/30 bg-primary/5 text-primary"      },
-              { label: "✅ Fechados", v: fechados,                             sub: `${pctFech}% do total`, cn: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500" },
-              { label: "⏳ Pendentes",v: pendentes,                            sub: `${totalRows > 0 ? Math.round(pendentes/totalRows*100) : 0}% do total`, cn: "border-yellow-500/30 bg-yellow-500/10 text-yellow-500"   },
-              { label: "⚠ Outros",   v: outros,                               sub: "sem status / outro",  cn: "border-destructive/30 bg-destructive/10 text-destructive" },
-              { label: "📦 Entregas", v: totalEnt,                            sub: "total do dia",   cn: "border-blue-400/30 bg-blue-500/10 text-blue-400"  },
-              { label: "⚖️ Peso",    v: fmtNum(totalPeso),                   sub: "kg total",       cn: "border-border bg-card text-foreground"             },
-              { label: "🛣️ KM",      v: fmtNum(totalKm),                    sub: "km total",       cn: "border-border bg-card text-foreground"             },
+              { label: "Total",       v: totalRows,        sub: "registros",           cn: "border-primary/30 bg-primary/5 text-primary"                    },
+              { label: "✅ Fechados", v: fechados,         sub: `${pctFech}% do total`,cn: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"        },
+              { label: "⏳ Pendentes",v: pendentes,        sub: `${totalRows > 0 ? Math.round(pendentes/totalRows*100) : 0}% do total`, cn: "border-yellow-500/30 bg-yellow-500/10 text-yellow-500" },
+              { label: "⚠ Outros",   v: outros,           sub: "sem status / outro",  cn: "border-destructive/30 bg-destructive/10 text-destructive"        },
+              { label: "📦 Entregas", v: totalEnt,         sub: "total do dia",        cn: "border-blue-400/30 bg-blue-500/10 text-blue-400"                 },
+              { label: "⚖️ Peso",    v: fmtNum(totalPeso),sub: "kg total",            cn: "border-border bg-card text-foreground"                          },
+              { label: "🛣️ KM",      v: fmtNum(totalKm),  sub: "km total",            cn: "border-border bg-card text-foreground"                          },
             ].map((k) => (
               <div key={k.label} className={cn("flex-1 min-w-[110px] rounded-xl border p-4", k.cn)}>
                 <p className="text-[10px] font-semibold uppercase tracking-wide opacity-75 mb-1">{k.label}</p>
@@ -1112,16 +1171,16 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
               <div className="flex-1 h-px bg-border" />
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3">
-              <ResumoBox title="Por Status"       items={porStatus}      total={totalRows} />
-              <ResumoBox title="Por Tipo de Carga" items={porCarga}      total={totalRows} />
-              <ResumoBox title="Fechados por Filial" items={porFilialStatus} total={fechados} />
+              <ResumoBox title="Por Status"         items={porStatus}       total={totalRows} />
+              <ResumoBox title="Por Tipo de Carga"  items={porCarga}        total={totalRows} />
+              <ResumoBox title="Fechados por Filial" items={porFilialStatus} total={fechados}  />
             </div>
           </div>
         </div>
       )}
 
       {/* ══════════════════════════════════════════════════════════════════
-          ABA: DETALHES (tabela editável + filtro de status)
+          ABA: DETALHES
       ══════════════════════════════════════════════════════════════════ */}
       {tab === "detalhes" && (
         <div className="space-y-3">
@@ -1184,25 +1243,10 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
                 onClick={() => setLocalRows(fechRowsMesclados)}>
                 <RefreshCw className="h-3 w-3" /> Resetar
               </Button>
+
+              {/* ── Exportar Excel filtrado (abas por região) ── */}
               <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5"
-                onClick={() => {
-                  const data = rowsFiltradosDetalhes.map((r) => {
-                    const obj: Record<string, any> = {};
-                    TABLE_COLS.forEach(({ key, label }) => { obj[label] = (r as any)[key] ?? ""; });
-                    obj["ARQUIVO_ORIGEM"] = r.ARQUIVO_ORIGEM;
-                    obj["ABA_ORIGEM"]     = r.ABA_ORIGEM;
-                    return obj;
-                  });
-                  if (!data.length) return;
-                  const wb = XLSX.utils.book_new();
-                  const ws = XLSX.utils.json_to_sheet(data);
-                  ws["!cols"] = Object.keys(data[0] ?? {}).map((k) => ({
-                    wch: Math.max(k.length, ...data.slice(0,50).map((row) => String(row[k] ?? "").length)) + 2,
-                  }));
-                  const sufixo = filtroStatus ? `_${filtroStatus}` : "";
-                  XLSX.utils.book_append_sheet(wb, ws, "Fechamento");
-                  XLSX.writeFile(wb, `RFK_Fechamento_${diaLabel.replace(/\//g, "-")}${sufixo}.xlsx`);
-                }}>
+                onClick={exportarExcelFiltrado}>
                 <FileSpreadsheet className="h-3.5 w-3.5" />
                 Exportar{filtroStatus ? ` (${filtroStatus})` : ""} Excel
               </Button>
@@ -1211,13 +1255,13 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
 
           {/* Tabela editável */}
           <div className="rounded-xl border border-border overflow-hidden shadow-sm">
-            <div className="overflow-x-auto overflow-y-auto max-h-[520px] scrollbar-thin">
+            <div className="overflow-auto max-h-[520px] scrollbar-thin">
               <Table className="min-w-max w-full">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     {TABLE_COLS.map((c) => (
                       <TableHead key={c.key}
-                        className={cn("text-[10px] uppercase tracking-wide h-9 whitespace-nowrap", c.editavel && "bg-primary/5 text-primary")}>
+                        className={cn("text-[10px] uppercase tracking-wide h-9 whitespace-nowrap sticky top-0 bg-card z-10", c.editavel && "bg-primary/5 text-primary")}>
                         {c.label}{c.editavel && <span className="ml-1 text-[8px] opacity-60">✎</span>}
                       </TableHead>
                     ))}
@@ -1230,7 +1274,7 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
                         Nenhum registro para o status selecionado.
                       </TableCell>
                     </TableRow>
-                  ) : rowsFiltradosDetalhes.map((row, ri) => {
+                  ) : rowsFiltradosDetalhes.map((row) => {
                     const riOriginal = rowsExibidos.findIndex((r) => r._idx === row._idx);
                     return (
                       <TableRow
