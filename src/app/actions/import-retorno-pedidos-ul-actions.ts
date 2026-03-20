@@ -211,7 +211,8 @@ function montarResumos(resultados: Resultado[]) {
       byArq.set(r.Arquivo, { Arquivo: r.Arquivo, Encontrados: 0, Nao_Encontrados: 0, Total: 0 })
     const ag = byArq.get(r.Arquivo)!
     ag.Total++
-    r.Encontrado_Excel === "SIM" ? ag.Encontrados++ : ag.Nao_Encontrados++
+    if (r.Encontrado_Excel === "SIM") ag.Encontrados++
+    else ag.Nao_Encontrados++
   }
 
   // Resumo por rota
@@ -222,7 +223,8 @@ function montarResumos(resultados: Resultado[]) {
       byRota.set(key, { Rota: key, Encontrados: 0, Nao_Encontrados: 0, Total: 0 })
     const ag = byRota.get(key)!
     ag.Total++
-    r.Encontrado_Excel === "SIM" ? ag.Encontrados++ : ag.Nao_Encontrados++
+    if (r.Encontrado_Excel === "SIM") ag.Encontrados++
+    else ag.Nao_Encontrados++
   }
 
   // Resumo por tipo de empresa
@@ -232,7 +234,8 @@ function montarResumos(resultados: Resultado[]) {
       byEmp.set(r.Tipo_Empresa, { Tipo_Empresa: r.Tipo_Empresa, Encontrados: 0, Nao_Encontrados: 0, Total: 0 })
     const ag = byEmp.get(r.Tipo_Empresa)!
     ag.Total++
-    r.Encontrado_Excel === "SIM" ? ag.Encontrados++ : ag.Nao_Encontrados++
+    if (r.Encontrado_Excel === "SIM") ag.Encontrados++
+    else ag.Nao_Encontrados++
   }
 
   // Resumo geral (usado pelos stats cards da interface)

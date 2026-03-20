@@ -975,7 +975,7 @@ export function DashboardViagens(): JSX.Element {
       return;
     }
     const dataForSheet = filtrados.map(row => {
-      let mappedRow = {};
+      const mappedRow = {};
       TABLE_COLS.forEach(col => {
         mappedRow[col.label] = row[col.key];
       });

@@ -792,7 +792,7 @@ export const FechamentoDiario: FC<FechamentoDiarioProps> = ({
 
   useEffect(() => {
     setLocalRows(fechRowsMesclados);
-  }, [fechRowsMesclados]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fechRowsMesclados]);  
 
   const rowsExibidos = localRows.length > 0 ? localRows : fechRowsMesclados;
 
