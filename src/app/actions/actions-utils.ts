@@ -43,7 +43,7 @@ function parseSheetWithHeaderDetection(
   }
 
   const rawData: any[][] = XLSX.utils.sheet_to_json(sheet, {
-    header: 1, blankrows: true, defval: undefined,
+    header: 1, blankrows: true, defval: "",
   });
 
   let firstHeaderIndex = -1;
@@ -174,6 +174,25 @@ class FileReader {
 
     return allResults;
   }
+
+  async readRaw(fieldName: string): Promise<{ rows: any[][]; fileName: string }[]> {
+    const files = this.formData.getAll(fieldName) as File[]
+    const results: { rows: any[][]; fileName: string }[] = []
+
+    for (const file of files) {
+      const buffer = await file.arrayBuffer()
+      // CSV e XLSX — lê como matriz bruta sem cabeçalho
+      const wb   = XLSX.read(buffer, { type: "array", cellDates: false })
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, {
+        header: 1, blankrows: true, defval: "",
+      })
+      results.push({ rows, fileName: file.name })
+    }
+
+    return results
+  }
+
 }
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────

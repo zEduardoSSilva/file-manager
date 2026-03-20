@@ -1,502 +1,760 @@
-"use server"
+"use client"
 
-import { processAndSave, PipelineArgs, ProcessorOutput, PipelineResponse } from "./actions-utils"
+import * as React from "react"
+import * as XLSX from "xlsx"
+import { Button }      from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { cn }          from "@/lib/utils"
+
+const h = React.createElement
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+
+interface DiaColaborador {
+  data: string
+  dia_semana: string
+  marcacoes: string[]
+  situacoes: { cod: string; desc: string; tempo: string }[]
+}
+
+interface Colaborador {
+  id: string
+  nome: string
+  escala: string
+  horario_previsto: string
+  dias: DiaColaborador[]
+}
+
+interface RegistroPonto {
+  ID: string; Nome: string; Escala: string; Horario_Previsto: string
+  Data: string; Dia_Semana: string
+  Entrada: string; Saida_Almoco: string; Retorno_Almoco: string; Saida: string
+  Qtd_Marcacoes: number; Marcacoes_Completas: string
+  Tempo_Trabalhado: string; Intervalo_Almoco: string; Hora_Extra: string
+  Cod_Situacao: string; Desc_Situacao: string; Tipo_Presenca: string
+}
+
+interface RegistroDetalhe {
+  ID: string; Nome: string; Dia: string; Dia_Semana: string
+  Entrada: string; Saida_Almoco: string; Retorno_Almoco: string; Saida: string
+  Tem_Ajuste_Manual: boolean
+  Tempo_Trabalhado: string; Tempo_Almoco: string
+  Marcacoes_Completas: number; Marcacoes_Faltantes: number
+  Marcacoes_100pct: boolean; Bonus_Marcacoes: number
+  Excesso_Jornada: string; Jornada_OK: boolean
+  HE_Realizada: string; Excesso_HE: string; HE_OK: boolean
+  Almoco_Realizado: string; Deficit_Almoco: string; Almoco_OK: boolean
+  Periodo_Manha: string; Periodo_Tarde: string; Intrajornada_OK: boolean
+  Interjornada_Descanso: string; Interjornada_OK: boolean
+  Todos_5_Criterios_OK: boolean
+  Bonus_Criterios: number; Bonificacao_Total_Dia: number
+  Desc_Situacao: string
+}
+
+interface RegistroAbsenteismo {
+  ID: string; Nome: string; Escala: string
+  Dias_Uteis_Mes: number; Dias_Trabalhados: number
+  Dias_Atestado: number; Dias_Auxilio_Doenca: number; Dias_Ferias: number
+  Dias_Acidente_Trabalho: number; Dias_Abono: number
+  Dias_Falta_Injustificada: number; Total_Presencas: number; Pct_Presenca: string
+}
+
+type ActiveTab = "ponto" | "absenteismo" | "detalhe"
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
-const MOT_BONIFICACAO_DIARIA_TOTAL = 16.00
-const MOT_PERCENTUAL_PONTO         = 0.20
-const MOT_VALOR_PONTO              = +(MOT_BONIFICACAO_DIARIA_TOTAL * MOT_PERCENTUAL_PONTO).toFixed(2) // 3.20
-const MOT_VALOR_MARCACOES          = +(MOT_VALOR_PONTO / 2).toFixed(2) // 1.60
-const MOT_VALOR_CRITERIOS          = +(MOT_VALOR_PONTO / 2).toFixed(2) // 1.60
 
-const AJU_BONIFICACAO_DIARIA_TOTAL = 12.00
-const AJU_PERCENTUAL_PONTO         = 0.40
-const AJU_VALOR_PONTO              = +(AJU_BONIFICACAO_DIARIA_TOTAL * AJU_PERCENTUAL_PONTO).toFixed(2) // 4.80
-const AJU_VALOR_MARCACOES          = +(AJU_VALOR_PONTO / 2).toFixed(2) // 2.40
-const AJU_VALOR_CRITERIOS          = +(AJU_VALOR_PONTO / 2).toFixed(2) // 2.40
+const PRESENCA_JUSTIFICADA: Record<string, string> = {
+  "002": "Férias", "003": "Auxílio Doença", "004": "Acidente Trabalho",
+  "014": "Atestado", "073": "Atestado Acidente Trabalho Not", "501": "ABONO",
+}
+const FALTA_CODES  = new Set(["015"])
+const IGNORE_CODES = new Set(["016","317","318","400","404","077","078","079","305","499","999"])
 
-const CARGA_HORARIA_PADRAO_MIN = 440  // 07:20
-const INTERJORNADA_MIN_MIN     = 11 * 60 // 11h
+const CARGA_HORARIA_MIN   = 440
+const INTERJORNADA_MIN    = 660
+const VALOR_MARCACOES_MOT = 1.60
+const VALOR_CRITERIOS_MOT = 1.60
+const VALOR_MARCACOES_AJU = 2.40
+const VALOR_CRITERIOS_AJU = 2.40
 
-const SITUACOES_CONTAM_PRESENCA = [
-  "ATESTADO","AUXILIO DOENCA","AUXÍLIO DOENÇA","FERIAS","FÉRIAS",
-  "LICENCA MATERNIDADE","LICENÇA MATERNIDADE","LICENCA PATERNIDADE",
-  "LICENÇA PATERNIDADE","FALTA ABONADA","ABONADA",
-]
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// ─── Helpers de tempo ─────────────────────────────────────────────────────────
-
-function horarioParaMinutos(horario: any): number | null {
-  if (!horario || String(horario).trim() === "") return null
-  try {
-    const clean = String(horario).replace("*", "").trim()
-    const [h, m] = clean.split(":").map(Number)
-    return h * 60 + m
-  } catch { return null }
+function dateToOrdinal(s: string): number {
+  const p = s.split("/")
+  if (p.length < 3) return 0
+  return Math.floor(new Date(+p[2], +p[1] - 1, +p[0]).getTime() / 86400000)
 }
 
-function minutosParaHorario(min: number | null): string {
-  if (min == null) return ""
-  return `${String(Math.floor(min / 60)).padStart(2,"0")}:${String(min % 60).padStart(2,"0")}`
+function hmToMin(s: string): number {
+  const m = String(s ?? "").match(/(\d+):(\d{2})/)
+  return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : 0
 }
 
-function calcularTempoTrabalhado(
-  entrada: string, saidaAlmoco: string, retornoAlmoco: string, saida: string
-): { trab: number | null; alm: number | null } {
-  const e  = horarioParaMinutos(entrada)
-  const sa = horarioParaMinutos(saidaAlmoco)
-  const ra = horarioParaMinutos(retornoAlmoco)
-  const s  = horarioParaMinutos(saida)
+function minToHm(m: number): string {
+  if (!m) return ""
+  return `${Math.floor(m / 60).toString().padStart(2, "0")}:${(m % 60).toString().padStart(2, "0")}`
+}
 
-  if (e == null || s == null) return { trab: null, alm: null }
+function sitPrincipal(situacoes: DiaColaborador["situacoes"]): { cod: string; desc: string } {
+  for (const s of situacoes) {
+    if (s.cod && !IGNORE_CODES.has(s.cod)) return { cod: s.cod, desc: s.desc }
+  }
+  return { cod: "", desc: "" }
+}
 
-  let total = s - e
-  if (total < 0) total += 24 * 60
+function calcularDia(marcacoes: string[], horarioPrevisto: string) {
+  const r = {
+    entrada: "", saida_almoco: "", retorno_almoco: "", saida: "",
+    trab_min: 0, intervalo_min: 0, he_min: 0,
+    qtd_marcacoes: marcacoes.length, marcacoes_ok: false,
+  }
+  if (!marcacoes.length) return r
+  r.entrada        = marcacoes[0] ?? ""
+  r.saida_almoco   = marcacoes[1] ?? ""
+  r.retorno_almoco = marcacoes[2] ?? ""
+  r.saida          = marcacoes[3] ?? ""
+  r.marcacoes_ok   = marcacoes.length >= 4
 
-  let alm = 0
-  if (sa != null && ra != null) {
-    alm = ra - sa
-    if (alm < 0) alm += 24 * 60
+  const e = hmToMin(r.entrada)
+  const s = r.saida ? hmToMin(r.saida) : null
+  if (s !== null) {
+    let total = s - e
+    if (total < 0) total += 1440
+    let interv = 0
+    if (r.saida_almoco && r.retorno_almoco) {
+      interv = hmToMin(r.retorno_almoco) - hmToMin(r.saida_almoco)
+      if (interv < 0) interv += 1440
+    }
+    r.intervalo_min = interv
+    r.trab_min      = total - interv
+    let prev = 0
+    if (horarioPrevisto) {
+      const hp = horarioPrevisto.match(/\d{2}:\d{2}/g) ?? []
+      if (hp.length >= 4)
+        prev = (hmToMin(hp[3]) - hmToMin(hp[0])) - (hmToMin(hp[2]) - hmToMin(hp[1]))
+    }
+    if (prev > 0) r.he_min = Math.max(0, r.trab_min - prev)
+  }
+  return r
+}
+
+function diasUteisMes(periodoStr: string): number {
+  const m = periodoStr.match(/(\d{2}\/\d{2}\/\d{4}).*?(\d{2}\/\d{2}\/\d{4})/)
+  if (!m) return 0
+  const parse = (s: string) => { const [d, mo, y] = s.split("/"); return new Date(+y, +mo - 1, +d) }
+  let d = parse(m[1])
+  const fim = parse(m[2])
+  let count = 0
+  while (d <= fim) { if (d.getDay() !== 0) count++; d = new Date(d.getTime() + 86400000) }
+  return count
+}
+
+// ─── Parser ───────────────────────────────────────────────────────────────────
+
+function parseApuracao(rawData: any[][]): {
+  colaboradores: Colaborador[]; periodo: string; periodStart: string; periodEnd: string
+} {
+  const mapa = new Map<string, Colaborador>()
+  const ordem: string[] = []
+  let current: Colaborador | null = null
+  let periodStart = "", periodEnd = ""
+
+  for (const cols of rawData) {
+    const c = Array.from({ length: 12 }, (_, i) => String(cols[i] ?? "").trim())
+
+    if (c[8] === "Período:" && c[9]) { periodStart = c[9]; periodEnd = c[11] }
+
+    if (/^\d{2,}$/.test(c[0]) && c[1] && !/[/:]/.test(c[0]) && c[0] !== "0002") {
+      if (mapa.has(c[0])) {
+        current = mapa.get(c[0])!
+      } else {
+        current = { id: c[0], nome: c[1], escala: "", horario_previsto: "", dias: [] }
+        mapa.set(c[0], current)
+        ordem.push(c[0])
+      }
+      continue
+    }
+
+    if (!current) continue
+
+    if (/^\d{4}$/.test(c[4]) && /\d{2}:\d{2}/.test(c[8])) {
+      if (!current.horario_previsto) { current.escala = c[4]; current.horario_previsto = c[8] }
+      continue
+    }
+
+    if (c[3].includes("Total Colaborador")) { current = null; continue }
+
+    if (/^\d{2}\/\d{2}/.test(c[0])) {
+      const marcacoes = c[2].match(/\d{2}:\d{2}/g) ?? []
+      const situacoes: DiaColaborador["situacoes"] = []
+      if (c[6] && c[7]) situacoes.push({ cod: c[6], desc: c[7], tempo: c[9] })
+      if (!current.dias.some(d => d.data === c[0]))
+        current.dias.push({ data: c[0], dia_semana: c[1], marcacoes, situacoes })
+      continue
+    }
+
+    if (!c[0] && c[6] && c[7] && current.dias.length)
+      current.dias[current.dias.length - 1].situacoes.push({ cod: c[6], desc: c[7], tempo: c[9] })
   }
 
-  return { trab: total - alm, alm }
+  const colaboradores = ordem.map(id => mapa.get(id)!)
+  const periodo = periodStart && periodEnd ? `${periodStart} a ${periodEnd}` : ""
+  return { colaboradores, periodo, periodStart, periodEnd }
 }
 
-// ─── Etapa 1: Parser de CSV de ponto ─────────────────────────────────────────
+// ─── Geração de dados ─────────────────────────────────────────────────────────
 
-function parsearCSVPonto(rows: any[], mes: number): any[] {
-  // Os dados já chegam parseados pelo pipeline-utils
-  // Tentamos identificar a estrutura do CSV de ponto
-  const resultado: any[] = []
-
-  let idAtual: string | null = null
-  let nomeAtual: string | null = null
-  let horarioPrevisto: string | null = null
-
-  for (const row of rows) {
-    const valores = Object.values(row).map(v => String(v ?? "").trim())
-    const col0 = valores[0] ?? ""
-    const col1 = valores[1] ?? ""
-    const col2 = valores[2] ?? ""
-
-    // Ignora cabeçalhos
-    if (/PONTO_ORIGINAL|APURAÇÃO|TRANSMENDES|PAG:|PERÍODO/i.test(col0)) continue
-    if (/Total Colaborador|Total Geral/i.test(col1)) continue
-    if (!col0 && !col1) continue
-
-    // Linha de identificação do colaborador (ID numérico + nome)
-    if (/^\d{2,}$/.test(col0) && !col0.includes("/") && col1) {
-      idAtual = col0
-      nomeAtual = col1
-      horarioPrevisto = null
-      continue
-    }
-
-    // Linha de escala/horário previsto (col0 vazia, tem horários)
-    if (idAtual && !col0 && valores.some(v => /^\d{2}:\d{2}/.test(v))) {
-      const horarios = valores.filter(v => /^\d{2}:\d{2}/.test(v))
-      if (horarios.length >= 2) horarioPrevisto = horarios.join(" ")
-      continue
-    }
-
-    // Linha de data + marcações
-    if (/\d{2}\/\d{2}/.test(col0) && col0.length >= 5 && col0.length <= 10) {
-      const data = col0.length === 10 ? col0 : `${col0}/${new Date().getFullYear()}`
-
-      // Extrai marcações da col2 (separadas por espaço)
-      const marcacoes = col2.split(/\s+/).filter(v => /^\d{2}:\d{2}/.test(v))
-      const entrada        = marcacoes[0] ?? ""
-      const saidaAlmoco   = marcacoes[1] ?? ""
-      const retornoAlmoco = marcacoes[2] ?? ""
-      const saida         = marcacoes[3] ?? ""
-
-      // Tempo total empresa (primeira → última marcação)
-      let tempoTotalEmpresa = ""
-      if (marcacoes.length >= 2) {
-        const ini = horarioParaMinutos(marcacoes[0])
-        const fim = horarioParaMinutos(marcacoes[marcacoes.length - 1])
-        if (ini != null && fim != null) {
-          let diff = fim - ini
-          if (diff < 0) diff += 24 * 60
-          tempoTotalEmpresa = minutosParaHorario(diff)
-        }
-      }
-
-      // Situação (código + descrição)
-      let codSit = "", descSit = "", tempoSit = ""
-      for (let i = 3; i < valores.length; i++) {
-        const v = valores[i]
-        if (/^\d{3}$/.test(v) && !codSit) { codSit = v; continue }
-        if (v && !/^\d+$/.test(v) && !descSit) { descSit = v; continue }
-        if (/^\d{2}:\d{2}/.test(v) && !tempoSit) { tempoSit = v }
-      }
-
-      resultado.push({
-        ID_Colaborador: idAtual ?? "",
-        Nome_Colaborador: nomeAtual ?? "",
-        Data: data,
-        Dia_Semana: col1,
-        Entrada: entrada,
-        Saida_Almoco: saidaAlmoco,
-        Retorno_Almoco: retornoAlmoco,
-        Saida: saida,
-        Tempo_Total_Empresa: tempoTotalEmpresa,
-        Horario_Previsto: horarioPrevisto ?? "",
-        Cod_Situacao: codSit,
-        Desc_Situacao: descSit,
-        Tempo_Situacao: tempoSit,
+function gerarCartaoPonto(colaboradores: Colaborador[]): RegistroPonto[] {
+  const rows: RegistroPonto[] = []
+  for (const colab of colaboradores) {
+    for (const dia of colab.dias) {
+      const calc = calcularDia(dia.marcacoes, colab.horario_previsto)
+      const { cod, desc } = sitPrincipal(dia.situacoes)
+      const tipo = dia.marcacoes.length
+        ? "Presença Física"
+        : PRESENCA_JUSTIFICADA[cod] ?? (FALTA_CODES.has(cod) || !cod ? "Falta" : desc || "—")
+      rows.push({
+        ID: colab.id, Nome: colab.nome, Escala: colab.escala,
+        Horario_Previsto: colab.horario_previsto,
+        Data: dia.data, Dia_Semana: dia.dia_semana,
+        Entrada: calc.entrada, Saida_Almoco: calc.saida_almoco,
+        Retorno_Almoco: calc.retorno_almoco, Saida: calc.saida,
+        Qtd_Marcacoes: calc.qtd_marcacoes,
+        Marcacoes_Completas: dia.marcacoes.length ? (calc.marcacoes_ok ? "SIM" : "NÃO") : "",
+        Tempo_Trabalhado: minToHm(calc.trab_min),
+        Intervalo_Almoco: minToHm(calc.intervalo_min),
+        Hora_Extra: minToHm(calc.he_min),
+        Cod_Situacao: cod, Desc_Situacao: desc, Tipo_Presenca: tipo,
       })
     }
   }
-
-  // Filtra por mês
-  return resultado.filter(row => {
-    const parts = row.Data.split("/")
-    if (parts.length < 2) return false
-    return parseInt(parts[1]) === mes
-  })
+  return rows
 }
 
-// ─── Remove duplicatas priorizando registro mais completo ─────────────────────
-
-function removerDuplicatas(rows: any[]): any[] {
-  const mapa = new Map<string, any>()
-  for (const row of rows) {
-    const chave = `${row.ID_Colaborador}|${row.Data}`
-    const score = [row.Entrada, row.Saida_Almoco, row.Retorno_Almoco, row.Saida]
-      .filter(v => v && v !== "").length
-    const existing = mapa.get(chave)
-    if (!existing) {
-      mapa.set(chave, { ...row, _score: score })
-    } else if (score > existing._score) {
-      mapa.set(chave, { ...row, _score: score })
+function gerarAbsenteismo(colaboradores: Colaborador[], diasUteis: number): RegistroAbsenteismo[] {
+  return colaboradores.map(colab => {
+    let trabalhados = 0, atestado = 0, aux = 0, ferias = 0, acidente = 0, abono = 0, falta = 0
+    for (const dia of colab.dias) {
+      if (dia.marcacoes.length) { trabalhados++; continue }
+      const { cod } = sitPrincipal(dia.situacoes)
+      if      (cod === "014") atestado++
+      else if (cod === "003") aux++
+      else if (cod === "002") ferias++
+      else if (cod === "004") acidente++
+      else if (cod === "501") abono++
+      else                    falta++
     }
-  }
-  return Array.from(mapa.values()).map(({ _score, ...rest }) => rest)
+    const total = trabalhados + atestado + aux + ferias + acidente + abono
+    const pct   = diasUteis > 0 ? Math.round((total / diasUteis) * 1000) / 10 : 0
+    return {
+      ID: colab.id, Nome: colab.nome, Escala: colab.escala,
+      Dias_Uteis_Mes: diasUteis, Dias_Trabalhados: trabalhados,
+      Dias_Atestado: atestado, Dias_Auxilio_Doenca: aux, Dias_Ferias: ferias,
+      Dias_Acidente_Trabalho: acidente, Dias_Abono: abono,
+      Dias_Falta_Injustificada: falta, Total_Presencas: total, Pct_Presenca: `${pct}%`,
+    }
+  })
 }
 
-// ─── Análise de conformidade ──────────────────────────────────────────────────
+function gerarDetalhe(colaboradores: Colaborador[], grupo: "Motorista" | "Ajudante"): RegistroDetalhe[] {
+  const vMar = grupo === "Motorista" ? VALOR_MARCACOES_MOT : VALOR_MARCACOES_AJU
+  const vCri = grupo === "Motorista" ? VALOR_CRITERIOS_MOT : VALOR_CRITERIOS_AJU
+  const rows: RegistroDetalhe[] = []
+  const ultimoReg: Record<string, { data: string; saidaMin: number | null }> = {}
 
-function analisarConformidade(
-  rows: any[],
-  valorMarcacoes: number,
-  valorCriterios: number,
-  colNome: string
-): { detalhe: any[]; consolidado: any[] } {
+  const sorted = colaboradores
+    .flatMap(c => c.dias.filter(d => d.marcacoes.length).map(d => ({ colab: c, dia: d })))
+    .sort((a, b) => {
+      const idCmp = a.colab.id.localeCompare(b.colab.id)
+      return idCmp !== 0 ? idCmp : dateToOrdinal(a.dia.data) - dateToOrdinal(b.dia.data)
+    })
 
-  const sorted = [...rows].sort((a, b) => {
-    if (a.ID_Colaborador !== b.ID_Colaborador) return a.ID_Colaborador.localeCompare(b.ID_Colaborador)
-    return a.Data.localeCompare(b.Data)
-  })
-
-  const ultimoRegistro: Record<string, { data: string; saidaMin: number | null }> = {}
-  const detalhe: any[] = []
-
-  for (const row of sorted) {
-    const { trab, alm } = calcularTempoTrabalhado(
-      row.Entrada, row.Saida_Almoco, row.Retorno_Almoco, row.Saida
-    )
-
-    const marc = [row.Entrada, row.Saida_Almoco, row.Retorno_Almoco, row.Saida]
-    const marcOk = marc.filter(m => m && m !== "").length
+  for (const { colab, dia } of sorted) {
+    const calc = calcularDia(dia.marcacoes, colab.horario_previsto)
+    const { desc } = sitPrincipal(dia.situacoes)
+    const e   = calc.entrada        ? hmToMin(calc.entrada)        : null
+    const sa  = calc.saida_almoco   ? hmToMin(calc.saida_almoco)   : null
+    const ra  = calc.retorno_almoco ? hmToMin(calc.retorno_almoco) : null
+    const s   = calc.saida          ? hmToMin(calc.saida)          : null
+    const trab = calc.trab_min, alm = calc.intervalo_min
+    const marcOk = calc.qtd_marcacoes
     const cumpriuMarcacoes = marcOk === 4
-    const bonusMarcacoes   = cumpriuMarcacoes ? valorMarcacoes : 0
+    const bonusMarcacoes   = cumpriuMarcacoes ? vMar : 0
 
-    // Jornada
-    const limiteJornada = CARGA_HORARIA_PADRAO_MIN + 120 // +2h
-    const excessoJornada = trab != null ? Math.max(0, trab - limiteJornada) : null
-    const cumpriuJornada = trab != null ? trab <= limiteJornada : false
-
-    // HE
-    const he            = trab != null ? Math.max(0, trab - CARGA_HORARIA_PADRAO_MIN) : 0
-    const excessoHE     = Math.max(0, he - 120)
-    const cumpriuHE     = he <= 120
-
-    // Almoço
-    const cumpriuAlmoco = alm != null ? alm >= 60 : false
-    const deficitAlmoco = alm != null ? Math.max(0, 60 - alm) : 60
-
-    // Intrajornada
-    const e  = horarioParaMinutos(row.Entrada)
-    const sa = horarioParaMinutos(row.Saida_Almoco)
-    const ra = horarioParaMinutos(row.Retorno_Almoco)
-    const s  = horarioParaMinutos(row.Saida)
+    const limiteJornada  = CARGA_HORARIA_MIN + 120
+    const excessoJornada = trab > 0 ? Math.max(0, trab - limiteJornada) : 0
+    const cumpriuJornada = trab > 0 ? trab <= limiteJornada : false
+    const he             = trab > 0 ? Math.max(0, trab - CARGA_HORARIA_MIN) : 0
+    const excessoHE      = Math.max(0, he - 120)
+    const cumpriuHE      = he <= 120
+    const cumpriuAlmoco  = alm >= 60
+    const deficitAlmoco  = Math.max(0, 60 - alm)
 
     let periodoManha = 0, periodoTarde = 0
-    if (e != null && sa != null) { periodoManha = sa - e; if (periodoManha < 0) periodoManha += 1440 }
-    if (ra != null && s  != null) { periodoTarde = s - ra;  if (periodoTarde < 0) periodoTarde += 1440 }
-    const excessoManha = Math.max(0, periodoManha - 360)
-    const excessoTarde = Math.max(0, periodoTarde - 360)
-    const cumpriuIntrajornada = excessoManha === 0 && excessoTarde === 0
+    if (e !== null && sa !== null) { periodoManha = sa - e; if (periodoManha < 0) periodoManha += 1440 }
+    if (ra !== null && s !== null) { periodoTarde = s - ra; if (periodoTarde < 0) periodoTarde += 1440 }
+    const cumpriuIntra = Math.max(periodoManha, periodoTarde) <= 360
 
-    // Interjornada
-    let descansoMin: number | null = null
-    let cumpriuInterjornada = true
-    const prev = ultimoRegistro[row.ID_Colaborador]
-    if (prev && prev.saidaMin != null && e != null) {
-      const prevDateOrd = dateToOrdinal(prev.data)
-      const currDateOrd = dateToOrdinal(row.Data)
-      if (currDateOrd >= prevDateOrd) {
-        descansoMin = (currDateOrd - prevDateOrd) * 1440 + e - prev.saidaMin
-        cumpriuInterjornada = descansoMin >= INTERJORNADA_MIN_MIN
-      }
+    let descansoMin: number | null = null, cumpriuInter = true
+    const prev = ultimoReg[colab.id]
+    if (prev && prev.saidaMin !== null && e !== null) {
+      const diff = dateToOrdinal(dia.data) - dateToOrdinal(prev.data)
+      if (diff >= 0) { descansoMin = diff * 1440 + e - prev.saidaMin; cumpriuInter = descansoMin >= INTERJORNADA_MIN }
     }
-    ultimoRegistro[row.ID_Colaborador] = { data: row.Data, saidaMin: s }
+    ultimoReg[colab.id] = { data: dia.data, saidaMin: s }
 
-    const todos5OK = cumpriuJornada && cumpriuHE && cumpriuAlmoco && cumpriuIntrajornada && cumpriuInterjornada
-    const bonusCriterios  = todos5OK ? valorCriterios : 0
-    const bonificacaoTotal = +(bonusMarcacoes + bonusCriterios).toFixed(2)
+    const todos5 = cumpriuJornada && cumpriuHE && cumpriuAlmoco && cumpriuIntra && cumpriuInter
+    const bonusCri = todos5 ? vCri : 0
 
-    const temAjuste = marc.some(m => m && m.includes("*"))
-
-    detalhe.push({
-      "ID": row.ID_Colaborador,
-      [colNome]: row.Nome_Colaborador,
-      "Dia": row.Data,
-      "Dia_Semana": row.Dia_Semana,
-      "Entrada": row.Entrada,
-      "Saida_Almoco": row.Saida_Almoco,
-      "Retorno_Almoco": row.Retorno_Almoco,
-      "Saida": row.Saida,
-      "Tem_Ajuste_Manual": temAjuste,
-      "Tempo_Trabalhado": minutosParaHorario(trab),
-      "Tempo_Almoco": minutosParaHorario(alm),
-      "Marcacoes_Completas": marcOk,
-      "Marcacoes_Faltantes": 4 - marcOk,
-      "✓ Marcacoes_100%": cumpriuMarcacoes,
-      "💰 Bonus_Marcacoes": +bonusMarcacoes.toFixed(2),
-      "Excesso_Jornada": minutosParaHorario(excessoJornada),
-      "✓ Jornada_OK": cumpriuJornada,
-      "HE_Realizada": minutosParaHorario(he),
-      "Excesso_HE": minutosParaHorario(excessoHE),
-      "✓ HE_OK": cumpriuHE,
-      "Almoco_Realizado": minutosParaHorario(alm),
-      "Deficit_Almoco": minutosParaHorario(deficitAlmoco),
-      "✓ Almoco_OK": cumpriuAlmoco,
-      "Periodo_Manha": minutosParaHorario(periodoManha),
-      "Periodo_Tarde": minutosParaHorario(periodoTarde),
-      "✓ Intrajornada_OK": cumpriuIntrajornada,
-      "Interjornada_Descanso": minutosParaHorario(descansoMin),
-      "✓ Interjornada_OK": cumpriuInterjornada,
-      "Todos_5_Criterios_OK": todos5OK,
-      "💰 Bonus_Criterios": +bonusCriterios.toFixed(2),
-      "💵 Bonificacao_Total_Dia": bonificacaoTotal,
-      "Desc_Situacao": row.Desc_Situacao,
+    rows.push({
+      ID: colab.id, Nome: colab.nome, Dia: dia.data, Dia_Semana: dia.dia_semana,
+      Entrada: calc.entrada, Saida_Almoco: calc.saida_almoco,
+      Retorno_Almoco: calc.retorno_almoco, Saida: calc.saida,
+      Tem_Ajuste_Manual: dia.marcacoes.some(m => m.includes("*")),
+      Tempo_Trabalhado: minToHm(trab), Tempo_Almoco: minToHm(alm),
+      Marcacoes_Completas: marcOk, Marcacoes_Faltantes: 4 - marcOk,
+      Marcacoes_100pct: cumpriuMarcacoes, Bonus_Marcacoes: +bonusMarcacoes.toFixed(2),
+      Excesso_Jornada: minToHm(excessoJornada), Jornada_OK: cumpriuJornada,
+      HE_Realizada: minToHm(he), Excesso_HE: minToHm(excessoHE), HE_OK: cumpriuHE,
+      Almoco_Realizado: minToHm(alm), Deficit_Almoco: minToHm(deficitAlmoco), Almoco_OK: cumpriuAlmoco,
+      Periodo_Manha: minToHm(periodoManha), Periodo_Tarde: minToHm(periodoTarde), Intrajornada_OK: cumpriuIntra,
+      Interjornada_Descanso: descansoMin !== null ? minToHm(descansoMin) : "", Interjornada_OK: cumpriuInter,
+      Todos_5_Criterios_OK: todos5,
+      Bonus_Criterios: +bonusCri.toFixed(2),
+      Bonificacao_Total_Dia: +(bonusMarcacoes + bonusCri).toFixed(2),
+      Desc_Situacao: desc,
     })
   }
-
-  // Consolidado por colaborador
-  const porColab: Record<string, any> = {}
-  for (const row of detalhe) {
-    const id = row["ID"]
-    if (!porColab[id]) {
-      porColab[id] = {
-        "ID": id, [colNome]: row[colNome],
-        dias: 0, bonusMarcacoes: 0, bonusCriterios: 0, bonifTotal: 0,
-        diasCriteriosOk: 0, dias4Marc: 0, ajustes: 0,
-      }
-    }
-    const c = porColab[id]
-    c.dias++
-    c.bonusMarcacoes += row["💰 Bonus_Marcacoes"]
-    c.bonusCriterios += row["💰 Bonus_Criterios"]
-    c.bonifTotal     += row["💵 Bonificacao_Total_Dia"]
-    if (row["Todos_5_Criterios_OK"]) c.diasCriteriosOk++
-    if (row["Marcacoes_Completas"] === 4) c.dias4Marc++
-    if (row["Tem_Ajuste_Manual"]) c.ajustes++
-  }
-
-  const consolidado = Object.values(porColab).map((c: any) => ({
-    "ID": c["ID"],
-    [colNome]: c[colNome],
-    "Dias_Trabalhados": c.dias,
-    "💰 Total_Bonus_Marcacoes": +c.bonusMarcacoes.toFixed(2),
-    "💰 Total_Bonus_Criterios": +c.bonusCriterios.toFixed(2),
-    "💵 BONIFICACAO_TOTAL": +c.bonifTotal.toFixed(2),
-    "Dias_Todos_Criterios_OK": c.diasCriteriosOk,
-    "Dias_4_Marcacoes_Completas": c.dias4Marc,
-    "Total_Ajustes_Manuais": c.ajustes,
-  })).sort((a, b) => b["💵 BONIFICACAO_TOTAL"] - a["💵 BONIFICACAO_TOTAL"])
-
-  return { detalhe, consolidado }
+  return rows
 }
 
-// ─── Etapa 4: Absenteísmo ─────────────────────────────────────────────────────
+function gerarExcel(
+  ponto: RegistroPonto[], absenteismo: RegistroAbsenteismo[],
+  detalhe: RegistroDetalhe[], periodo: string
+) {
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ponto),       "Cartao_Ponto")
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(absenteismo), "Relatorio_Absenteismo")
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detalhe),     "Detalhe_Conformidade")
+  XLSX.writeFile(wb, `Ponto_${periodo.replace(/\//g, "-").replace(/ /g, "_")}.xlsx`)
+}
 
-function analisarAbsenteismo(
-  rowsMot: any[], rowsAju: any[], mes: number,
-  datasExcluir: string[], considerarDomingos: boolean,
-  absValor100: number, absValor90: number, absValor75: number,
-): { resumo: any[]; detalhe: any[] } {
+// ─── Sub-componentes de render (sem JSX) ─────────────────────────────────────
 
-  const todos: any[] = [
-    ...rowsMot.map(r => ({ ...r, Grupo: "Motorista" })),
-    ...rowsAju.map(r => ({ ...r, Grupo: "Ajudante" })),
-  ]
+function dash() { return h("span", { className: "text-muted-foreground/30" }, "—") }
+function okIcon(ok: boolean) {
+  return h("span", { className: ok ? "text-emerald-600 font-bold" : "text-red-500 font-bold" }, ok ? "✓" : "✗")
+}
 
-  // Remove domingos
-  const filtrado = todos.filter(row => {
-    const parts = row.Data?.split("/")
-    if (!parts || parts.length < 3) return true
-    const d = new Date(+parts[2], +parts[1] - 1, +parts[0])
-    if (!considerarDomingos && d.getDay() === 0) return false
-    const iso = d.toISOString().slice(0, 10)
-    const brFmt = `${parts[0]}/${parts[1]}/${parts[2]}`
-    if (datasExcluir.includes(brFmt)) return false
-    return true
-  })
-
-  const regexPresenca = new RegExp(SITUACOES_CONTAM_PRESENCA.join("|"), "i")
-
-  const porColab: Record<string, any> = {}
-
-  for (const row of filtrado) {
-    const id   = row.ID_Colaborador
-    const nome = row.Nome_Colaborador
-    if (!id || !nome) continue
-
-    if (!porColab[id]) {
-      porColab[id] = {
-        ID: id, Nome: nome, Grupo: row.Grupo,
-        totalDias: 0, presencasFisicas: 0, presencasJustificadas: 0, totalPresencas: 0,
-      }
-    }
-
-    const c = porColab[id]
-    c.totalDias++
-
-    const presencaFisica = !!(
-      (row.Entrada && row.Entrada !== "") ||
-      (row.Saida && row.Saida !== "") ||
-      (row.Tempo_Total_Empresa && row.Tempo_Total_Empresa !== "")
+function THead(headers: string[], extraClass = "px-3") {
+  return h("thead", { className: "sticky top-0 z-10" },
+    h("tr", {
+      style: { backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", backgroundColor: "hsl(var(--muted) / 0.9)" }
+    },
+      ...headers.map(hd =>
+        h("th", { key: hd, className: `${extraClass} py-2.5 text-center font-semibold text-muted-foreground whitespace-nowrap text-[10px]` }, hd)
+      )
     )
-    const presencaJustificada = !!(row.Desc_Situacao && regexPresenca.test(row.Desc_Situacao))
-    const presente = presencaFisica || presencaJustificada
+  )
+}
 
-    if (presencaFisica)     c.presencasFisicas++
-    if (presencaJustificada) c.presencasJustificadas++
-    if (presente)            c.totalPresencas++
-  }
+function TabelaPonto({ rows }: { rows: RegistroPonto[] }) {
+  return h("div", { className: "rounded-xl border border-border/60 shadow-sm overflow-hidden" },
+    h("div", { className: "overflow-auto", style: { maxHeight: "calc(100vh - 340px)" } },
+      h("table", { className: "w-full text-[11px]" },
+        THead(["ID","Nome","Data","Dia","Entrada","Saída Alm.","Ret. Alm.","Saída",
+               "Marc.","OK?","Trab.","Intervalo","HE","Cód","Situação","Tipo Presença"]),
+        h("tbody", {},
+          ...rows.map((r, i) => {
+            const isFalta = r.Tipo_Presenca === "Falta"
+            const isJust  = !!PRESENCA_JUSTIFICADA[r.Cod_Situacao]
+            return h("tr", {
+              key: i,
+              className: cn("border-b transition-colors",
+                isFalta ? "bg-red-50 hover:bg-red-100"
+                : isJust ? "bg-emerald-50 hover:bg-emerald-100"
+                : i % 2 === 0 ? "bg-background hover:bg-muted/10" : "bg-muted/5 hover:bg-muted/10")
+            },
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.ID),
+              h("td", { className: "px-3 py-1.5 text-left font-medium min-w-[180px]" }, r.Nome),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Data),
+              h("td", { className: "px-3 py-1.5 text-center" }, r.Dia_Semana),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Entrada || dash()),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Saida_Almoco || dash()),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Retorno_Almoco || dash()),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Saida || dash()),
+              h("td", { className: "px-3 py-1.5 text-center" }, r.Qtd_Marcacoes || dash()),
+              h("td", { className: "px-3 py-1.5 text-center" },
+                r.Marcacoes_Completas === "SIM"
+                  ? h("span", { className: "text-emerald-600 font-bold" }, "✓")
+                  : r.Marcacoes_Completas === "NÃO"
+                  ? h("span", { className: "text-red-500 font-bold" }, "✗")
+                  : dash()
+              ),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Tempo_Trabalhado || dash()),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Intervalo_Almoco || dash()),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" },
+                r.Hora_Extra
+                  ? h("span", { className: "text-amber-600 font-bold" }, r.Hora_Extra)
+                  : dash()
+              ),
+              h("td", { className: "px-3 py-1.5 text-center font-mono text-muted-foreground" }, r.Cod_Situacao || dash()),
+              h("td", { className: "px-3 py-1.5 text-left min-w-[180px] text-muted-foreground" }, r.Desc_Situacao || dash()),
+              h("td", { className: "px-3 py-1.5 text-center" },
+                h("span", {
+                  className: cn("text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                    r.Tipo_Presenca === "Presença Física" ? "bg-blue-100 text-blue-700"
+                    : isFalta ? "bg-red-100 text-red-700"
+                    : "bg-emerald-100 text-emerald-700")
+                }, r.Tipo_Presenca)
+              )
+            )
+          })
+        )
+      )
+    )
+  )
+}
 
-  const resumo = Object.values(porColab).map((c: any) => {
-    const faltas   = Math.max(0, c.totalDias - c.totalPresencas)
-    const perc     = c.totalDias > 0 ? +(c.totalPresencas / c.totalDias * 100).toFixed(2) : 0
-    const incentivo = perc >= 100 ? absValor100 : perc >= 90 ? absValor90 : perc >= 75 ? absValor75 : 0
-    return {
-      "ID": c.ID, "Nome": c.Nome, "Grupo": c.Grupo,
-      "Total_Dias": c.totalDias,
-      "Presenças Físicas": c.presencasFisicas,
-      "Atestados/Férias": c.presencasJustificadas,
-      "Total Presenças": c.totalPresencas,
-      "Faltas": faltas,
-      "Percentual (%)": perc,
-      "Valor_Incentivo": incentivo,
+function TabelaAbsenteismo({ rows }: { rows: RegistroAbsenteismo[] }) {
+  return h("div", { className: "rounded-xl border border-border/60 shadow-sm overflow-hidden" },
+    h("div", { className: "overflow-auto", style: { maxHeight: "calc(100vh - 340px)" } },
+      h("table", { className: "w-full text-[11px]" },
+        THead(["ID","Nome","Escala","Dias Úteis","Trabalhados",
+               "Atestado","Aux. Doença","Férias","Acidente","Abono",
+               "Faltas","Total Presenças","% Presença"]),
+        h("tbody", {},
+          ...rows.map((r, i) => {
+            const pct    = parseFloat(r.Pct_Presenca)
+            const isBad  = pct < 75
+            const isGood = pct >= 100
+            return h("tr", {
+              key: i,
+              className: cn("border-b transition-colors",
+                isBad  ? "bg-red-50 hover:bg-red-100"
+                : isGood ? "bg-emerald-50 hover:bg-emerald-100"
+                : i % 2 === 0 ? "bg-background hover:bg-muted/10" : "bg-muted/5 hover:bg-muted/10")
+            },
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.ID),
+              h("td", { className: "px-3 py-1.5 text-left font-medium min-w-[180px]" }, r.Nome),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Escala),
+              h("td", { className: "px-3 py-1.5 text-center font-mono" }, r.Dias_Uteis_Mes),
+              h("td", { className: "px-3 py-1.5 text-center font-bold text-blue-700" }, r.Dias_Trabalhados),
+              ...[r.Dias_Atestado, r.Dias_Auxilio_Doenca, r.Dias_Ferias, r.Dias_Acidente_Trabalho, r.Dias_Abono]
+                .map((v, ci) => h("td", { key: ci, className: "px-3 py-1.5 text-center" },
+                  v > 0 ? h("span", { className: "font-bold text-emerald-700" }, v) : dash()
+                )),
+              h("td", { className: "px-3 py-1.5 text-center" },
+                r.Dias_Falta_Injustificada > 0
+                  ? h("span", { className: "font-bold text-red-600" }, r.Dias_Falta_Injustificada)
+                  : dash()
+              ),
+              h("td", { className: "px-3 py-1.5 text-center font-bold" }, r.Total_Presencas),
+              h("td", { className: "px-3 py-1.5 text-center" },
+                h("span", {
+                  className: cn("text-[10px] font-bold px-2 py-0.5 rounded-full",
+                    pct >= 100 ? "bg-emerald-100 text-emerald-700"
+                    : pct >= 90 ? "bg-blue-100 text-blue-700"
+                    : pct >= 75 ? "bg-amber-100 text-amber-700"
+                    : "bg-red-100 text-red-700")
+                }, r.Pct_Presenca)
+              )
+            )
+          })
+        )
+      )
+    )
+  )
+}
+
+function TabelaDetalhe({ rows }: { rows: RegistroDetalhe[] }) {
+  return h("div", { className: "rounded-xl border border-border/60 shadow-sm overflow-hidden" },
+    h("div", { className: "overflow-auto", style: { maxHeight: "calc(100vh - 340px)" } },
+      h("table", { className: "w-full text-[11px]" },
+        THead(["ID","Nome","Dia","Dia","Entrada","S.Alm","R.Alm","Saída",
+               "Trab.","Almoço","Marc.","Bônus Marc.",
+               "Exc.Jorn","Jorn.✓","HE","Exc.HE","HE✓",
+               "Alm.✓","Intra✓","Interjorn.","Inter✓",
+               "5 Crit.✓","Bônus Crit.","Total Dia","Situação"], "px-2"),
+        h("tbody", {},
+          ...rows.map((r, i) => {
+            const ok5 = r.Todos_5_Criterios_OK
+            return h("tr", {
+              key: i,
+              className: cn("border-b transition-colors",
+                ok5 ? "bg-emerald-50 hover:bg-emerald-100"
+                : r.Bonus_Marcacoes > 0 ? "bg-background hover:bg-muted/10"
+                : "bg-red-50 hover:bg-red-100")
+            },
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.ID),
+              h("td", { className: "px-2 py-1.5 text-left font-medium min-w-[160px]" }, r.Nome),
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.Dia),
+              h("td", { className: "px-2 py-1.5 text-center" }, r.Dia_Semana),
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.Entrada),
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.Saida_Almoco || dash()),
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.Retorno_Almoco || dash()),
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.Saida),
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.Tempo_Trabalhado),
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.Tempo_Almoco || dash()),
+              h("td", { className: "px-2 py-1.5 text-center" },
+                h("span", { className: cn("font-bold", r.Marcacoes_100pct ? "text-emerald-600" : "text-red-500") },
+                  `${r.Marcacoes_Completas}/4`)
+              ),
+              h("td", { className: "px-2 py-1.5 text-center font-mono font-bold text-emerald-700" },
+                r.Bonus_Marcacoes > 0 ? `R$${r.Bonus_Marcacoes.toFixed(2)}` : dash()
+              ),
+              h("td", { className: "px-2 py-1.5 text-center font-mono text-amber-600" }, r.Excesso_Jornada || dash()),
+              h("td", { className: "px-2 py-1.5 text-center" }, okIcon(r.Jornada_OK)),
+              h("td", { className: "px-2 py-1.5 text-center font-mono" }, r.HE_Realizada || dash()),
+              h("td", { className: "px-2 py-1.5 text-center font-mono text-amber-600" }, r.Excesso_HE || dash()),
+              h("td", { className: "px-2 py-1.5 text-center" }, okIcon(r.HE_OK)),
+              h("td", { className: "px-2 py-1.5 text-center" }, okIcon(r.Almoco_OK)),
+              h("td", { className: "px-2 py-1.5 text-center" }, okIcon(r.Intrajornada_OK)),
+              h("td", { className: "px-2 py-1.5 text-center font-mono text-[10px]" }, r.Interjornada_Descanso || dash()),
+              h("td", { className: "px-2 py-1.5 text-center" }, okIcon(r.Interjornada_OK)),
+              h("td", { className: "px-2 py-1.5 text-center" },
+                h("span", {
+                  className: cn("text-[10px] font-bold px-1.5 py-0.5 rounded-full",
+                    ok5 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")
+                }, ok5 ? "SIM" : "NÃO")
+              ),
+              h("td", { className: "px-2 py-1.5 text-center font-mono font-bold text-emerald-700" },
+                r.Bonus_Criterios > 0 ? `R$${r.Bonus_Criterios.toFixed(2)}` : dash()
+              ),
+              h("td", { className: "px-2 py-1.5 text-center font-mono font-bold text-primary" },
+                `R$${r.Bonificacao_Total_Dia.toFixed(2)}`
+              ),
+              h("td", { className: "px-2 py-1.5 text-left text-muted-foreground min-w-[160px]" }, r.Desc_Situacao || dash())
+            )
+          })
+        )
+      )
+    )
+  )
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
+
+export function PontoApuracaoView() {
+  const [file,          setFile]          = React.useState<File | null>(null)
+  const [loading,       setLoading]       = React.useState(false)
+  const [error,         setError]         = React.useState<string | null>(null)
+  const [periodo,       setPeriodo]       = React.useState("")
+  const [colaboradores, setColaboradores] = React.useState<Colaborador[]>([])
+  const [ponto,         setPonto]         = React.useState<RegistroPonto[]>([])
+  const [absenteismo,   setAbsenteismo]   = React.useState<RegistroAbsenteismo[]>([])
+  const [detalhe,       setDetalhe]       = React.useState<RegistroDetalhe[]>([])
+  const [activeTab,     setActiveTab]     = React.useState<ActiveTab>("ponto")
+  const [searchPonto,   setSearchPonto]   = React.useState("")
+  const [searchAbs,     setSearchAbs]     = React.useState("")
+  const [searchDetalhe, setSearchDetalhe] = React.useState("")
+  const [diasUteis,     setDiasUteis]     = React.useState(0)
+
+  const inputRef = React.useRef<HTMLInputElement>(null)
+
+  async function processarArquivo(f: File) {
+    setLoading(true); setError(null)
+    setPonto([]); setAbsenteismo([]); setColaboradores([]); setDetalhe([])
+    try {
+      const buf  = await f.arrayBuffer()
+      const nome = f.name.toLowerCase()
+      let rawData: any[][]
+
+      if (nome.endsWith(".csv")) {
+        const texto = new TextDecoder("utf-8").decode(buf)
+        const primeiraLinha = texto.split("\n")[0] ?? ""
+        const sep = primeiraLinha.includes(";") ? ";" : primeiraLinha.includes("\t") ? "\t" : ","
+        rawData = texto
+          .split("\n")
+          .map(linha => linha.replace(/\r$/, "").split(sep).map(v => v.trim()))
+          .filter(row => row.some(v => v !== ""))
+      } else {
+        const wb = XLSX.read(buf, { type: "array", cellDates: false })
+        rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {
+          header: 1, blankrows: true, defval: "",
+        }) as any[][]
+      }
+
+      const { colaboradores: colabs, periodo: per } = parseApuracao(rawData)
+      const du  = per ? diasUteisMes(per) : 0
+      const pt  = gerarCartaoPonto(colabs)
+      const ab  = gerarAbsenteismo(colabs, du)
+      const det = gerarDetalhe(colabs, "Motorista")
+
+      setColaboradores(colabs); setPeriodo(per); setDiasUteis(du)
+      setPonto(pt); setAbsenteismo(ab); setDetalhe(det)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
     }
-  }).sort((a, b) => a.Grupo.localeCompare(b.Grupo) || a.Nome.localeCompare(b.Nome))
-
-  return { resumo, detalhe: filtrado }
-}
-
-// ─── Helper: converte DD/MM/YYYY para ordinal de dias ────────────────────────
-
-function dateToOrdinal(dataStr: string): number {
-  const parts = dataStr.split("/")
-  if (parts.length < 3) return 0
-  return Math.floor(new Date(+parts[2], +parts[1] - 1, +parts[0]).getTime() / 86400000)
-}
-
-// ─── Processor principal ──────────────────────────────────────────────────────
-
-async function pontoProcessor(args: PipelineArgs): Promise<ProcessorOutput> {
-  const sheetsData = await args.files.readAll("files")
-  const fileNames: string[] = (args.formData?.getAll("fileNames") as string[]) ?? []
-
-  const excludedDatesRaw = args.formData?.get("excludedDates") as string ?? "[]"
-  const datasExcluir: string[] = JSON.parse(excludedDatesRaw)
-  const considerarDomingos = args.formData?.get("includeSundays") === "true"
-
-  const absValor100 = 50.0
-  const absValor90  = 40.0
-  const absValor75  = 25.0
-
-  if (!sheetsData.length) throw new Error("Nenhum arquivo encontrado.")
-
-  // Separa arquivos de motoristas vs ajudantes pelo nome
-  const rowsMot: any[] = []
-  const rowsAju: any[] = []
-
-  sheetsData.forEach((rows, idx) => {
-    const nome = (fileNames[idx] ?? "").toLowerCase()
-    const parsed = parsearCSVPonto(rows, args.month ?? new Date().getMonth() + 1)
-    if (/ajudante/i.test(nome)) rowsAju.push(...parsed)
-    else rowsMot.push(...parsed)
-  })
-
-  const cleanMot = removerDuplicatas(rowsMot)
-  const cleanAju = removerDuplicatas(rowsAju)
-
-  // Sem marcação
-  const semMarcMot = cleanMot.filter(r =>
-    !r.Entrada && !r.Saida_Almoco && !r.Retorno_Almoco && !r.Saida
-  )
-  const semMarcAju = cleanAju.filter(r =>
-    !r.Entrada && !r.Saida_Almoco && !r.Retorno_Almoco && !r.Saida
-  )
-
-  // Etapas 2 e 3
-  const { detalhe: detMot, consolidado: consMot } =
-    analisarConformidade(cleanMot, MOT_VALOR_MARCACOES, MOT_VALOR_CRITERIOS, "Motorista")
-  const { detalhe: detAju, consolidado: consAju } =
-    analisarConformidade(cleanAju, AJU_VALOR_MARCACOES, AJU_VALOR_CRITERIOS, "Ajudante")
-
-  // Etapa 4
-  const { resumo: absResumo, detalhe: absDetalhe } = analisarAbsenteismo(
-    cleanMot, cleanAju, args.month ?? 1,
-    datasExcluir, considerarDomingos, absValor100, absValor90, absValor75,
-  )
-
-  // Resumo de bonificações
-  const resumoBonif = [
-    ...["MOTORISTA", "AJUDANTE"].flatMap((grupo, gi) => {
-      const det = gi === 0 ? detMot : detAju
-      const vMar = gi === 0 ? MOT_VALOR_MARCACOES : AJU_VALOR_MARCACOES
-      const vCri = gi === 0 ? MOT_VALOR_CRITERIOS : AJU_VALOR_CRITERIOS
-      const vPon = gi === 0 ? MOT_VALOR_PONTO : AJU_VALOR_PONTO
-      const tMar = det.reduce((s, r) => s + r["💰 Bonus_Marcacoes"], 0)
-      const tCri = det.reduce((s, r) => s + r["💰 Bonus_Criterios"], 0)
-      const tTot = det.reduce((s, r) => s + r["💵 Bonificacao_Total_Dia"], 0)
-      return [
-        { Grupo: grupo, Tipo: "1ª - Marcações (4/4) — GARANTIDO", Valor_Diario: `R$ ${vMar.toFixed(2)}`, Total_Pago: `R$ ${tMar.toFixed(2)}`, Regra: "Garantido se 4 batidas" },
-        { Grupo: grupo, Tipo: "2ª - 5 Critérios OK — TUDO OU NADA", Valor_Diario: `R$ ${vCri.toFixed(2)}`, Total_Pago: `R$ ${tCri.toFixed(2)}`, Regra: "Jornada + HE + Almoço + Intrajornada + Interjornada" },
-        { Grupo: grupo, Tipo: "TOTAL PONTO", Valor_Diario: `R$ ${vPon.toFixed(2)}`, Total_Pago: `R$ ${tTot.toFixed(2)}`, Regra: "" },
-      ]
-    })
-  ]
-
-  const totalBonifMot = consMot.reduce((s, r) => s + r["💵 BONIFICACAO_TOTAL"], 0)
-  const totalBonifAju = consAju.reduce((s, r) => s + r["💵 BONIFICACAO_TOTAL"], 0)
-  const totalIncentAbs = absResumo.reduce((s, r) => s + r["Valor_Incentivo"], 0)
-
-  return {
-    data: consMot,
-    resumoMensal: absResumo,
-    summary: `Ponto ${args.month}/${args.year}: ${consMot.length} motoristas · ${consAju.length} ajudantes · R$ ${(totalBonifMot + totalBonifAju).toFixed(2)} ponto · R$ ${totalIncentAbs.toFixed(2)} absenteísmo`,
-    extraSheets: [
-      { name: "01_Ponto_Completo_Motorista",  data: cleanMot  },
-      { name: "02_Sem_Marcacao_Motorista",     data: semMarcMot },
-      { name: "03_Detalhe_Ponto_Motorista",    data: detMot    },
-      { name: "04_Consolidado_Motorista",      data: consMot   },
-      { name: "05_Ponto_Completo_Ajudante",    data: cleanAju  },
-      { name: "06_Sem_Marcacao_Ajudante",      data: semMarcAju },
-      { name: "07_Detalhe_Ponto_Ajudante",     data: detAju    },
-      { name: "08_Consolidado_Ajudante",       data: consAju   },
-      { name: "09_Resumo_Bonificacoes",        data: resumoBonif },
-      { name: "10_Absenteismo_Resumo",         data: absResumo },
-      { name: "11_Absenteismo_Detalhe",        data: absDetalhe },
-    ],
   }
-}
 
-export async function executePontoPipeline(formData: FormData): Promise<PipelineResponse> {
-  return processAndSave("ponto", formData, pontoProcessor)
+  function handleFile(f: File) { setFile(f); processarArquivo(f) }
+
+  const pontoFiltrado = React.useMemo(() => {
+    if (!searchPonto) return ponto
+    const s = searchPonto.toLowerCase()
+    return ponto.filter(r => r.Nome.toLowerCase().includes(s) || r.Data.includes(s) || r.Tipo_Presenca.toLowerCase().includes(s))
+  }, [ponto, searchPonto])
+
+  const absFiltrado = React.useMemo(() => {
+    if (!searchAbs) return absenteismo
+    const s = searchAbs.toLowerCase()
+    return absenteismo.filter(r => r.Nome.toLowerCase().includes(s))
+  }, [absenteismo, searchAbs])
+
+  const detalheFiltrado = React.useMemo(() => {
+    if (!searchDetalhe) return detalhe
+    const s = searchDetalhe.toLowerCase()
+    return detalhe.filter(r => r.Nome.toLowerCase().includes(s) || r.Dia.includes(s))
+  }, [detalhe, searchDetalhe])
+
+  const done = ponto.length > 0
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const searchValue  = activeTab === "ponto" ? searchPonto : activeTab === "detalhe" ? searchDetalhe : searchAbs
+  const countLabel   = activeTab === "ponto"
+    ? `${pontoFiltrado.length} / ${ponto.length} registros`
+    : activeTab === "detalhe"
+    ? `${detalheFiltrado.length} / ${detalhe.length} registros`
+    : `${absFiltrado.length} / ${absenteismo.length} colaboradores`
+
+  return h("div", { className: "space-y-4" },
+
+    // ── Card Upload ──
+    h(Card, { className: "shadow-sm border-border/60" },
+      h(CardHeader, { className: "pb-3" },
+        h(CardTitle, { className: "flex items-center gap-2 text-base" }, "Apuração de Ponto"),
+        h(CardDescription, {}, "Carregue o arquivo de apuração (CSV ou XLSX) gerado pelo sistema de ponto.")
+      ),
+      h(CardContent, {},
+        h("div", {
+          onDrop: (e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) },
+          onDragOver: (e: React.DragEvent) => e.preventDefault(),
+          onClick: () => inputRef.current?.click(),
+          className: cn(
+            "rounded-xl border-2 border-dashed p-8 flex flex-col items-center gap-3 cursor-pointer transition-colors",
+            file ? "border-emerald-300 bg-emerald-50" : "border-border hover:border-primary/40 hover:bg-muted/10"
+          )
+        },
+          loading
+            ? h("div", { className: "size-8 animate-spin rounded-full border-4 border-primary border-t-transparent" })
+            : file
+            ? h("div", { className: "size-8 text-emerald-500 text-2xl text-center" }, "✓")
+            : h("div", { className: "size-8 text-muted-foreground/40 text-2xl text-center" }, "📄"),
+
+          h("div", { className: "text-center" },
+            loading
+              ? h("p", { className: "text-sm font-medium text-primary" }, "Processando...")
+              : file
+              ? h("div", {},
+                  h("p", { className: "text-sm font-semibold text-emerald-700" }, file.name),
+                  h("p", { className: "text-xs text-emerald-600 mt-0.5" },
+                    `${colaboradores.length} colaboradores · ${ponto.length} registros · ${periodo}`)
+                )
+              : h("div", {},
+                  h("p", { className: "text-sm text-muted-foreground" }, "Arraste ou clique para selecionar"),
+                  h("p", { className: "text-xs text-muted-foreground/60 mt-0.5" }, "CSV ou XLSX de apuração")
+                )
+          ),
+
+          done && h("div", {
+            className: "flex gap-2 mt-1",
+            onClick: (e: React.MouseEvent) => e.stopPropagation()
+          },
+            h(Button, {
+              size: "sm", className: "gap-1.5 h-7 text-xs",
+              onClick: () => gerarExcel(ponto, absenteismo, detalhe, periodo)
+            }, "↓ Baixar Excel"),
+            h(Button, {
+              size: "sm", variant: "outline" as const, className: "gap-1.5 h-7 text-xs",
+              onClick: () => {
+                setFile(null); setPonto([]); setAbsenteismo([])
+                setColaboradores([]); setPeriodo(""); setDetalhe([])
+              }
+            }, "✕ Limpar")
+          )
+        ),
+
+        error && h("div", { className: "mt-3 flex items-center gap-2 text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2 border border-destructive/20" },
+          "⚠ " + error
+        ),
+
+        h("input", {
+          ref: inputRef, type: "file", accept: ".csv,.xlsx,.xls", className: "hidden",
+          onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+            if (e.target.files?.[0]) handleFile(e.target.files[0])
+          }
+        })
+      )
+    ),
+
+    // ── Stats ──
+    done && h("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3" },
+      ...[
+        { label: "Colaboradores",   value: colaboradores.length,                                               color: "text-primary"     },
+        { label: "Registros Ponto", value: ponto.length,                                                       color: "text-blue-600"    },
+        { label: "Dias Úteis/Mês",  value: diasUteis,                                                          color: "text-emerald-600" },
+        { label: "Faltas Totais",   value: absenteismo.reduce((s, r) => s + r.Dias_Falta_Injustificada, 0),    color: "text-amber-600"   },
+      ].map(stat =>
+        h("div", { key: stat.label, className: "rounded-xl border border-border/60 bg-card px-4 py-3 flex items-center gap-3" },
+          h("div", { className: "size-8 rounded-lg bg-muted/30 flex items-center justify-center shrink-0" },
+            h("span", { className: cn("text-sm font-bold", stat.color) }, "•")
+          ),
+          h("div", {},
+            h("p", { className: cn("text-xl font-bold font-mono leading-tight", stat.color) }, stat.value),
+            h("p", { className: "text-[10px] text-muted-foreground" }, stat.label)
+          )
+        )
+      )
+    ),
+
+    // ── Abas + Tabelas ──
+    done && h("div", { className: "space-y-3" },
+
+      // Cabeçalho das abas + busca
+      h("div", { className: "flex items-center gap-3 flex-wrap" },
+        h("div", { className: "flex border-b border-border" },
+          ...([
+            { id: "ponto"       as ActiveTab, label: "Cartão de Ponto"       },
+            { id: "absenteismo" as ActiveTab, label: "Relatório Absenteísmo" },
+            { id: "detalhe"     as ActiveTab, label: "Detalhe Conformidade"  },
+          ]).map(t =>
+            h("button", {
+              key: t.id,
+              onClick: () => setActiveTab(t.id),
+              className: cn(
+                "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px",
+                activeTab === t.id
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )
+            }, t.label)
+          )
+        ),
+        h("div", { className: "flex-1 min-w-[200px] max-w-xs" },
+          h("input", {
+            className: "w-full h-8 rounded-md border border-input bg-background px-3 text-xs outline-none focus:border-primary",
+            placeholder: activeTab === "ponto" ? "Buscar nome, data, tipo..."
+              : activeTab === "detalhe" ? "Buscar nome ou data..."
+              : "Buscar colaborador...",
+            value: searchValue,
+            onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+              if (activeTab === "ponto") setSearchPonto(e.target.value)
+              else if (activeTab === "detalhe") setSearchDetalhe(e.target.value)
+              else setSearchAbs(e.target.value)
+            }
+          })
+        ),
+        h("span", { className: "text-[10px] text-muted-foreground font-mono ml-auto" }, countLabel)
+      ),
+
+      // Tabelas condicionais
+      activeTab === "ponto"       && h(TabelaPonto,       { rows: pontoFiltrado }),
+      activeTab === "absenteismo" && h(TabelaAbsenteismo, { rows: absFiltrado }),
+      activeTab === "detalhe"     && h(TabelaDetalhe,     { rows: detalheFiltrado })
+    )
+  )
 }
