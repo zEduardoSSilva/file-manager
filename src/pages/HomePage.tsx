@@ -25,7 +25,8 @@ interface LiveStats {
 
 // ─── Dados das seções ─────────────────────────────────────────────────────────
 const INCENTIVES = [
-  { id: "incentivo_mensal", name: "Incentivo (Mensal)", desc: "Cálculo e acompanhamento", icon: BadgePercent, color: "bg-violet-500/10 text-violet-500 border border-violet-500/20", path: "/pipeline/incentivo" },
+  { id: "incentivo_mensal", name: "Incentivo (Mensal)", desc: "Cálculo e acompanhamento", icon: BadgePercent, color: "bg-violet-500/10 text-violet-500 border border-violet-500/20", path: "/pipeline/incentivo-mensal" },
+  { id: "incentivo_verao", name: "Incentivo (Verão)", desc: "Cálculo e acompanhamento", icon: BadgePercent, color: "bg-violet-500/10 text-violet-500 border border-violet-500/20", path: "/pipeline/incentivo-verao" },
 ];
 
 const REGISTRATIONS = [
@@ -299,7 +300,7 @@ export default function HomePage() {
           icon={BadgePercent}
           iconColor="bg-violet-500/10 text-violet-500"
           items={INCENTIVES}
-          cols={1}
+          cols={2}
         />
         <Section
           title="Cadastros"

@@ -8,7 +8,8 @@ import  VisaoStatusPage  from '@/components/pipeline/status-pipeline-view'
 import  VisaoComercialPage  from '@/components/pipeline/comercial-pipeline-view'
 import { VeiculosPipelineView } from '@/components/pipeline/veiculos-pipeline-view'
 import { FuncionariosPipelineView } from '@/components/pipeline/funcionarios-pipeline-view'
-import { IncentivoPipelineView } from '@/components/pipeline/incentivo-pipeline-view'
+import { IncentivoMensalPipelineView } from '@/components/pipeline/incentivo-mensal-pipeline-view'
+import { IncentivoVeraoPipelineView } from '@/components/pipeline/incentivo-verao-pipeline-view'
 import { MotivosDevPipelineView } from '@/components/pipeline/motivos-dev-pipeline-view'
 import FirebaseUsage from '@/pages/FirebaseUsage'
 import { LoginPage } from '@/pages/LoginPage'
@@ -30,7 +31,8 @@ export default function App() {
             {/* Rotas de cadastros e incentivos */}
             <Route path="/pipeline/veiculos" element={<VeiculosPipelineView />} />
             <Route path="/pipeline/funcionarios" element={<FuncionariosPipelineView />} />
-            <Route path="/pipeline/incentivo" element={<IncentivoPipelineView />} />
+            <Route path="/pipeline/incentivo-mensa" element={<IncentivoMensalPipelineView />} />
+            <Route path="/pipeline/incentivo-verao" element={<IncentivoVeraoPipelineView />} />
             <Route path="/pipeline/motivos-dev" element={<MotivosDevPipelineView />} />
 
             {/* Rotas de visualização */}

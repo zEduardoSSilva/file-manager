@@ -867,10 +867,11 @@ export function ConsolidacaoEntregasPipelineView() {
         a.dados.filter(r => removeAcentos(String(r["ROTA"] ?? "")).trim() !== "TESTE")
       )
       if (acumulado.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(acumulado), "Acumulado")
-
+      
+      const now = new Date()
       const nome = day > 0
-        ? `Entregas_${String(day).padStart(2,"0")}-${String(month).padStart(2,"0")}-${year}.xlsx`
-        : `Entregas_${String(month).padStart(2,"0")}-${year}.xlsx`
+        ? `Entregas_${now.getDate().toString().padStart(2, "0")}${(now.getMonth() + 1).toString().padStart(2, "0")}${now.getFullYear()}.xlsx`
+        : `Entregas_${(now.getMonth() + 1).toString().padStart(2, "0")}${now.getFullYear()}.xlsx`
 
       XLSX.writeFile(wb, nome)
       addLog(`Excel gerado: ${nome}`, "success")

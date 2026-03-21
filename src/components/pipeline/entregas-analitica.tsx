@@ -39,7 +39,7 @@ import { trackRead, trackWrite, trackDelete } from "@/lib/firebaseUsageTracker"
 import { mainDocId, loadItemsFromFirebase } from "@/app/actions/actions-utils"
 import { getAnaliticaCacheKey, getFromCache, setInCache, clearCacheEntry } from "@/lib/data-cache"
 import { updateEntregasFromFaturamentoAction } from "@/app/actions/update-faturamento-action"
-import { FechamentoDiario } from "./FechamentoDiario"
+import { FechamentoDiario } from "./financeiro-pipeline-view"
 import { getFirebaseConnectionStatus, toggleFirebaseConnection } from "@/lib/firebase-connection"
 import {
   getStoragePayload, setStoragePayload, clearStoragePayload,
@@ -156,9 +156,18 @@ function cellVal(v: any, col: string) {
   return <span>{String(v)}</span>
 }
 function extractDay(dateStr: any): number | null {
-  if (!dateStr) return null
-  const m = String(dateStr).trim().match(/^(\d{1,2})[\/\.]/)
-  return m ? parseInt(m[1]) : null
+  if (dateStr == null || String(dateStr).trim() === "") return null;
+  const s = String(dateStr).trim();
+  const m = s.match(/^(\d{1,2})[\/\.]/);
+  if (m) return parseInt(m[1], 10);
+  const n = parseFloat(s);
+  if (!isNaN(n) && n > 30000 && n < 70000) {
+    const utc_timestamp = (n - 25569) * 86400 * 1000;
+    return new Date(utc_timestamp).getUTCDate();
+  }
+  const isoMatch = s.match(/^\d{4}-\d{2}-(\d{2})/);
+  if (isoMatch) return parseInt(isoMatch[3], 10);
+  return null;
 }
 function fmtTs(ts: number): string {
   return new Date(ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -1396,7 +1405,7 @@ export function VisaoAnaliticaPage() {
           {/* GerenciarImportacoesDialog e GerenciarColunasDialog permanecem iguais ao original */}
         </>
       )}
-      <GerenciarColunasDialog open={showGerenciarColunas} onClose={() => setShowGerenciarColunas(false)} cols={gridCols} setCols={setGridCols} />
+      <GerenciarColunasDialog open={showGerenciarColunas} onClose={() => setShowGerenciarColunas(false)} cols={gridCols} setCols={setCols} />
     </div>
   )
 }

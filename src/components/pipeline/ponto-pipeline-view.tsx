@@ -398,7 +398,8 @@ function gerarExcel(
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ponto),       "Cartao_Ponto")
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(absenteismo), "Relatorio_Absenteismo")
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detalhe),     "Detalhe_Conformidade")
-  XLSX.writeFile(wb, `Ponto_${periodo.replace(/\//g, "-").replace(/ /g, "_")}.xlsx`)
+  const now = new Date()
+  XLSX.writeFile(wb, `Absenteísmo_${now.getDate().toString().padStart(2, "0")}${(now.getMonth() + 1).toString().padStart(2, "0")}${now.getFullYear()}.xlsx`)
 }
 
 // ─── Helpers render ───────────────────────────────────────────────────────────
