@@ -4,7 +4,10 @@
 // Gerencia o buffer local (localStorage) da Visão Analítica.
 // Chave por período: analitica_2026_03
 // Limite: ~4.5MB por chave (seguro para ~3000 registros)
+// Usa getFromCache/setInCache de data-cache.ts internamente.
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { getFromCache, setInCache } from './data-cache'
 
 const PREFIX = "analitica"
 
@@ -22,13 +25,7 @@ export interface StoragePayload {
 
 // ── Leitura ───────────────────────────────────────────────────────────────────
 export function getStoragePayload(year: number, month: number): StoragePayload | null {
-  try {
-    const raw = localStorage.getItem(chave(year, month))
-    if (!raw) return null
-    return JSON.parse(raw) as StoragePayload
-  } catch {
-    return null
-  }
+  return getFromCache<StoragePayload>(chave(year, month)) ?? null
 }
 
 // ── Escrita ───────────────────────────────────────────────────────────────────
@@ -40,7 +37,7 @@ export function setStoragePayload(
 ): boolean {
   try {
     const payload: StoragePayload = { rows, year, month, savedAt: Date.now(), source }
-    localStorage.setItem(chave(year, month), JSON.stringify(payload))
+    setInCache<StoragePayload>(chave(year, month), payload)
     return true
   } catch (e) {
     // QuotaExceededError — localStorage cheio

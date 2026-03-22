@@ -83,7 +83,7 @@ const ADMIN_GROUP = {
 export function PipelineLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const { currentUser, logout } = useAuth();
+  const { currentUser, userRole, logout } = useAuth();
 
   const [isFirebaseConnected, setFirebaseConnected] = useState(getFirebaseConnectionStatus());
 
@@ -99,7 +99,7 @@ export function PipelineLayout() {
 
   const displayName = currentUser?.displayName ?? currentUser?.email?.split("@")[0] ?? "Usuário";
   const email = currentUser?.email ?? "";
-  const isAdmin = currentUser?.role === UserRole.ADMINISTRADOR;
+  const isAdmin = userRole === 'developer';
 
   return (
     <SidebarProvider>

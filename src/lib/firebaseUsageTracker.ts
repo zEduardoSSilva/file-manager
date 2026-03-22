@@ -23,7 +23,6 @@
  */
 
 import {
-  getFirestore,
   doc,
   getDoc,
   setDoc,
@@ -31,20 +30,8 @@ import {
   increment,
   DocumentReference,
 } from "firebase/firestore";
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-
-const firebaseConfig = {
-  apiKey:            "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
-  authDomain:        "file-manager-hub-50030335.firebaseapp.com",
-  projectId:         "file-manager-hub-50030335",
-  storageBucket:     "file-manager-hub-50030335.firebasestorage.app",
-  messagingSenderId: "187801013388",
-  appId:             "1:187801013388:web:ef1417fae5d8d24d93ffa9",
-};
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
-const auth = getAuth(app); // Get auth instance
+// Importa db e auth do arquivo central — sem duplicar config aqui.
+import { db, auth } from "./firebase-app";
 
 // ─── Limites do plano Spark ───────────────────────────────────────────────────
 export const SPARK_LIMITS = {
@@ -219,36 +206,36 @@ export interface DailyUsage {
   users: { [userId: string]: UserUsage };
 }
 
-/** Busca os contadores dos últimos N dias. */
+/** Busca os contadores dos últimos N dias em paralelo (Promise.all). */
 export async function fetchUsageHistory(days = 7): Promise<DailyUsage[]> {
-  const result: DailyUsage[] = [];
   const today = new Date();
 
-  for (let i = 0; i < days; i++) {
+  const promises = Array.from({ length: days }, (_, i) => {
     const d = new Date(today);
     d.setDate(today.getDate() - i);
     const key = d.toISOString().slice(0, 10);
     const ref = doc(db, "_meta", `usage_${key}`);
 
-    try {
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        const data = snap.data();
-        result.push({
-          date: key,
-          totalReads: data.totalReads ?? 0,
-          totalWrites: data.totalWrites ?? 0,
-          totalDeletes: data.totalDeletes ?? 0,
-          users: data.users ?? {},
-        });
-      } else {
-        result.push({ date: key, totalReads: 0, totalWrites: 0, totalDeletes: 0, users: {} });
-      }
-    } catch (e) {
-      console.error(`Firebase Usage Tracker: Falha ao buscar uso para ${key}`, e);
-      result.push({ date: key, totalReads: 0, totalWrites: 0, totalDeletes: 0, users: {} });
-    }
-  }
+    return getDoc(ref)
+      .then(snap => {
+        if (snap.exists()) {
+          const data = snap.data();
+          return {
+            date:         key,
+            totalReads:   data.totalReads   ?? 0,
+            totalWrites:  data.totalWrites  ?? 0,
+            totalDeletes: data.totalDeletes ?? 0,
+            users:        data.users        ?? {},
+          } as DailyUsage;
+        }
+        return { date: key, totalReads: 0, totalWrites: 0, totalDeletes: 0, users: {} } as DailyUsage;
+      })
+      .catch(e => {
+        console.error(`Firebase Usage Tracker: Falha ao buscar uso para ${key}`, e);
+        return { date: key, totalReads: 0, totalWrites: 0, totalDeletes: 0, users: {} } as DailyUsage;
+      });
+  });
 
+  const result = await Promise.all(promises);
   return result.reverse(); // mais antigo → mais recente
 }

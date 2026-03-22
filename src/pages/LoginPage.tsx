@@ -150,6 +150,13 @@ export function LoginPage() {
             </p>
           </div>
 
+          <div className="flex items-start gap-3 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3.5 text-sm text-blue-800 dark:text-blue-300">
+            <AlertCircle className="size-5 shrink-0 mt-0.5 text-blue-500" />
+            <div className="leading-relaxed text-[13px]">
+              <span className="font-bold">Aviso aos testadores:</span> Você pode criar um cadastro para experimentar o sistema. Contas novas recebem o perfil padrão de <span className="font-semibold">Usuário</span>. Apenas desenvolvedores podem visualizar todas as áreas no momento.
+            </div>
+          </div>
+
           {/* Tabs */}
           <div className="flex rounded-lg border border-border/60 p-1 bg-muted/30">
             {(["login", "register"] as Mode[]).map(m => (

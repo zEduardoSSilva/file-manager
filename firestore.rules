@@ -22,6 +22,20 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    match /users/{userId} {
+      // Leitura: apenas o próprio usuário pode ler seu documento
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Atualização do próprio perfil: qualquer campo EXCETO role
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && !('role' in request.resource.data.diff(resource.data).affectedKeys());
+
+      // Criar/alterar role: somente usuários com role 'developer'
+      allow write: if request.auth != null
+                   && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'developer';
+    }
+
     // REGRA NOVA ACRESCENTADA PARA CORRIGIR O ERRO
     match /motivos_devolucao/{docId} {
         allow read, write: if request.auth != null;

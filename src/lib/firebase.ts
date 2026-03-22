@@ -1,36 +1,17 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp, getApps, getApp } from "firebase/app";
-// import { getAnalytics } from "firebase/analytics";
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  query, 
-  where, 
-  getDocs, 
-  orderBy, 
+// Importa db do arquivo central – não duplicar firebaseConfig aqui.
+import {
+  collection,
+  addDoc,
+  query,
+  getDocs,
+  orderBy,
   limit,
-  Timestamp 
+  Timestamp
 } from "firebase/firestore";
+import { db } from './firebase-app';
 import { getFirebaseConnectionStatus } from './firebase-connection';
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
-  authDomain: "file-manager-hub-50030335.firebaseapp.com",
-  projectId: "file-manager-hub-50030335",
-  storageBucket: "file-manager-hub-50030335.firebasestorage.app",
-  messagingSenderId: "187801013388",
-  appId: "1:187801013388:web:ef1417fae5d8d24d93ffa9",
-  measurementId: "G-MJ60ERTPV8"
-};
-
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const db = getFirestore(app);
-
-// Initialize Firebase
-// const analytics = typeof window !== 'undefined' ? getAnalytics(app) : null;
+export { db };
 
 export interface DriverConsolidated {
   'Empresa'?: string;

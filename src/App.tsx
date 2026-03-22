@@ -24,7 +24,10 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<PipelineLayout />}>
             <Route path="/" element={<HomePage />} />
-            <Route path="/user-management" element={<UserManagementPage />} />
+            
+            <Route element={<ProtectedRoute allowedRoles={['developer']} />}>
+              <Route path="/user-management" element={<UserManagementPage />} />
+            </Route>
             <Route path="/usage" element={<FirebaseUsage />} />
             <Route path="/pipeline" element={<Navigate to="/" />} />
 

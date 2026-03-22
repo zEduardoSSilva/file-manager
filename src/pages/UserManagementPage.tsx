@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { UserProfile } from '@/lib/types';
-import { UserRole } from '@/lib/user-roles';
+import { UserRole, ROLE_LABELS } from '@/lib/user-roles';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -44,7 +44,7 @@ const UserManagementPage: React.FC = () => {
 
   const userRoleChartData = useMemo(() => {
     const roleCounts = users.reduce((acc, user) => {
-      const roleName = capitalize(user.role);
+      const roleName = ROLE_LABELS[user.role] || capitalize(user.role);
       acc[roleName] = (acc[roleName] || 0) + 1;
       return acc;
     }, {} as { [key: string]: number });
@@ -86,7 +86,7 @@ const UserManagementPage: React.FC = () => {
   };
 
   const openAddUserDialog = () => {
-    setCurrentUser({ nome: '', email: '', role: UserRole.VISUALIZADOR, ativo: true });
+    setCurrentUser({ nome: '', email: '', role: UserRole.USER, ativo: true });
     setIsDialogOpen(true);
   };
 
@@ -158,7 +158,7 @@ const UserManagementPage: React.FC = () => {
               <TableRow key={user.id}>
                 <TableCell className="font-medium">{user.nome}</TableCell>
                 <TableCell>{user.email}</TableCell>
-                <TableCell>{capitalize(user.role)}</TableCell>
+                <TableCell>{ROLE_LABELS[user.role] || capitalize(user.role)}</TableCell>
                 <TableCell className="text-right">
                   <Button variant="outline" size="sm" onClick={() => { setCurrentUser(user); setIsDialogOpen(true); }}>
                     <Edit className="mr-2 h-4 w-4" /> Editar
@@ -186,7 +186,7 @@ const UserManagementPage: React.FC = () => {
                     <SelectTrigger><SelectValue placeholder="Selecione um perfil" /></SelectTrigger>
                     <SelectContent>
                         {Object.values(UserRole).map(role => (
-                            <SelectItem key={role} value={role}>{capitalize(role)}</SelectItem>
+                            <SelectItem key={role} value={role}>{ROLE_LABELS[role] || capitalize(role)}</SelectItem>
                         ))}
                     </SelectContent>
                 </Select>

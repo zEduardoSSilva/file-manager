@@ -1,28 +1,19 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import {
-  getAuth, onAuthStateChanged, User,
+  onAuthStateChanged, User,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
   updateProfile,
 } from 'firebase/auth'
-import { initializeApp, getApps, getApp } from 'firebase/app'
+import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { Loader2 } from 'lucide-react'
-
-const firebaseConfig = {
-  apiKey:            "AIzaSyDj733yNRCHjua7X-0rkHc74VA4qkDpg9w",
-  authDomain:        "file-manager-hub-50030335.firebaseapp.com",
-  projectId:         "file-manager-hub-50030335",
-  storageBucket:     "file-manager-hub-50030335.firebasestorage.app",
-  messagingSenderId: "187801013388",
-  appId:             "1:187801013388:web:ef1417fae5d8d24d93ffa9",
-}
-
-const app  = !getApps().length ? initializeApp(firebaseConfig) : getApp()
-const auth = getAuth(app)
+// Importa auth e db do arquivo central — sem duplicar config aqui.
+import { auth, db } from '@/lib/firebase-app'
 
 interface AuthContextType {
   currentUser: User | null
+  userRole:    string | null
   loading:     boolean
   register:    (name: string, email: string, password: string) => Promise<void>
   login:       (email: string, password: string) => Promise<void>
@@ -39,11 +30,34 @@ export function useAuth() {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [userRole,    setUserRole]    = useState<string | null>(null)
   const [loading,     setLoading]     = useState(true)
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user)
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user)
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid))
+          if (userDoc.exists()) {
+            setUserRole(userDoc.data().role || 'user')
+          } else {
+            // Se o documento não existe, inicializa com o perfil 'user' na base
+            await setDoc(doc(db, 'users', user.uid), {
+              email: user.email,
+              name: user.displayName || '',
+              role: 'user'
+            })
+            setUserRole('user')
+          }
+        } catch (err) {
+          console.error("Erro ao buscar usuário do Firestore:", err)
+          setUserRole('user')
+        }
+      } else {
+        setCurrentUser(null)
+        setUserRole(null)
+      }
       setLoading(false)
     })
     return unsubscribe
@@ -52,8 +66,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = async (name: string, email: string, password: string) => {
     const cred = await createUserWithEmailAndPassword(auth, email, password)
     await updateProfile(cred.user, { displayName: name })
-    // Força atualização local do displayName
+    
+    // Garante criação rápida no Firestore antes mesmo do useEffect completar
+    await setDoc(doc(db, 'users', cred.user.uid), {
+      email,
+      name,
+      role: 'user'
+    })
+
     setCurrentUser({ ...cred.user, displayName: name } as User)
+    setUserRole('user')
   }
 
   const login = async (email: string, password: string) => {
@@ -68,13 +90,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        <p className="ml-3 text-lg font-semibold">Carregando...</p>
+        <p className="ml-3 text-lg font-semibold">Carregando permissões...</p>
       </div>
     )
   }
 
   return (
-    <AuthContext.Provider value={{ currentUser, loading, register, login, logout }}>
+    <AuthContext.Provider value={{ currentUser, userRole, loading, register, login, logout }}>
       {children}
     </AuthContext.Provider>
   )
